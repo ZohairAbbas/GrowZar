@@ -14,5 +14,8 @@ export default defineConfig({
   },
   datasource: {
     url: env("DATABASE_URL"),
+    // growzar_app cannot create databases, and pg_hba only lets it reach
+    // growzar and growzar_shadow, so migrate's shadow database is explicit.
+    shadowDatabaseUrl: env("SHADOW_DATABASE_URL"),
   },
 });

@@ -6,9 +6,10 @@
     "node": ">=20.19"
   },
   "scripts": {
-    "dev": "react-router dev",
+    "dev": "node --env-file=.env ./node_modules/.bin/react-router dev",
     "build": "react-router build",
     "start": "react-router-serve ./build/server/index.js",
+    "start:local": "node --env-file=.env ./node_modules/.bin/react-router-serve ./build/server/index.js",
     "worker": "node --enable-source-maps ./build/worker/index.js",
     "typecheck": "react-router typegen && tsc --noEmit",
     "test": "vitest run",
