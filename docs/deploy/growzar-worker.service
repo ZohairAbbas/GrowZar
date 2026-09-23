@@ -1,0 +1,27 @@
+[Unit]
+Description=Growzar worker (connector sync + event relay)
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/growzar
+EnvironmentFile=/etc/growzar/growzar.env
+Environment=NODE_ENV=production
+Environment=TZ=UTC
+Environment=NODE_OPTIONS=--max-old-space-size=512
+# Two connections only; the web process holds the other four.
+Environment=DATABASE_POOL=2
+ExecStart=/usr/bin/npm run worker
+Restart=on-failure
+RestartSec=10
+
+MemoryMax=768M
+MemoryHigh=640M
+
+StandardOutput=append:/var/log/growzar/worker.log
+StandardError=append:/var/log/growzar/worker.err.log
+
+[Install]
+WantedBy=multi-user.target

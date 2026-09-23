@@ -1,0 +1,27 @@
+[Unit]
+Description=Growzar web
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/growzar
+EnvironmentFile=/etc/growzar/growzar.env
+Environment=NODE_ENV=production
+Environment=TZ=UTC
+Environment=NODE_OPTIONS=--max-old-space-size=768
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+
+# This box runs four production apps on 2 vCPUs with swap already full.
+# A Growzar leak must not take Courierify down with it.
+MemoryMax=1G
+MemoryHigh=850M
+
+StandardOutput=append:/var/log/growzar/web.log
+StandardError=append:/var/log/growzar/web.err.log
+
+[Install]
+WantedBy=multi-user.target
