@@ -149,6 +149,143 @@ function mintClaimToken(options: {
   return `${header}.${body}.${signature}`;
 }
 
+/**
+ * §6 list endpoints.
+ *
+ * The rows live in memory and are seeded through `/__seed`. Ordering is
+ * `(updatedAt, id)` ascending — the second key is mandatory (§6.2), and
+ * ordering on `updatedAt` alone is a live bug in Courierify's
+ * `/inventrify/order-outcomes` that stalls forever on a cluster of rows
+ * sharing a timestamp. This mock orders correctly so Growzar's cursor walk is
+ * exercised against a conforming app; the real one is a finding for the report.
+ */
+type Row = { id: string; updatedAt: string; [key: string]: unknown };
+
+const LIST_PATHS = new Set([
+  "/api/v1/orders",
+  "/api/v1/shipments",
+  "/api/v1/settlements",
+  "/api/v1/costs",
+]);
+
+/** shop -> path -> rows, and the tombstones reported alongside them. */
+const rows = new Map<string, Map<string, Row[]>>();
+const tombstones = new Map<string, Map<string, string[]>>();
+
+function bucket<T>(map: Map<string, Map<string, T[]>>, shop: string, path: string): T[] {
+  let byPath = map.get(shop);
+  if (!byPath) {
+    byPath = new Map();
+    map.set(shop, byPath);
+  }
+  let list = byPath.get(path);
+  if (!list) {
+    list = [];
+    byPath.set(path, list);
+  }
+  return list;
+}
+
+const byUpdatedAtThenId = (a: Row, b: Row) =>
+  a.updatedAt === b.updatedAt
+    ? a.id < b.id
+      ? -1
+      : a.id > b.id
+        ? 1
+        : 0
+    : a.updatedAt < b.updatedAt
+      ? -1
+      : 1;
+
+/** The cursor is opaque to Growzar; here it is the last (updatedAt, id) seen. */
+const encodeCursor = (row: Row) =>
+  Buffer.from(`${row.updatedAt}|${row.id}`).toString("base64url");
+
+function afterCursor(list: Row[], cursor: string | null): Row[] {
+  if (!cursor) return list;
+  const [updatedAt, id] = Buffer.from(cursor, "base64url")
+    .toString("utf8")
+    .split("|");
+  if (!updatedAt || !id) return list;
+  return list.filter(
+    (row) => row.updatedAt > updatedAt || (row.updatedAt === updatedAt && row.id > id),
+  );
+}
+
+function listEndpoint(
+  res: import("node:http").ServerResponse,
+  url: URL,
+  req: import("node:http").IncomingMessage,
+) {
+  const shop = String(req.headers["x-growzar-shop"] ?? "").toLowerCase();
+
+  // A one-shot 429 with Retry-After, so the client's handling of it can be
+  // driven from a test. Set with /__rate-limit.
+  const pending = rateLimitOnce.get(shop);
+  if (pending) {
+    rateLimitOnce.delete(shop);
+    res.writeHead(429, {
+      "content-type": "application/json",
+      "retry-after": String(pending),
+    });
+    return res.end(
+      JSON.stringify({ error: "Slow down.", errorType: "rate_limited" }),
+    );
+  }
+
+  // Fault injection: fail the next N list calls with a 500. Set high enough to
+  // exhaust the client's retries and the run aborts mid-walk, which is what a
+  // killed worker looks like from the database's point of view — and is far
+  // more testable than actually killing one.
+  const fault = failNext.get(shop);
+  if (fault && fault.after > 0) {
+    fault.after -= 1;
+  } else if (fault && fault.count > 0) {
+    fault.count -= 1;
+    res.writeHead(500, { "content-type": "application/json" });
+    return res.end(
+      JSON.stringify({ error: "Injected failure.", errorType: "internal_error" }),
+    );
+  }
+
+  const all = [...bucket(rows, shop, url.pathname)].sort(byUpdatedAtThenId);
+
+  const updatedSince = url.searchParams.get("updatedSince");
+  // §6.2: `updatedSince` is INCLUSIVE, so the boundary row repeats and Growzar
+  // is expected to deduplicate it. Making it exclusive here would hide a bug
+  // in Growzar rather than expose one.
+  const filtered = updatedSince
+    ? all.filter((row) => row.updatedAt >= updatedSince)
+    : all;
+
+  const cursor = url.searchParams.get("cursor");
+  const remaining = afterCursor(filtered, cursor);
+
+  const limit = Math.min(Number(url.searchParams.get("limit") ?? 200), 200);
+  const page = remaining.slice(0, limit);
+  const hasMore = remaining.length > page.length;
+  const last = page[page.length - 1];
+
+  return json(res, 200, {
+    shop,
+    shopTimezone: "Asia/Karachi",
+    shopCurrency: "PKR",
+    data: page,
+    // §6.2: deletions are reported, never left to silent absence. Reported on
+    // the last page of a walk, which is where a real app would flush them.
+    deletedIds: hasMore ? [] : bucket(tombstones, shop, url.pathname),
+    pagination: {
+      limit,
+      count: page.length,
+      hasMore,
+      nextCursor: hasMore && last ? encodeCursor(last) : null,
+    },
+  });
+}
+
+const rateLimitOnce = new Map<string, number>();
+const failNext = new Map<string, { count: number; after: number }>();
+
 const server = createServer((req, res) => {
   const chunks: Buffer[] = [];
   req.on("data", (chunk) => chunks.push(chunk));
@@ -178,6 +315,56 @@ const server = createServer((req, res) => {
       return json(res, 200, { installed: [...INSTALLED] });
     }
 
+    if (url.pathname === "/__seed" && req.method === "POST") {
+      // { shop, path, rows: [...], deletedIds?: [...] } — rows replace any
+      // existing row with the same id, which is how "the app corrected a row"
+      // is expressed.
+      const seed = JSON.parse(rawBody || "{}") as {
+        shop: string;
+        path: string;
+        rows?: Row[];
+        deletedIds?: string[];
+        reset?: boolean;
+      };
+      const shop = seed.shop.toLowerCase();
+      const list = bucket(rows, shop, seed.path);
+
+      if (seed.reset) list.length = 0;
+
+      for (const row of seed.rows ?? []) {
+        const index = list.findIndex((existing) => existing.id === row.id);
+        if (index >= 0) list[index] = row;
+        else list.push(row);
+      }
+
+      const graves = bucket(tombstones, shop, seed.path);
+      for (const id of seed.deletedIds ?? []) {
+        if (!graves.includes(id)) graves.push(id);
+      }
+
+      return json(res, 200, { rows: list.length, deletedIds: graves.length });
+    }
+
+    if (url.pathname === "/__fail") {
+      // `after` lets the failure land mid-walk: succeed this many calls, then
+      // fail `count` times. Failing from the first call only ever tests a run
+      // that never started.
+      failNext.set((url.searchParams.get("shop") ?? "").toLowerCase(), {
+        count: Number(url.searchParams.get("count") ?? 4),
+        after: Number(url.searchParams.get("after") ?? 0),
+      });
+      return json(res, 200, { ok: true });
+    }
+
+    if (url.pathname === "/__rate-limit") {
+      // Make the next list call answer 429 with this Retry-After, once.
+      rateLimitOnce.set(
+        (url.searchParams.get("shop") ?? "").toLowerCase(),
+        Number(url.searchParams.get("seconds") ?? 1),
+      );
+      return json(res, 200, { ok: true });
+    }
+
     if (url.pathname === "/__uninstall") {
       INSTALLED.delete((url.searchParams.get("shop") ?? "").toLowerCase());
       return json(res, 200, { installed: [...INSTALLED] });
@@ -187,6 +374,10 @@ const server = createServer((req, res) => {
     const verified = verifyGrowzarRequest(req, rawBody);
     if (!verified.ok) {
       return error(res, verified.status, verified.type, verified.message);
+    }
+
+    if (LIST_PATHS.has(url.pathname)) {
+      return listEndpoint(res, url, req);
     }
 
     if (url.pathname === "/api/v1/growzar/status") {

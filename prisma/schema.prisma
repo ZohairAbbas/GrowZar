@@ -64,9 +64,151 @@ model Store {
   connections    AppConnection[]
   memberScopes   MemberStoreScope[]
   accessRequests StoreAccessRequest[]
+  syncState      SyncState[]
+  rawRecords     RawRecord[]
+  orderSnapshots OrderSnapshot[]
 
   @@index([organizationId])
   @@map("stores")
+}
+
+/// What each app owns, at the grain Growzar caches it.
+enum SyncEntity {
+  ORDER
+  PARCEL
+  SETTLEMENT
+  COST
+}
+
+enum SyncRunStatus {
+  IDLE
+  RUNNING
+  FAILED
+}
+
+/// One cursor per store per app per entity (API-CONTRACT §6.2).
+///
+/// This row is what makes a sync resumable. The cursor is advanced only after
+/// the page it came from has been written, so a worker killed mid-run restarts
+/// from the last page it actually persisted — repeating some rows, which
+/// dedupe absorbs, rather than skipping any.
+model SyncState {
+  id        String     @id @default(uuid())
+  storeId   String
+  app       SuiteApp
+  entity    SyncEntity
+
+  /// The app's opaque `nextCursor`. Null means "start from updatedSince".
+  cursor    String?
+  /// Inclusive high-water mark. §6.2: `updatedSince` is inclusive, so the last
+  /// row repeats on the next run and is deduplicated rather than skipped.
+  updatedSince DateTime?
+
+  status         SyncRunStatus @default(IDLE)
+  /// Set when a run starts, cleared when it ends. A row RUNNING for longer
+  /// than the lease is a crashed worker, not a busy one.
+  runStartedAt   DateTime?
+  lastSuccessAt  DateTime?
+  lastError      String?
+  consecutiveFailures Int     @default(0)
+
+  rowsWritten Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, app, entity])
+  @@index([status])
+  @@map("sync_state")
+}
+
+/// The raw cache: exactly what the app returned, at order and parcel grain.
+///
+/// Phase 2 computes every metric from these rows, so nothing derived is stored
+/// here — a derived number would have to be recomputed from scratch anyway the
+/// first time its formula changed, and by then the source would be gone.
+/// Re-deriving must never need a re-fetch.
+///
+/// `externalId` is the canonical key from §3: the Shopify numeric order ID as a
+/// string for orders, the owning app's shipment ID for parcels. Never an
+/// order name, never a SKU.
+model RawRecord {
+  id         String     @id @default(uuid())
+  storeId    String
+  app        SuiteApp
+  entity     SyncEntity
+  externalId String
+
+  /// The app's `updatedAt` for this row. Half of the dedupe key from §6.2:
+  /// a row re-sent unchanged has the same (entity, id, updatedAt) and is not
+  /// written again.
+  sourceUpdatedAt DateTime
+
+  /// Verbatim. Not reshaped, not normalized, not trimmed.
+  payload Json
+
+  /// §6.2 tombstone. The row is kept and marked rather than deleted, because
+  /// a metric computed last week over a row that has since been deleted still
+  /// has to be explicable.
+  deletedAt DateTime?
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, app, entity, externalId])
+  @@index([storeId, entity, sourceUpdatedAt])
+  @@map("raw_records")
+}
+
+/// Versioned, finalizing snapshots at ORDER grain, for COD money that settles
+/// late.
+///
+/// The old hub had this idea at daily grain and got three things wrong. Each is
+/// prevented here by construction rather than by care:
+///
+///  1. **Finalization collided on the second run.** Version numbers are
+///     allocated under a unique constraint on (storeId, orderId, version), and
+///     a collision is retried rather than crashing. Finalizing an order that is
+///     already final does nothing.
+///  2. **Change detection ignored costs, so late corrections never produced a
+///     new version.** `contentHash` is over the canonical form of the WHOLE
+///     payload. No field can be left out of the comparison, because no field is
+///     named in it.
+///  3. **Consumers summed every version and double-counted.** Superseded
+///     versions carry `supersededAt`, and `latest_order_snapshots` is a view
+///     that returns exactly one row per order. Consumers read the view.
+model OrderSnapshot {
+  id       String @id @default(uuid())
+  storeId  String
+  /// Shopify numeric order ID as a string (§3, rule #6).
+  orderId  String
+  version  Int
+
+  /// True once the money can no longer change — settlement received and the
+  /// return window closed. A final snapshot is never superseded.
+  isFinal  Boolean @default(false)
+
+  /// SHA-256 over the canonical JSON of `payload`. Equal hash means nothing
+  /// changed and no version is written.
+  contentHash String
+
+  payload Json
+
+  /// Set on every version except the newest. A consumer that filters on
+  /// `supersededAt IS NULL` is correct even without the view.
+  supersededAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, orderId, version])
+  @@index([storeId, orderId, supersededAt])
+  @@map("order_snapshots")
 }
 
 /// Every claim token Growzar has honoured, by its `jti` (API-CONTRACT §10).
