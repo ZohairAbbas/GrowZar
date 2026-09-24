@@ -1,6 +1,6 @@
 import { auth } from "./auth.server";
 import { prisma } from "./db.server";
-import { requireOrganization } from "./session.server";
+import { redirectWithCookies, requireOrganization } from "./session.server";
 import { isStoreInScope, resolveScopedStoreIds, storeScopeFilter } from "./scope";
 import type { Action, Section } from "./permissions";
 
@@ -141,6 +141,33 @@ export async function requireStore(
   });
 
   if (!store) {
+    // The store may genuinely be theirs, through a different organization —
+    // which is exactly what happens when an owner approves a join request
+    // (DECISIONS §6): the requester becomes a member of the owning
+    // organization while their session still points at their own. Switching
+    // the active organization is the honest answer; 403 would be telling
+    // someone they cannot see a store they have just been given.
+    //
+    // Only a real membership triggers it, so this reveals nothing to anyone
+    // who was not already let in.
+    const elsewhere = await prisma.store.findFirst({
+      where: {
+        id: storeId,
+        organization: { members: { some: { userId: viewer.userId } } },
+      },
+      select: { organizationId: true },
+    });
+
+    if (elsewhere) {
+      const activated = await auth.api.setActiveOrganization({
+        body: { organizationId: elsewhere.organizationId },
+        headers: request.headers,
+        asResponse: true,
+      });
+      const url = new URL(request.url);
+      throw redirectWithCookies(activated, `${url.pathname}${url.search}`);
+    }
+
     throw new Forbidden("That store is not available to you.");
   }
 
