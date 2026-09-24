@@ -31,7 +31,31 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const connections = await prisma.appConnection.findMany({
     where: { storeId: store.id },
     orderBy: { app: "asc" },
-    select: { app: true, status: true, lastSyncedAt: true },
+    select: {
+      app: true,
+      status: true,
+      lastSyncedAt: true,
+      disconnectedAt: true,
+      purgeAfter: true,
+    },
+  });
+
+  // The visible per-store event log (§7): what fired, and what Growzar did
+  // about it. A merchant asking "why does this still say delivered?" should be
+  // able to see the answer rather than be told one.
+  const events = await prisma.inboundEvent.findMany({
+    where: { storeId: store.id },
+    orderBy: { receivedAt: "desc" },
+    take: 25,
+    select: {
+      id: true,
+      app: true,
+      topic: true,
+      occurredAt: true,
+      receivedAt: true,
+      status: true,
+      lastError: true,
+    },
   });
 
   // Someone who proved, through an app, that they work on this shop while it
@@ -76,6 +100,17 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       app: connection.app,
       status: connection.status,
       lastSyncedAt: connection.lastSyncedAt?.toISOString() ?? null,
+      disconnectedAt: connection.disconnectedAt?.toISOString() ?? null,
+      purgeAfter: connection.purgeAfter?.toISOString() ?? null,
+    })),
+    events: events.map((event) => ({
+      id: event.id,
+      app: event.app,
+      topic: event.topic,
+      occurredAt: event.occurredAt.toISOString(),
+      receivedAt: event.receivedAt.toISOString(),
+      status: event.status,
+      lastError: event.lastError,
     })),
   };
 }
@@ -171,12 +206,29 @@ export async function action({ request, params }: Route.ActionArgs) {
   return { ok: "Access granted." };
 }
 
+const shortDate = (iso: string | null) =>
+  iso
+    ? new Date(iso).toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : "an earlier date";
+
+const shortDateTime = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
 export default function StoreDetail({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
   const navigation = useNavigation();
-  const { store, connections, accessRequests, canDecide } = loaderData;
+  const { store, connections, accessRequests, canDecide, events } = loaderData;
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10">
@@ -297,15 +349,90 @@ export default function StoreDetail({
       ) : (
         <ul className="mt-3 divide-y divide-gray-100 rounded-2xl border border-gray-200 bg-white">
           {connections.map((connection) => (
+            <li key={connection.app} className="px-5 py-3">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm font-medium capitalize text-gray-900">
+                  {connection.app.toLowerCase()}
+                </span>
+                <span
+                  className={
+                    connection.status === "CONNECTED"
+                      ? "text-xs font-medium uppercase tracking-wide text-green-700"
+                      : "text-xs font-medium uppercase tracking-wide text-amber-700"
+                  }
+                >
+                  {connection.status === "DISCONNECTED"
+                    ? "Reconnect needed"
+                    : connection.status.toLowerCase().replace(/_/g, " ")}
+                </span>
+              </div>
+
+              {/*
+                Reconnect mode (D-17). Nothing was deleted when the app was
+                uninstalled; the data is still here, stamped with when it was
+                last true, and it goes on a schedule rather than vanishing.
+              */}
+              {connection.status === "DISCONNECTED" ? (
+                <p className="mt-1.5 text-xs leading-relaxed text-amber-800">
+                  Showing data as of{" "}
+                  <strong>{shortDate(connection.lastSyncedAt ?? connection.disconnectedAt)}</strong>
+                  . Nothing has been deleted
+                  {connection.purgeAfter
+                    ? `, and nothing will be until ${shortDate(connection.purgeAfter)}`
+                    : ""}
+                  . Reinstall the app to pick up where you left off.
+                </p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h2 className="mt-8 text-lg font-semibold text-gray-900">Event log</h2>
+      <p className="mt-1 text-sm text-gray-600">
+        What your apps have told Growzar, and what Growzar did about it.
+      </p>
+
+      {events.length === 0 ? (
+        <p className="mt-3 text-sm text-gray-600">
+          Nothing yet. Events appear here as your apps send them.
+        </p>
+      ) : (
+        <ul className="mt-3 divide-y divide-gray-100 rounded-2xl border border-gray-200 bg-white">
+          {events.map((event) => (
             <li
-              key={connection.app}
-              className="flex items-center justify-between gap-4 px-5 py-3"
+              key={event.id}
+              className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 py-3"
             >
-              <span className="text-sm font-medium capitalize text-gray-900">
-                {connection.app.toLowerCase()}
-              </span>
-              <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                {connection.status.toLowerCase().replace(/_/g, " ")}
+              <div className="min-w-0">
+                <p className="truncate font-mono text-sm text-gray-900">
+                  {event.topic}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {event.app.toLowerCase()} · happened {shortDateTime(event.occurredAt)}
+                  {/*
+                    Received time is shown beside occurred time on purpose:
+                    §7 gives no ordering guarantee, and the gap between the two
+                    is the first thing worth seeing when something looks stale.
+                  */}
+                  {event.occurredAt !== event.receivedAt
+                    ? ` · received ${shortDateTime(event.receivedAt)}`
+                    : ""}
+                </p>
+                {event.lastError ? (
+                  <p className="mt-0.5 text-xs text-red-600">{event.lastError}</p>
+                ) : null}
+              </div>
+              <span
+                className={`text-xs font-medium uppercase tracking-wide ${
+                  event.status === "FAILED"
+                    ? "text-red-600"
+                    : event.status === "PROCESSED"
+                      ? "text-green-700"
+                      : "text-gray-500"
+                }`}
+              >
+                {event.status.toLowerCase()}
               </span>
             </li>
           ))}

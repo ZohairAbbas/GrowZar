@@ -345,6 +345,33 @@ const server = createServer((req, res) => {
       return json(res, 200, { rows: list.length, deletedIds: graves.length });
     }
 
+    if (url.pathname === "/__emit" && req.method === "POST") {
+      // Send a signed event to Growzar (§7 + §2.2), exactly as a real app
+      // would. Body: the envelope. Query: growzar=<base url>, and optionally
+      // sign=bad / ts=<epoch ms> to produce the failures a test needs.
+      const growzar = url.searchParams.get("growzar") ?? "http://127.0.0.1:3020";
+      const path = "/api/v1/events";
+      const ts = Number(url.searchParams.get("ts") ?? Date.now());
+      const secret =
+        url.searchParams.get("sign") === "bad" ? "not-the-secret" : SECRET;
+
+      const payload = `${ts}.POST ${path}.${rawBody}`;
+      const signature = `sha256=${createHmac("sha256", secret).update(payload).digest("hex")}`;
+
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (url.searchParams.get("sign") !== "none") {
+        headers["X-Growzar-Signature"] = signature;
+        headers["X-Growzar-Timestamp"] = String(ts);
+      }
+
+      return fetch(growzar + path, { method: "POST", headers, body: rawBody })
+        .then(async (response) => {
+          const text = await response.text();
+          json(res, 200, { status: response.status, body: text });
+        })
+        .catch((cause) => error(res, 502, "courier_error", String(cause)));
+    }
+
     if (url.pathname === "/__fail") {
       // `after` lets the failure land mid-walk: succeed this many calls, then
       // fail `count` times. Failing from the first call only ever tests a run
