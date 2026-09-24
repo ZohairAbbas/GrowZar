@@ -34,7 +34,8 @@ model Organization {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  stores Store[]
+  stores         Store[]
+  accessRequests StoreAccessRequest[]
 
   logo              String?
   metadata          String?
@@ -59,12 +60,106 @@ model Store {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  connections  AppConnection[]
-  memberScopes MemberStoreScope[]
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connections    AppConnection[]
+  memberScopes   MemberStoreScope[]
+  accessRequests StoreAccessRequest[]
 
   @@index([organizationId])
   @@map("stores")
+}
+
+/// Every claim token Growzar has honoured, by its `jti` (API-CONTRACT §10).
+///
+/// This table is what makes a claim token single-use. The row is written in the
+/// same transaction that consumes the token, and the unique constraint on
+/// `jti` — not a prior read — is what actually stops a replay: two requests
+/// arriving together both pass a "have I seen this?" check, and only one
+/// survives the insert.
+///
+/// Rows outlive the 5-minute token deliberately. A token replayed an hour
+/// later must still be refused, and the row is also the audit trail for which
+/// app handed which shop to whom.
+model ConsumedClaimToken {
+  id        String   @id @default(uuid())
+  jti       String   @unique
+  app       SuiteApp
+  shopDomain String
+  email     String
+  /// Null when the claim was consumed before the person finished signing up.
+  userId    String?
+  storeId   String?
+  consumedAt DateTime @default(now())
+  /// The token's own exp, kept so expired rows can be swept later without
+  /// guessing how long tokens live.
+  tokenExpiresAt DateTime
+
+  @@index([shopDomain])
+  @@map("consumed_claim_tokens")
+}
+
+/// A verified claim waiting for the person to finish signing in or signing up.
+///
+/// The token is consumed the moment it is verified — it is single-use and
+/// short-lived, and holding it across a sign-up round trip would mean either
+/// re-verifying an expired token or keeping it in a cookie. This row is the
+/// server-side continuation instead: it says "this shop has been proven, by
+/// this app, for this email", and nothing else can be done with it.
+model PendingClaim {
+  id           String   @id @default(uuid())
+  app          SuiteApp
+  shopDomain   String
+  email        String
+  shopifyUserId String?
+  isStoreOwner Boolean
+  locale       String?
+  createdAt    DateTime @default(now())
+  /// Short: long enough to sign up, not long enough to be a standing grant.
+  expiresAt    DateTime
+  consumedAt   DateTime?
+
+  @@index([shopDomain])
+  @@index([expiresAt])
+  @@map("pending_claims")
+}
+
+enum StoreAccessRequestStatus {
+  PENDING
+  APPROVED
+  DECLINED
+  CANCELLED
+}
+
+/// Someone who proved, through an app, that they work on a shop that another
+/// organization has already claimed (DECISIONS §6).
+///
+/// Growzar never silently adds them and never creates a second store row. The
+/// current owner approves or declines, and until then the requester sees a
+/// waiting state. The same row type covers a store moving between
+/// organizations, which is the same question with a different answer.
+model StoreAccessRequest {
+  id             String   @id @default(uuid())
+  storeId        String
+  /// The organization the requester wants the store to be reachable from.
+  organizationId String
+  requestedByUserId String
+  app            SuiteApp
+  /// True when the requester's token said isStoreOwner, which is what turns
+  /// this into a move request rather than a join request.
+  claimsOwnership Boolean  @default(false)
+  status         StoreAccessRequestStatus @default(PENDING)
+  decidedByUserId String?
+  decidedAt      DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, requestedByUserId, status])
+  @@index([storeId])
+  @@index([organizationId])
+  @@map("store_access_requests")
 }
 
 /// The other half of store scope (D-20): which stores a member may see when

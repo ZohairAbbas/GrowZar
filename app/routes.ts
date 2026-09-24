@@ -29,6 +29,10 @@ export default [
 
   route("organizations/new", "routes/organizations.new.tsx"),
 
+  // "Open in Growzar" lands here with a signed claim token (contract §10).
+  route("claim", "routes/claim.tsx"),
+  route("claim/:pendingClaimId", "routes/claim.$pendingClaimId.tsx"),
+
   ...prefix("stores", [
     index("routes/stores._index.tsx"),
     route(":storeId", "routes/stores.$storeId.tsx"),
