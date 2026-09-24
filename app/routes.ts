@@ -29,6 +29,9 @@ export default [
 
   route("organizations/new", "routes/organizations.new.tsx"),
 
+  // The event relay's front door (contract §7).
+  route("api/v1/events", "routes/api.v1.events.ts"),
+
   // "Open in Growzar" lands here with a signed claim token (contract §10).
   route("claim", "routes/claim.tsx"),
   route("claim/:pendingClaimId", "routes/claim.$pendingClaimId.tsx"),

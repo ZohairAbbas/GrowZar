@@ -3,6 +3,8 @@ import IORedis from "ioredis";
 
 import { prisma } from "~/lib/db.server";
 import { isQuietHours, syncStore } from "~/lib/sync/sync.server";
+import { EVENTS_QUEUE, enqueueEvent } from "~/lib/events/queue.server";
+import { processEvent } from "~/lib/events/process.server";
 
 /**
  * The sync worker.
@@ -111,8 +113,72 @@ syncWorker.on("failed", (job, error) => {
   console.error(`[sync] job ${job?.id} failed:`, error.message);
 });
 
+/**
+ * The event relay's processor (G-GZR-5).
+ *
+ * A separate worker on a separate queue, so a backfill walking 25 pages cannot
+ * sit in front of an `app.uninstalled`. Concurrency is 2: the work per event is
+ * small, and an uninstall arriving while a hundred status changes are queued
+ * should not wait for all of them.
+ */
+export const eventsWorker = new Worker<{ inboundEventId: string }>(
+  EVENTS_QUEUE,
+  async (job) => {
+    const outcome = await processEvent(job.data.inboundEventId);
+    console.log(
+      `[events] ${job.data.inboundEventId} -> ${outcome.status}: ${outcome.note}`,
+    );
+    return outcome;
+  },
+  { connection, prefix: PREFIX, concurrency: 2 },
+);
+
+eventsWorker.on("failed", (job, error) => {
+  console.error(`[events] job ${job?.id} failed:`, error.message);
+});
+
+/**
+ * The sweeper.
+ *
+ * An event is written to the database and then enqueued. If Redis is
+ * unavailable in between, the row exists and no job does — which is the right
+ * way round, but only if something eventually notices. This does, every
+ * minute, and it also retries events whose jobs exhausted their attempts.
+ */
+const SWEEP_INTERVAL_MS = 60_000;
+
+async function sweepStrandedEvents() {
+  const stranded = await prisma.inboundEvent.findMany({
+    where: {
+      status: { in: ["PENDING", "FAILED"] },
+      // Give the endpoint's own enqueue a moment to win the race.
+      receivedAt: { lt: new Date(Date.now() - 30_000) },
+    },
+    select: { id: true },
+    take: 100,
+  });
+
+  for (const event of stranded) {
+    // The job id is the row id, so re-enqueuing something already queued is a
+    // no-op rather than a second run.
+    await enqueueEvent(event.id).catch(() => {});
+  }
+
+  if (stranded.length > 0) {
+    console.log(`[events] swept ${stranded.length} stranded event(s)`);
+  }
+}
+
+const sweepTimer = setInterval(() => {
+  void sweepStrandedEvents().catch((error) =>
+    console.error("[events] sweep failed", error),
+  );
+}, SWEEP_INTERVAL_MS);
+
 async function shutdown(signal: string) {
   console.log(`[sync] ${signal}: draining`);
+  clearInterval(sweepTimer);
+  await eventsWorker.close();
   // Closing the worker lets the job in flight finish. A sync killed mid-run is
   // safe by design, but finishing the page it is on avoids re-fetching it.
   await syncWorker.close();

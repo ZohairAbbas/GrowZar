@@ -66,10 +66,70 @@ model Store {
   accessRequests StoreAccessRequest[]
   syncState      SyncState[]
   rawRecords     RawRecord[]
+  inboundEvents  InboundEvent[]
   orderSnapshots OrderSnapshot[]
 
   @@index([organizationId])
   @@map("stores")
+}
+
+enum InboundEventStatus {
+  PENDING
+  PROCESSED
+  /// Applied to nothing because a newer event for the same entity had already
+  /// been applied. Not a failure — §7 guarantees no ordering.
+  SUPERSEDED
+  /// Accepted and stored, but nothing here knows how to act on it yet. Kept
+  /// rather than dropped: the topic list grows, and an event we could not use
+  /// in R1 is still evidence of what happened.
+  IGNORED
+  FAILED
+}
+
+/// The event relay's inbox (API-CONTRACT §7, X1).
+///
+/// Every signed event an app has sent, whether or not Growzar could act on it.
+/// This table is three things at once: the deduplication key, the retry queue's
+/// source of truth, and the per-store event log a merchant can look at to see
+/// what fired and why.
+model InboundEvent {
+  id      String @id @default(uuid())
+  /// The app generates it and never reuses it (§7). Unique here is what makes
+  /// at-least-once delivery safe: a replay loses the insert race and is
+  /// recognised as a replay rather than applied twice.
+  eventId String @unique
+
+  app        SuiteApp
+  topic      String
+  shopDomain String
+  /// Null when the event names a shop Growzar has never had claimed. Kept
+  /// anyway — an event arriving before its store is a fact worth seeing.
+  storeId    String?
+
+  /// When the thing happened, per the app. Ordering is by this, never by
+  /// arrival (§7).
+  occurredAt DateTime
+  receivedAt DateTime @default(now())
+
+  /// What the event is about, when it is about one thing —
+  /// "shipment:SHP-1", "order:5123456789012". Used to decide whether a late
+  /// arrival has already been overtaken.
+  entityKey String?
+
+  actor   Json?
+  payload Json
+
+  status      InboundEventStatus @default(PENDING)
+  attempts    Int                @default(0)
+  lastError   String?
+  processedAt DateTime?
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, receivedAt])
+  @@index([status])
+  @@index([storeId, entityKey, occurredAt])
+  @@map("inbound_events")
 }
 
 /// What each app owns, at the grain Growzar caches it.
