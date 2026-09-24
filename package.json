@@ -13,6 +13,7 @@
     "worker": "node --enable-source-maps ./build/worker/index.js",
     "typecheck": "react-router typegen && tsc --noEmit",
     "test": "vitest run",
+    "auth:generate": "node --env-file=.env ./node_modules/.bin/better-auth generate --config app/lib/auth.server.ts -y",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
@@ -40,6 +41,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@better-auth/cli": "^1.4.22",
     "@react-router/dev": "8.4.0",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.23.1",
