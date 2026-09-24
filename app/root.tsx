@@ -32,17 +32,38 @@ export default function App() {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  const title = isRouteErrorResponse(error)
-    ? `${error.status} ${error.statusText}`
-    : "Something went wrong";
-  const detail = isRouteErrorResponse(error)
-    ? error.data
-    : "The error has been logged. Try again, or go back to Home.";
+  const routeError = isRouteErrorResponse(error) ? error : null;
+
+  // A 403 is a normal outcome here, not a crash: it is what a direct URL to
+  // another store's data returns for a member scoped away from it (G-GZR-2).
+  // It gets a plain explanation and a way back, never a stack trace and never
+  // a hint about what was on the other side.
+  const forbidden = routeError?.status === 403;
+
+  const title = forbidden
+    ? "You do not have access to this"
+    : routeError
+      ? `${routeError.status} ${routeError.statusText}`
+      : "Something went wrong";
+
+  const detail = forbidden
+    ? typeof routeError.data === "string" && routeError.data
+      ? routeError.data
+      : "Ask an owner or admin of your organization if you need it."
+    : routeError
+      ? routeError.data
+      : "The error has been logged. Try again, or go back to Home.";
 
   return (
     <main className="mx-auto max-w-lg px-6 py-24">
       <h1 className="text-2xl font-semibold">{title}</h1>
       <p className="mt-2 text-gray-600">{detail}</p>
+      <a
+        href="/"
+        className="mt-6 inline-block text-sm font-semibold text-accent-500 hover:text-accent-600"
+      >
+        Go to Growzar
+      </a>
     </main>
   );
 }

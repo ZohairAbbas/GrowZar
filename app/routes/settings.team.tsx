@@ -1,14 +1,12 @@
-import { Form, useNavigation } from "react-router";
+import { Form, Link, useNavigation } from "react-router";
 import { AlertCircle, Check, Clock, Send, Users, X } from "lucide-react";
 
 import type { Route } from "./+types/settings.team";
 import { auth } from "~/lib/auth.server";
 import { canSendEmail } from "~/lib/env.server";
-import {
-  findViewerMember,
-  readableAuthError,
-  requireOrganization,
-} from "~/lib/session.server";
+import { prisma } from "~/lib/db.server";
+import { Forbidden, can, requireSection } from "~/lib/authorize.server";
+import { readableAuthError } from "~/lib/session.server";
 import { INVITABLE_ROLES, ROLE_LABELS } from "~/lib/permissions";
 import { LoadingSpinner } from "~/components/ui/LoadingSpinner";
 import { RoleBadge } from "~/components/ui/RoleBadge";
@@ -31,27 +29,54 @@ export function meta() {
  * because on a box with no Resend key the difference is the whole story.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  const { session, organizationId } = await requireOrganization(request);
+  // The page itself is a Settings view; the two things it can *do* are checked
+  // separately below, because a manager may invite without being able to
+  // manage the team.
+  const viewer = await requireSection(request, "settings", "view");
+  const organizationId = viewer.organizationId;
 
   const organization = await auth.api.getFullOrganization({
     query: { organizationId },
     headers: request.headers,
   });
-  const viewer = findViewerMember(organization?.members ?? [], session.user.id);
 
   const invitations = await auth.api.listInvitations({
     query: { organizationId },
     headers: request.headers,
   });
 
+  const [canManageTeam, canInvite] = await Promise.all([
+    can(request, organizationId, { member: ["update"] }),
+    can(request, organizationId, { invitation: ["create"] }),
+  ]);
+
+  const scopes = await prisma.memberStoreScope.groupBy({
+    by: ["memberId"],
+    where: { member: { organizationId } },
+    _count: { storeId: true },
+  });
+  const scopeCounts = new Map(scopes.map((row) => [row.memberId, row._count.storeId]));
+
+  const scopeFlags = await prisma.member.findMany({
+    where: { organizationId },
+    select: { id: true, scopeAllStores: true },
+  });
+  const allStoresById = new Map(
+    scopeFlags.map((row) => [row.id, row.scopeAllStores !== false]),
+  );
+
   return {
+    canManageTeam,
+    canInvite,
     members: (organization?.members ?? []).map((member) => ({
       id: member.id,
       role: member.role,
       name: member.user.name,
       email: member.user.email,
       createdAt: member.createdAt,
-      isViewer: member.id === viewer?.id,
+      isViewer: member.id === viewer.memberId,
+      allStores: allStoresById.get(member.id) ?? true,
+      scopedStoreCount: scopeCounts.get(member.id) ?? 0,
     })),
     pending: invitations
       .filter((invitation) => invitation.status === "pending")
@@ -61,15 +86,30 @@ export async function loader({ request }: Route.LoaderArgs) {
         role: invitation.role ?? "staff",
         expiresAt: invitation.expiresAt,
       })),
-    viewerRole: viewer?.role ?? "staff",
+    viewerRole: viewer.role,
     emailConfigured: canSendEmail,
   };
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const { organizationId } = await requireOrganization(request);
+  const viewer = await requireSection(request, "settings", "view");
+  const organizationId = viewer.organizationId;
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
+
+  // Every branch re-checks the permission it needs. The loader's answer
+  // decided what to render; it cannot be trusted to decide what to execute,
+  // because a form can be posted without ever loading the page.
+  const needed: Record<string, string[]> =
+    intent === "invite"
+      ? { invitation: ["create"] }
+      : intent === "cancel-invitation"
+        ? { invitation: ["cancel"] }
+        : { member: ["delete"] };
+
+  if (!(await can(request, organizationId, needed))) {
+    throw new Forbidden("Your role does not allow that.");
+  }
 
   try {
     if (intent === "cancel-invitation") {
@@ -121,9 +161,11 @@ export default function TeamSettings({
   actionData,
 }: Route.ComponentProps) {
   const navigation = useNavigation();
-  const { members, pending, viewerRole, emailConfigured } = loaderData;
-  const canManageTeam = viewerRole === "owner" || viewerRole === "admin";
-  const canInvite = canManageTeam || viewerRole === "manager";
+  // Both come from the loader's permission check, so a custom role gets the
+  // same answer a built-in one does. Neither is the enforcement — the action
+  // re-checks — they only decide what is worth rendering.
+  const { members, pending, emailConfigured, canManageTeam, canInvite } =
+    loaderData;
   const submittingIntent = navigation.formData?.get("intent")?.toString() ?? null;
 
   return (
@@ -278,10 +320,27 @@ export default function TeamSettings({
                   ) : null}
                 </p>
                 <p className="truncate text-xs text-gray-500">{member.email}</p>
+                <p className="mt-0.5 truncate text-xs text-gray-500">
+                  {member.allStores
+                    ? "All stores"
+                    : member.scopedStoreCount === 0
+                      ? "No stores"
+                      : `${member.scopedStoreCount} ${
+                          member.scopedStoreCount === 1 ? "store" : "stores"
+                        }`}
+                </p>
               </div>
 
               <div className="flex items-center gap-3">
                 <RoleBadge role={member.role} />
+                {canManageTeam ? (
+                  <Link
+                    to={`/settings/team/${member.id}`}
+                    className="rounded-lg px-2 py-1 text-xs font-medium text-accent-600 transition hover:bg-accent-50"
+                  >
+                    Role &amp; stores
+                  </Link>
+                ) : null}
                 {canManageTeam && !member.isViewer && member.role !== "owner" ? (
                   <Form method="post">
                     <input type="hidden" name="intent" value="remove-member" />

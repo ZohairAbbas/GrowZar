@@ -83,6 +83,25 @@ export const auth = betterAuth({
       // the member row instead (G-GZR-2).
       teams: { enabled: false },
       schema: {
+        member: {
+          additionalFields: {
+            // Store scope, half of it (G-GZR-2). `true` means every store in
+            // the organization, which is what an owner or admin wants and what
+            // a brand-new member gets. `false` means the subset named in
+            // member_store_scopes — possibly empty, which means no stores at
+            // all, and that is a deliberate state rather than an accident.
+            //
+            // `input: false`: scope is set through Growzar's own team screen
+            // after the membership exists, never as a field on an invitation
+            // or an addMember call, so there is one code path that writes it.
+            scopeAllStores: {
+              type: "boolean",
+              required: false,
+              input: false,
+              defaultValue: true,
+            },
+          },
+        },
         organization: {
           additionalFields: {
             // Growzar's own column (see prisma/schema.prisma). It is declared

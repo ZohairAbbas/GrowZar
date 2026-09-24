@@ -61,9 +61,32 @@ model Store {
 
   organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   connections  AppConnection[]
+  memberScopes MemberStoreScope[]
 
   @@index([organizationId])
   @@map("stores")
+}
+
+/// The other half of store scope (D-20): which stores a member may see when
+/// their `scopeAllStores` is false.
+///
+/// A row here grants nothing on its own — the section × action permission from
+/// the member's role is checked first, and this narrows *where* that permission
+/// applies. Both are checked together in app/lib/authorize.server.ts, which is
+/// the only place either is read.
+model MemberStoreScope {
+  id        String   @id @default(uuid())
+  memberId  String
+  storeId   String
+  createdAt DateTime @default(now())
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  store  Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, storeId])
+  @@index([memberId])
+  @@index([storeId])
+  @@map("member_store_scopes")
 }
 
 enum SuiteApp {
@@ -196,6 +219,13 @@ model Member {
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   role           String       @default("member")
   createdAt      DateTime
+
+  scopeAllStores Boolean? @default(true)
+
+  /// Hand-added relation to Growzar's own scope table. The Better Auth
+  /// generator only adds what is missing, so this survives regeneration —
+  /// verified before it was written.
+  storeScopes MemberStoreScope[]
 
   @@index([organizationId])
   @@index([userId])
