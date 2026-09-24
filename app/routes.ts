@@ -29,11 +29,18 @@ export default [
 
   route("organizations/new", "routes/organizations.new.tsx"),
 
+  ...prefix("stores", [
+    index("routes/stores._index.tsx"),
+    route(":storeId", "routes/stores.$storeId.tsx"),
+  ]),
+
   layout("routes/settings.tsx", [
     ...prefix("settings", [
       index("routes/settings._index.tsx"),
       route("organization", "routes/settings.organization.tsx"),
       route("team", "routes/settings.team.tsx"),
+      route("team/:memberId", "routes/settings.team.$memberId.tsx"),
+      route("roles", "routes/settings.roles.tsx"),
     ]),
   ]),
 

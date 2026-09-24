@@ -3,11 +3,8 @@ import { AlertCircle, Building2, Check, Trash2 } from "lucide-react";
 
 import type { Route } from "./+types/settings.organization";
 import { auth } from "~/lib/auth.server";
-import {
-  findViewerMember,
-  readableAuthError,
-  requireOrganization,
-} from "~/lib/session.server";
+import { Forbidden, can, requireSection } from "~/lib/authorize.server";
+import { readableAuthError } from "~/lib/session.server";
 import { LoadingSpinner } from "~/components/ui/LoadingSpinner";
 import { RoleBadge } from "~/components/ui/RoleBadge";
 
@@ -27,16 +24,22 @@ const CURRENCIES = ["PKR", "USD", "AED", "SAR", "GBP", "EUR"];
  * G-GZR-2 adds the section-level check and the store scope on top.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  const { session, organizationId } = await requireOrganization(request);
+  const viewer = await requireSection(request, "settings", "view");
+  const organizationId = viewer.organizationId;
 
   const organization = await auth.api.getFullOrganization({
     query: { organizationId },
     headers: request.headers,
   });
 
-  const member = findViewerMember(organization!.members, session.user.id);
+  const [canEdit, canDelete] = await Promise.all([
+    can(request, organizationId, { organization: ["update"] }),
+    can(request, organizationId, { organization: ["delete"] }),
+  ]);
 
   return {
+    canEdit,
+    canDelete,
     organization: {
       id: organization!.id,
       name: organization!.name,
@@ -44,16 +47,23 @@ export async function loader({ request }: Route.LoaderArgs) {
       baseCurrency: (organization as { baseCurrency?: string }).baseCurrency ?? "",
       memberCount: organization!.members.length,
     },
-    viewerRole: member?.role ?? "staff",
+    viewerRole: viewer.role,
   };
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const { organizationId } = await requireOrganization(request);
+  const viewer = await requireSection(request, "settings", "view");
+  const organizationId = viewer.organizationId;
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
 
   if (intent === "delete") {
+    // Re-checked here, not inferred from the loader: the delete form can be
+    // posted without ever rendering the page that hides it.
+    if (!(await can(request, organizationId, { organization: ["delete"] }))) {
+      throw new Forbidden("Only an owner can delete the organization.");
+    }
+
     const typed = String(formData.get("confirmSlug") ?? "").trim().toLowerCase();
     const expected = String(formData.get("slug") ?? "").trim().toLowerCase();
 
@@ -73,6 +83,10 @@ export async function action({ request }: Route.ActionArgs) {
         error: readableAuthError(error, "Could not delete the organization."),
       };
     }
+  }
+
+  if (!(await can(request, organizationId, { organization: ["update"] }))) {
+    throw new Forbidden("Your role does not allow changing the organization.");
   }
 
   const name = String(formData.get("name") ?? "").trim();
@@ -105,9 +119,7 @@ export default function OrganizationSettings({
   actionData,
 }: Route.ComponentProps) {
   const navigation = useNavigation();
-  const { organization, viewerRole } = loaderData;
-  const canEdit = viewerRole === "owner" || viewerRole === "admin";
-  const canDelete = viewerRole === "owner";
+  const { organization, viewerRole, canEdit, canDelete } = loaderData;
   const submittingIntent = navigation.formData?.get("intent")?.toString() ?? null;
 
   return (
