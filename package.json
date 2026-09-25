@@ -21,7 +21,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
-    "seed:holidays": "tsx scripts/seed-holiday-calendar.ts"
+    "seed:holidays": "tsx scripts/seed-holiday-calendar.ts",
+    "enroll": "tsx scripts/enroll-store.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
