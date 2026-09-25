@@ -55,6 +55,12 @@ model Store {
   displayName     String?
   currency        String?  @db.Char(3) // from the app that owns the shop, never defaulted
   timezone        String? // IANA; every date filter is shown in this zone (rule #5)
+  /// ISO-3166 alpha-2, the default region for normalising a phone written the
+  /// local way (rule #19). §6.1 does not carry the shop's country today, so
+  /// this is often inferred from the timezone — `countryInferred` says which,
+  /// because an inference must never be mistaken for something an app said.
+  country         String?  @db.Char(2)
+  countryInferred Boolean  @default(false)
   claimedAt       DateTime @default(now())
   claimedByUserId String?
   createdAt       DateTime @default(now())
@@ -67,10 +73,81 @@ model Store {
   syncState      SyncState[]
   rawRecords     RawRecord[]
   inboundEvents  InboundEvent[]
+  customers      Customer[]
   orderSnapshots OrderSnapshot[]
 
   @@index([organizationId])
   @@map("stores")
+}
+
+enum CustomerIdentityKind {
+  PHONE
+  EMAIL
+  SHOPIFY_ID
+}
+
+/// Growzar's own customer record (rule #19).
+///
+/// No app's customer count is ever displayed in Growzar. More than twenty
+/// phone formats exist across the suite and Courierify groups by the raw
+/// string, so its "customers" are spellings rather than people. This table is
+/// the answer to "how many buyers do I actually have", and it is Growzar's to
+/// compute because no single app can (§1.3).
+///
+/// Scoped to a store. A buyer at two of a merchant's shops is two
+/// relationships until the buyer network says otherwise, and that is Q11/D-23,
+/// deliberately not decided here.
+model Customer {
+  id      String @id @default(uuid())
+  storeId String
+
+  /// Display only, and the most recent one wins. Names are spelled many ways
+  /// and none of them is a key.
+  displayName String?
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  /// Set when this record was folded into another. The row is kept so a
+  /// metric computed before the merge can still be explained.
+  mergedIntoId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store      Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  identities CustomerIdentity[]
+
+  @@index([storeId, lastSeenAt])
+  @@index([mergedIntoId])
+  @@map("customers")
+}
+
+/// One way a buyer is known: a normalised phone, an email, or a Shopify
+/// customer id. Two orders sharing any one of these are the same person.
+///
+/// The value is the NORMALISED form, which is what makes matching work; `raw`
+/// keeps what the app actually sent, because a number Growzar could not parse
+/// is still the number the merchant has to ring.
+model CustomerIdentity {
+  id         String               @id @default(uuid())
+  customerId String
+  storeId    String
+  kind       CustomerIdentityKind
+  value      String
+  raw        String?
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  /// One identity belongs to exactly one customer per store. This constraint
+  /// is what makes the merge path necessary rather than optional — and what
+  /// stops two racing syncs quietly creating two people from one buyer.
+  @@unique([storeId, kind, value])
+  @@index([customerId])
+  @@map("customer_identities")
 }
 
 enum InboundEventStatus {

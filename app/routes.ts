@@ -41,6 +41,21 @@ export default [
     route(":storeId", "routes/stores.$storeId.tsx"),
   ]),
 
+  route("switch", "routes/switch.ts"),
+
+  // The app shell and its sections (G-GZR-6). One module serves all eight
+  // non-settings sections; each needs its own route id because they share it.
+  layout("routes/shell.tsx", [
+    route("home", "routes/section.tsx", { id: "section-home" }),
+    route("orders", "routes/section.tsx", { id: "section-orders" }),
+    route("shipping", "routes/section.tsx", { id: "section-shipping" }),
+    route("finance", "routes/section.tsx", { id: "section-finance" }),
+    route("customers", "routes/section.tsx", { id: "section-customers" }),
+    route("inventory", "routes/section.tsx", { id: "section-inventory" }),
+    route("marketing", "routes/section.tsx", { id: "section-marketing" }),
+    route("inbox", "routes/section.tsx", { id: "section-inbox" }),
+  ]),
+
   layout("routes/settings.tsx", [
     ...prefix("settings", [
       index("routes/settings._index.tsx"),

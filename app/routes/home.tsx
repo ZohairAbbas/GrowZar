@@ -1,5 +1,19 @@
+import { redirect } from "react-router";
+
+import type { Route } from "./+types/home";
+import { getSession } from "~/lib/session.server";
+
 export function meta() {
   return [{ title: "Growzar" }];
+}
+
+/**
+ * The front door. Someone already signed in wants the shell, not the pitch.
+ */
+export async function loader({ request }: Route.LoaderArgs) {
+  const session = await getSession(request);
+  if (session) throw redirect("/home");
+  return null;
 }
 
 export default function Home() {

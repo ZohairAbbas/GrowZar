@@ -5,6 +5,8 @@ import { appRequest } from "../apps/client.server";
 import { getAppCredentials } from "../apps/registry.server";
 import { extractId, extractUpdatedAt, feedsFor, type EntityFeed } from "./entities";
 import { recordOrderSnapshot } from "./snapshots.server";
+import { buyerFromOrderPayload, resolveCustomer } from "../customers/resolve.server";
+import { countryFromTimezone } from "../customers/phone";
 
 /**
  * Incremental sync (API-CONTRACT §6.2).
@@ -26,6 +28,8 @@ type ContractPage = {
   shop?: string;
   shopTimezone?: string;
   shopCurrency?: string;
+  /** Not in §6.1 today; read when an app sends it (see phone.ts). */
+  shopCountry?: string;
   data?: unknown[];
   deletedIds?: unknown[];
   pagination?: {
@@ -45,6 +49,8 @@ export type FeedRunResult = {
   tombstoned: number;
   skipped: number;
   snapshots: number;
+  customers: number;
+  unparseablePhones: number;
   finished: boolean;
   error?: string;
 };
@@ -128,6 +134,27 @@ async function learnShopFacts(storeId: string, page: ContractPage) {
     data.timezone = page.shopTimezone;
   }
 
+  // The shop's country, for normalising locally-written phone numbers
+  // (rule #19). A reported country always beats an inferred one, and an
+  // inference is recorded as such so nobody later reads it as fact.
+  if (page.shopCountry && /^[A-Za-z]{2}$/.test(page.shopCountry)) {
+    data.country = page.shopCountry.toUpperCase();
+    data.countryInferred = false;
+  } else if (page.shopTimezone) {
+    const inferred = countryFromTimezone(page.shopTimezone);
+    if (inferred) {
+      const current = await prisma.store.findUnique({
+        where: { id: storeId },
+        select: { country: true, countryInferred: true },
+      });
+      // Never overwrite something an app actually told us.
+      if (!current?.country || current.countryInferred) {
+        data.country = inferred;
+        data.countryInferred = true;
+      }
+    }
+  }
+
   if (Object.keys(data).length > 0) {
     await prisma.store.update({ where: { id: storeId }, data });
   }
@@ -146,20 +173,25 @@ async function writePage(options: {
   app: SuiteApp;
   feed: EntityFeed;
   page: ContractPage;
+  defaultRegion: string | null;
 }): Promise<{
   written: number;
   duplicates: number;
   skipped: number;
   tombstoned: number;
   snapshots: number;
+  customers: number;
+  unparseablePhones: number;
   maxUpdatedAt: Date | null;
 }> {
-  const { storeId, app, feed, page } = options;
+  const { storeId, app, feed, page, defaultRegion } = options;
 
   let written = 0;
   let duplicates = 0;
   let skipped = 0;
   let snapshots = 0;
+  let customers = 0;
+  let unparseablePhones = 0;
   let maxUpdatedAt: Date | null = null;
 
   for (const row of page.data ?? []) {
@@ -240,6 +272,20 @@ async function writePage(options: {
         isFinal: (row as Record<string, unknown>)?.isFinal === true,
       });
       if (outcome.kind === "written") snapshots += 1;
+
+      // Growzar's own customer record (rule #19). Built here, from the order
+      // as the app sent it, rather than taken from any app's customer count —
+      // Courierify groups by the raw phone string, so its count is of
+      // spellings, not of people.
+      const resolved = await resolveCustomer({
+        storeId,
+        buyer: buyerFromOrderPayload(row),
+        defaultRegion,
+        seenAt: sourceUpdatedAt,
+      });
+
+      if (resolved?.created) customers += 1;
+      if (resolved?.phoneProblem) unparseablePhones += 1;
     }
   }
 
@@ -260,7 +306,16 @@ async function writePage(options: {
     tombstoned += count;
   }
 
-  return { written, duplicates, skipped, tombstoned, snapshots, maxUpdatedAt };
+  return {
+    written,
+    duplicates,
+    skipped,
+    tombstoned,
+    snapshots,
+    customers,
+    unparseablePhones,
+    maxUpdatedAt,
+  };
 }
 
 /** Sync one feed for one store, resuming wherever the last run stopped. */
@@ -283,6 +338,8 @@ export async function syncFeed(options: {
     tombstoned: 0,
     skipped: 0,
     snapshots: 0,
+    customers: 0,
+    unparseablePhones: 0,
     finished: false,
   };
 
@@ -331,12 +388,28 @@ export async function syncFeed(options: {
       base.pages += 1;
       await learnShopFacts(storeId, response.data);
 
-      const result = await writePage({ storeId, app, feed, page: response.data });
+      // Re-read each page: `learnShopFacts` may have just taught us the
+      // country, and the first page of the first feed is exactly when that
+      // happens.
+      const store = await prisma.store.findUnique({
+        where: { id: storeId },
+        select: { country: true },
+      });
+
+      const result = await writePage({
+        storeId,
+        app,
+        feed,
+        page: response.data,
+        defaultRegion: store?.country ?? null,
+      });
       base.written += result.written;
       base.duplicates += result.duplicates;
       base.skipped += result.skipped;
       base.tombstoned += result.tombstoned;
       base.snapshots += result.snapshots;
+      base.customers += result.customers;
+      base.unparseablePhones += result.unparseablePhones;
 
       if (result.maxUpdatedAt && (!highWater || result.maxUpdatedAt > highWater)) {
         highWater = result.maxUpdatedAt;
