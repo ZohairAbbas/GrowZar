@@ -23,7 +23,7 @@
     "db:studio": "prisma studio",
     "seed:holidays": "tsx scripts/seed-holiday-calendar.ts",
     "enroll": "tsx scripts/enroll-store.ts",
-    "build:version": "node -e \"require('fs').writeFileSync('build/version.txt', require('child_process').execSync('git rev-parse --short HEAD').toString().trim())\""
+    "build:version": "node -e \"require('fs').writeFileSync('build/version.txt', require('child_process').execSync('git describe --always --dirty --abbrev=7').toString().trim())\""
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
