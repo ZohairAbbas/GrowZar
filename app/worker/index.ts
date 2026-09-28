@@ -84,6 +84,22 @@ export const syncWorker = new Worker<SyncJob>(
       return { deferred: "quiet_hours" };
     }
 
+    // A scheduler outlives its store: `upsertJobScheduler` state lives in
+    // Redis, and deleting a store does not touch it. Left alone, a deleted
+    // store's cycle fires every five minutes forever, doing nothing, on a box
+    // with 2 vCPUs and no headroom. So a job whose store is gone removes its
+    // own schedule on the way out.
+    const stillExists = await prisma.store.findUnique({
+      where: { id: storeId },
+      select: { id: true },
+    });
+
+    if (!stillExists) {
+      await syncQueue.removeJobScheduler(`cycle:${storeId}`);
+      console.log(`[sync] store=${storeId} no longer exists; schedule removed`);
+      return { removed: true };
+    }
+
     const results = await syncStore(storeId);
 
     const totals = results.reduce(
