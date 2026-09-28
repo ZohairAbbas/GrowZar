@@ -1,4 +1,5 @@
 import { prisma } from "~/lib/db.server";
+import { VERSION } from "~/lib/version.server";
 
 /**
  * Readiness check. Returns 200 only when the database answers, so the monitor
@@ -13,7 +14,7 @@ export async function loader() {
       ok: true,
       db: "up",
       latencyMs: Date.now() - startedAt,
-      version: process.env.GROWZAR_VERSION ?? "dev",
+      version: VERSION,
     });
   } catch (error) {
     console.error("[health] database check failed", error);
