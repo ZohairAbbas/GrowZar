@@ -3,7 +3,13 @@ import type { Prisma, SuiteApp, SyncEntity } from "@prisma/client";
 import { prisma } from "../db.server";
 import { appRequest } from "../apps/client.server";
 import { getAppCredentials } from "../apps/registry.server";
-import { extractId, extractUpdatedAt, feedsFor, type EntityFeed } from "./entities";
+import {
+  extractId,
+  extractTombstones,
+  extractUpdatedAt,
+  feedsFor,
+  type EntityFeed,
+} from "./entities";
 import { recordOrderSnapshot } from "./snapshots.server";
 import { buyerFromOrderPayload, resolveCustomer } from "../customers/resolve.server";
 import { countryFromTimezone } from "../customers/phone";
@@ -31,7 +37,6 @@ type ContractPage = {
   /** Not in §6.1 today; read when an app sends it (see phone.ts). */
   shopCountry?: string;
   data?: unknown[];
-  deletedIds?: unknown[];
   pagination?: {
     limit?: number;
     count?: number;
@@ -290,20 +295,24 @@ async function writePage(options: {
   }
 
   let tombstoned = 0;
-  for (const deleted of page.deletedIds ?? []) {
-    const externalId =
-      typeof deleted === "string"
-        ? deleted
-        : typeof deleted === "number"
-          ? String(deleted)
-          : null;
-    if (!externalId) continue;
+  const graves = extractTombstones(page as Record<string, unknown>, feed);
 
+  for (const externalId of graves.ids) {
     const { count } = await prisma.rawRecord.updateMany({
       where: { storeId, app, entity: feed.entity, externalId, deletedAt: null },
       data: { deletedAt: new Date(), lastSeenAt: new Date() },
     });
     tombstoned += count;
+  }
+
+  // The app had more deletions than it could return. "No tombstones" and "too
+  // many tombstones" must not look alike: a mass delete would otherwise pass
+  // as nothing happening, and §6.2 exists precisely so deletions are never
+  // inferred from absence.
+  if (graves.truncated) {
+    console.warn(
+      `[sync] ${app}/${feed.entity} truncated its tombstone list for store ${storeId}; a full resync is needed to see every deletion`,
+    );
   }
 
   return {
@@ -360,6 +369,9 @@ export async function syncFeed(options: {
   try {
     for (let page = 0; page < MAX_PAGES_PER_RUN; page += 1) {
       const params = new URLSearchParams({ limit: String(PAGE_LIMIT) });
+      for (const [key, value] of Object.entries(feed.query ?? {})) {
+        params.set(key, value);
+      }
       if (cursor) {
         params.set("cursor", cursor);
       } else if (state.updatedSince) {

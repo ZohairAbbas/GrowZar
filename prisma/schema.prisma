@@ -215,6 +215,10 @@ enum SyncEntity {
   PARCEL
   SETTLEMENT
   COST
+  /// Whether an order was confirmed, and how. Courierify serves this from
+  /// OrderConfirmation / VoiceCallLog rather than an order's stage, and it is
+  /// what I8 ("unconfirmed orders return more") is built on.
+  CONFIRMATION
 }
 
 enum SyncRunStatus {

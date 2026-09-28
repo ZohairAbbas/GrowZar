@@ -7,7 +7,7 @@
  */
 import { prisma } from "../app/lib/db.server.ts";
 import { syncStore } from "../app/lib/sync/sync.server.ts";
-import { SECTION_DEFINITIONS, sectionState } from "../app/lib/sections.server.ts";
+import { SECTION_DEFINITIONS, sectionState } from "../app/lib/sections.ts";
 import { SECTIONS } from "../app/lib/permissions.ts";
 
 const CFY = process.env.CFY ?? "http://127.0.0.1:4010";
@@ -48,7 +48,7 @@ async function makeStore(shop: string, apps: ("COURIERIFY" | "FINANCIFY")[]) {
 async function main() {
   const stamp = Date.now();
   const shop = `cust-${stamp}.myshopify.com`;
-  const store = await makeStore(shop, ["COURIERIFY"]);
+  const store = await makeStore(shop, ["FINANCIFY"]);
 
   console.log("\n1. buyers who differ only in phone format resolve to one customer");
 
@@ -65,7 +65,7 @@ async function main() {
   ];
 
   await seed(
-    CFY,
+    FIN,
     shop,
     "/api/v1/orders",
     spellings.map((phone, i) => ({
@@ -98,7 +98,7 @@ async function main() {
     fresh?.country === "PK", `${fresh?.country} (inferred: ${fresh?.countryInferred})`);
 
   console.log("\n2. two different buyers stay two customers");
-  await seed(CFY, shop, "/api/v1/orders", [
+  await seed(FIN, shop, "/api/v1/orders", [
     {
       id: "9100000000001", orderId: "9100000000001", updatedAt: iso(100),
       customerPhone: "0301-7654321", customerName: "Bilal Ahmed",
@@ -112,7 +112,7 @@ async function main() {
   check("a different number is a different person", twoPeople === 2, String(twoPeople));
 
   console.log("\n3. a buyer known by phone, then by email, then by both, merges");
-  await seed(CFY, shop, "/api/v1/orders", [
+  await seed(FIN, shop, "/api/v1/orders", [
     {
       id: "9200000000001", orderId: "9200000000001", updatedAt: iso(200),
       customerEmail: "ayesha@example.pk", customerName: "Ayesha K",
@@ -127,7 +127,7 @@ async function main() {
     String(beforeMerge));
 
   // Now an order carrying BOTH identities: they are one person after all.
-  await seed(CFY, shop, "/api/v1/orders", [
+  await seed(FIN, shop, "/api/v1/orders", [
     {
       id: "9300000000001", orderId: "9300000000001", updatedAt: iso(300),
       customerPhone: "+923001234567", customerEmail: "ayesha@example.pk",
@@ -149,7 +149,7 @@ async function main() {
     merged !== null);
 
   console.log("\n4. a phone Growzar cannot parse is kept, not invented");
-  await seed(CFY, shop, "/api/v1/orders", [
+  await seed(FIN, shop, "/api/v1/orders", [
     {
       id: "9400000000001", orderId: "9400000000001", updatedAt: iso(400),
       customerPhone: "call the shop", customerName: "Walk-in",

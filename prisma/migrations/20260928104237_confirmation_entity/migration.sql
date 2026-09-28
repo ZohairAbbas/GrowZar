@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "SyncEntity" ADD VALUE 'CONFIRMATION';

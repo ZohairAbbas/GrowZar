@@ -12,6 +12,7 @@ import { latestOrderSnapshots } from "../app/lib/sync/snapshots.server.ts";
 
 const SHOP = process.env.SHOP!;
 const CFY = process.env.CFY!;
+const FIN = process.env.FIN!;
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = "") => {
@@ -59,16 +60,18 @@ async function main() {
   const countOf = (app: string, entity: string) =>
     counts.find((c) => c.app === app && c.entity === entity)?._count._all ?? 0;
 
-  check("450 Courierify orders cached", countOf("COURIERIFY", "ORDER") === 450,
-    String(countOf("COURIERIFY", "ORDER")));
+  check("450 Financify orders cached", countOf("FINANCIFY", "ORDER") === 450,
+    String(countOf("FINANCIFY", "ORDER")));
   check("120 parcels cached", countOf("COURIERIFY", "PARCEL") === 120,
     String(countOf("COURIERIFY", "PARCEL")));
   check("60 settlement lines cached", countOf("COURIERIFY", "SETTLEMENT") === 60,
     String(countOf("COURIERIFY", "SETTLEMENT")));
   check("40 costs cached", countOf("FINANCIFY", "COST") === 40,
     String(countOf("FINANCIFY", "COST")));
-  check("both apps' order feeds stored separately, not merged",
-    countOf("FINANCIFY", "ORDER") === 50);
+  // Courierify serves no orders endpoint — G-CFY-2 built confirmations
+  // instead — so asking it for any would 404 every cycle.
+  check("Courierify is not asked for orders it does not serve",
+    countOf("COURIERIFY", "ORDER") === 0);
 
   const fresh = await prisma.store.findUnique({ where: { id: store.id } });
   console.log("\n2. currency and timezone come from the source, never a default");
@@ -83,11 +86,11 @@ async function main() {
   check("the boundary row came back and was deduplicated", dupes > 0, `${dupes} duplicate(s)`);
 
   const totalAfter = await prisma.rawRecord.count({ where: { storeId: store.id } });
-  check("row count unchanged", totalAfter === 450 + 120 + 60 + 40 + 50, String(totalAfter));
+  check("row count unchanged", totalAfter === 450 + 120 + 60 + 40, String(totalAfter));
 
   console.log("\n4. a re-sent row updates rather than duplicating");
   const target = "5123456789005";
-  await seed(CFY, "/api/v1/orders", [
+  await seed(FIN, "/api/v1/orders", [
     {
       id: target, orderId: target,
       updatedAt: new Date(Date.UTC(2026, 8, 20)).toISOString(),
@@ -101,7 +104,7 @@ async function main() {
   ]);
   const third = await syncStore(store.id);
   const rowsForTarget = await prisma.rawRecord.count({
-    where: { storeId: store.id, app: "COURIERIFY", entity: "ORDER", externalId: target },
+    where: { storeId: store.id, app: "FINANCIFY", entity: "ORDER", externalId: target },
   });
   check("still one raw row for that order", rowsForTarget === 1, String(rowsForTarget));
   check("the correction was written", third.some((r) => r.written > 0));
@@ -125,7 +128,7 @@ async function main() {
     (latest.find((r) => r.orderId === target)?.version ?? 0) === 2);
 
   console.log("\n7. snapshot defect 1: finalizing twice does not collide");
-  await seed(CFY, "/api/v1/orders", [
+  await seed(FIN, "/api/v1/orders", [
     {
       id: target, orderId: target,
       updatedAt: new Date(Date.UTC(2026, 8, 21)).toISOString(),
@@ -140,7 +143,7 @@ async function main() {
   // Re-send it again with a later updatedAt: the sync will read it once more
   // and try to snapshot an order that is already final. The old hub crashed
   // here on the second run.
-  await seed(CFY, "/api/v1/orders", [
+  await seed(FIN, "/api/v1/orders", [
     {
       id: target, orderId: target,
       updatedAt: new Date(Date.UTC(2026, 8, 22)).toISOString(),
@@ -166,14 +169,14 @@ async function main() {
   const secondShop = `${SHOP}`;
   // Reset this store's order feed so the walk starts again from nothing.
   await prisma.rawRecord.deleteMany({
-    where: { storeId: store.id, app: "COURIERIFY", entity: "ORDER" },
+    where: { storeId: store.id, app: "FINANCIFY", entity: "ORDER" },
   });
   await prisma.syncState.updateMany({
-    where: { storeId: store.id, app: "COURIERIFY", entity: "ORDER" },
+    where: { storeId: store.id, app: "FINANCIFY", entity: "ORDER" },
     data: { cursor: null, updatedSince: null, status: "IDLE", runStartedAt: null },
   });
 
-  const orderFeed = feedsFor("COURIERIFY").find((f) => f.entity === "ORDER")!;
+  const orderFeed = feedsFor("FINANCIFY").find((f) => f.entity === "ORDER")!;
 
   // Fail hard enough to exhaust the client's retries on the SECOND page, which
   // from the database's point of view is indistinguishable from the worker
@@ -181,16 +184,16 @@ async function main() {
   // Let page 1 land, then fail page 2 hard enough to exhaust the client's
   // retries. From the database's point of view that is exactly a worker killed
   // between two pages — and it is deterministic, which killing one is not.
-  await fetch(`${CFY}/__fail?shop=${SHOP}&after=1&count=4`);
+  await fetch(`${FIN}/__fail?shop=${SHOP}&after=1&count=4`);
 
   const interrupted = await syncFeed({
-    storeId: store.id, shopDomain: secondShop, app: "COURIERIFY", feed: orderFeed,
+    storeId: store.id, shopDomain: secondShop, app: "FINANCIFY", feed: orderFeed,
   });
   const afterInterrupt = await prisma.rawRecord.count({
-    where: { storeId: store.id, app: "COURIERIFY", entity: "ORDER" },
+    where: { storeId: store.id, app: "FINANCIFY", entity: "ORDER" },
   });
   const state = await prisma.syncState.findFirst({
-    where: { storeId: store.id, app: "COURIERIFY", entity: "ORDER" },
+    where: { storeId: store.id, app: "FINANCIFY", entity: "ORDER" },
   });
   console.log(
     `      interrupted after ${afterInterrupt} rows (${interrupted.error ?? "no error"}), cursor=${state?.cursor ? "held" : "none"}, state=${state?.status}`,
@@ -202,14 +205,14 @@ async function main() {
   check("the failure did not leave the feed locked as RUNNING", state?.status === "FAILED");
 
   const resumed = await syncFeed({
-    storeId: store.id, shopDomain: secondShop, app: "COURIERIFY", feed: orderFeed,
+    storeId: store.id, shopDomain: secondShop, app: "FINANCIFY", feed: orderFeed,
   });
   const afterResume = await prisma.rawRecord.count({
-    where: { storeId: store.id, app: "COURIERIFY", entity: "ORDER" },
+    where: { storeId: store.id, app: "FINANCIFY", entity: "ORDER" },
   });
   const distinct = await prisma.rawRecord.groupBy({
     by: ["externalId"],
-    where: { storeId: store.id, app: "COURIERIFY", entity: "ORDER" },
+    where: { storeId: store.id, app: "FINANCIFY", entity: "ORDER" },
   });
   console.log(
     `      resumed: +${resumed.written} rows, ${resumed.duplicates} duplicate(s), error=${resumed.error ?? "none"}`,
@@ -222,7 +225,7 @@ async function main() {
   await fetch(`${CFY}/__seed`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ shop: SHOP, path: "/api/v1/shipments", deletedIds: ["SHP-3"] }),
+    body: JSON.stringify({ shop: SHOP, path: "/api/v1/growzar/shipments", deletedIds: ["SHP-3"] }),
   });
   await prisma.syncState.updateMany({
     where: { storeId: store.id, app: "COURIERIFY", entity: "PARCEL" },

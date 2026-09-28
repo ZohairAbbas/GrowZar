@@ -162,9 +162,12 @@ function mintClaimToken(options: {
 type Row = { id: string; updatedAt: string; [key: string]: unknown };
 
 const LIST_PATHS = new Set([
+  // Courierify's real paths, confirmed against the live app on 2026-09-28.
+  "/api/v1/growzar/shipments",
+  "/api/v1/growzar/settlements",
+  "/api/v1/growzar/confirmations",
+  // Financify's, still the contract's reading — no running app to check against.
   "/api/v1/orders",
-  "/api/v1/shipments",
-  "/api/v1/settlements",
   "/api/v1/costs",
 ]);
 
@@ -273,7 +276,18 @@ function listEndpoint(
     data: page,
     // §6.2: deletions are reported, never left to silent absence. Reported on
     // the last page of a walk, which is where a real app would flush them.
-    deletedIds: hasMore ? [] : bucket(tombstones, shop, url.pathname),
+    // Courierify reports settlement deletions under their own key, not
+    // deletedIds. The mock mirrors that, because a mock that is tidier than
+    // the real app stops being a check on Growzar.
+    ...(url.pathname.endsWith("/settlements")
+      ? {
+          deletedSettlements: hasMore ? [] : bucket(tombstones, shop, url.pathname),
+          deletedSettlementsTruncated: false,
+        }
+      : {
+          deletedIds: hasMore ? [] : bucket(tombstones, shop, url.pathname),
+          deletedIdsTruncated: false,
+        }),
     pagination: {
       limit,
       count: page.length,

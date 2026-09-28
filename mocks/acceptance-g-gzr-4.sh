@@ -48,10 +48,9 @@ const costs = Array.from({ length: 40 }, (_, i) => ({
   variantId: "4412" + i, unitCost: { amount: "1200.00", currency: "PKR" },
 }));
 (async () => {
-  await post("'$CFY'", "/api/v1/orders", orders);
-  await post("'$CFY'", "/api/v1/shipments", parcels);
-  await post("'$CFY'", "/api/v1/settlements", settlements);
-  await post("'$FIN'", "/api/v1/orders", orders.slice(0, 50));
+  await post("'$CFY'", "/api/v1/growzar/shipments", parcels);
+  await post("'$CFY'", "/api/v1/growzar/settlements", settlements);
+  await post("'$FIN'", "/api/v1/orders", orders);
   await post("'$FIN'", "/api/v1/costs", costs);
 })();
 '
