@@ -9,5 +9,9 @@ export default defineConfig({
     // 3020 is Growzar's (see docs/deploy/growzar.service).
     port: 3020,
     host: "127.0.0.1",
+    // nginx proxies portal.growzar.com here, and Vite rejects a Host header it
+    // does not know with "Blocked request" — a 403 that looks like an nginx
+    // problem but is not. Production (react-router-serve) has no such check.
+    allowedHosts: ["portal.growzar.com"],
   },
 });

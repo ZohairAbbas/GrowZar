@@ -6,6 +6,7 @@ import { prisma } from "~/lib/db.server";
 import { getViewer, listVisibleStores } from "~/lib/authorize.server";
 import { redirectWithCookies } from "~/lib/session.server";
 import { safeRedirectPath } from "~/lib/redirects";
+import { STORE_COOKIE, STORE_COOKIE_MAX_AGE } from "~/lib/store-cookie.server";
 
 /**
  * Switching organization or store, for the shell's two switchers.
@@ -14,9 +15,7 @@ import { safeRedirectPath } from "~/lib/redirects";
  * pathless layout posts to the matched leaf route, not to the layout, so the
  * layout's action would never run.
  */
-export const STORE_COOKIE = "growzar_store";
 
-const STORE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 export async function action({ request }: Route.ActionArgs) {
   const viewer = await getViewer(request);

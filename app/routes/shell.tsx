@@ -18,7 +18,7 @@ import {
 
 import type { Route } from "./+types/shell";
 import { auth } from "~/lib/auth.server";
-import { STORE_COOKIE } from "./switch";
+import { readStoreCookie } from "~/lib/store-cookie.server";
 import { prisma } from "~/lib/db.server";
 import { getViewer, listVisibleStores, visibleSections } from "~/lib/authorize.server";
 import { SECTIONS, type Section } from "~/lib/permissions";
@@ -26,7 +26,7 @@ import {
   ORDERED_SECTIONS,
   sectionState,
   type SectionState,
-} from "~/lib/sections.server";
+} from "~/lib/sections";
 import { cn } from "~/lib/utils";
 
 /**
@@ -52,13 +52,6 @@ const SECTION_ICONS: Record<Section, typeof Home> = {
   inbox: Inbox,
   settings: Settings,
 };
-
-/** The store the shell is pointed at, remembered in a cookie. */
-export function readStoreCookie(request: Request): string | null {
-  const cookie = request.headers.get("Cookie") ?? "";
-  const match = cookie.match(new RegExp(`(?:^|; )${STORE_COOKIE}=([^;]+)`));
-  return match?.[1] ? decodeURIComponent(match[1]) : null;
-}
 
 export async function loader({ request }: Route.LoaderArgs) {
   const viewer = await getViewer(request);

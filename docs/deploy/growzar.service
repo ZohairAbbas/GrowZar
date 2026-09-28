@@ -5,13 +5,25 @@ Wants=postgresql.service redis-server.service
 
 [Service]
 Type=simple
+# Created here so a fresh box does not fail on a missing log directory.
+ExecStartPre=/bin/mkdir -p /var/log/growzar
 User=root
 WorkingDirectory=/root/growzar
 EnvironmentFile=/etc/growzar/growzar.env
 Environment=NODE_ENV=production
+# npm is a script with `#!/usr/bin/env node`, so pinning ExecStart to nvm's npm
+# is not enough on its own — `env node` resolves through PATH and would still
+# find /usr/bin/node (Node 20). This PATH is what actually decides the runtime.
+Environment=PATH=/root/.nvm/versions/node/v24.21.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=TZ=UTC
 Environment=NODE_OPTIONS=--max-old-space-size=768
-ExecStart=/usr/bin/npm run start
+# Node 24, explicitly. systemd has no shell and therefore no nvm, so a bare
+# `npm` resolves to /usr/bin/npm -> system Node 20 — which belongs to the four
+# production apps on this box (pack rule 2) and is NOT what Growzar is built
+# and tested against (.nvmrc says 24). The path is pinned on purpose: an nvm
+# upgrade should fail loudly here rather than silently move Growzar to an
+# untested runtime.
+ExecStart=/root/.nvm/versions/node/v24.21.0/bin/npm run start
 Restart=on-failure
 RestartSec=5
 

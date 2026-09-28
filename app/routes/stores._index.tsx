@@ -2,8 +2,11 @@ import { Link } from "react-router";
 import { Store as StoreIcon } from "lucide-react";
 
 import type { Route } from "./+types/stores._index";
-import { getViewer, listVisibleStores } from "~/lib/authorize.server";
-import { requireSection } from "~/lib/authorize.server";
+// One import, and only what the loader actually uses. An unused binding from a
+// `.server` module is not free: React Router strips server code from `loader`,
+// `action`, `middleware` and `headers`, and anything it cannot attribute to
+// those is assumed to be needed by the client — which fails the build.
+import { listVisibleStores, requireSection } from "~/lib/authorize.server";
 import { RoleBadge } from "~/components/ui/RoleBadge";
 
 export function meta() {

@@ -3,14 +3,14 @@ import { Check, Clock, Lock } from "lucide-react";
 
 import type { Route } from "./+types/section";
 import { prisma } from "~/lib/db.server";
-import { getViewer, listVisibleStores, requireSection } from "~/lib/authorize.server";
+import { listVisibleStores, requireSection } from "~/lib/authorize.server";
 import { SECTIONS, type Section } from "~/lib/permissions";
 import {
   APP_LABELS,
   SECTION_DEFINITIONS,
   sectionState,
-} from "~/lib/sections.server";
-import { readStoreCookie } from "./shell";
+} from "~/lib/sections";
+import { readStoreCookie } from "~/lib/store-cookie.server";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   return [{ title: loaderData ? `${loaderData.label} · Growzar` : "Growzar" }];
