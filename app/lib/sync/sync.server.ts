@@ -277,11 +277,19 @@ async function writePage(options: {
         isFinal: (row as Record<string, unknown>)?.isFinal === true,
       });
       if (outcome.kind === "written") snapshots += 1;
+    }
 
-      // Growzar's own customer record (rule #19). Built here, from the order
-      // as the app sent it, rather than taken from any app's customer count —
-      // Courierify groups by the raw phone string, so its count is of
-      // spellings, not of people.
+    // Growzar's own customer record (rule #19), built from whichever feed
+    // carries a buyer — not from any app's customer count, because Courierify
+    // groups by the raw phone string and counts spellings rather than people.
+    //
+    // Parcels count as well as orders. Rule #1 says a parcel is never counted
+    // AS an order, which is about counting, not about identity: a Courierify
+    // parcel carries `customer: { name, phone, phoneRaw }` on every row, and
+    // Courierify has no orders endpoint at all. Reading only orders left a
+    // Courierify-only merchant — which is most of them today — with an empty
+    // customer record forever, while the identity sat in the data unused.
+    if (feed.entity === "ORDER" || feed.entity === "PARCEL") {
       const resolved = await resolveCustomer({
         storeId,
         buyer: buyerFromOrderPayload(row),

@@ -6,6 +6,7 @@ import { auth } from "~/lib/auth.server";
 import { readFormData } from "~/lib/form.server";
 import { prisma } from "~/lib/db.server";
 import { attachStore, autoConnectApps } from "~/lib/claim.server";
+import { scheduleStore } from "~/lib/sync/queue.server";
 import { getSession, redirectWithCookies } from "~/lib/session.server";
 import { LoadingSpinner } from "~/components/ui/LoadingSpinner";
 
@@ -163,6 +164,16 @@ export async function action({ request, params }: Route.ActionArgs) {
     });
   } catch (error) {
     console.error("[claim] auto-connect failed", error);
+  }
+
+  // Put the store on the sync cycle now. The worker only scheduled at startup,
+  // so a store claimed afterwards was never synced until someone happened to
+  // restart it — and nothing errors while that is true, the store just sits
+  // there empty. The worker's reconcile is the net under this.
+  try {
+    await scheduleStore(outcome.storeId);
+  } catch (error) {
+    console.error("[claim] could not schedule the sync cycle", error);
   }
 
   const activated = await auth.api.setActiveOrganization({
