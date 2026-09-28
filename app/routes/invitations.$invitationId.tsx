@@ -11,6 +11,7 @@ import {
 
 import type { Route } from "./+types/invitations.$invitationId";
 import { auth } from "~/lib/auth.server";
+import { readFormData } from "~/lib/form.server";
 import {
   getSession,
   readableAuthError,
@@ -87,7 +88,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     );
   }
 
-  const formData = await request.formData();
+  const formData = await readFormData(request);
   const intent = String(formData.get("intent") ?? "");
 
   try {

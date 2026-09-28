@@ -3,6 +3,7 @@ import { AlertCircle, ArrowLeft, Check, UserPlus, X } from "lucide-react";
 
 import type { Route } from "./+types/stores.$storeId";
 import { Forbidden, can, requireStore } from "~/lib/authorize.server";
+import { readFormData } from "~/lib/form.server";
 import { prisma } from "~/lib/db.server";
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -137,7 +138,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     throw new Forbidden("Your role does not allow answering access requests.");
   }
 
-  const formData = await request.formData();
+  const formData = await readFormData(request);
   const requestId = String(formData.get("requestId") ?? "");
   const intent = String(formData.get("intent") ?? "");
 

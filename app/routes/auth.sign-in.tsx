@@ -3,8 +3,14 @@ import { AlertCircle, KeyRound, Mail } from "lucide-react";
 
 import type { Route } from "./+types/auth.sign-in";
 import { auth } from "~/lib/auth.server";
+import { readFormData } from "~/lib/form.server";
 import { safeRedirectPath } from "~/lib/redirects";
-import { getSession, readableAuthError, redirectWithCookies } from "~/lib/session.server";
+import {
+  getSession,
+  readAuthFailure,
+  readableAuthError,
+  redirectWithCookies,
+} from "~/lib/session.server";
 import { LoadingSpinner } from "~/components/ui/LoadingSpinner";
 
 export function meta() {
@@ -20,7 +26,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const formData = await request.formData();
+  const formData = await readFormData(request);
   const intent = String(formData.get("intent") ?? "password");
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const next = safeRedirectPath(String(formData.get("next") ?? ""));
@@ -54,6 +60,13 @@ export async function action({ request }: Route.ActionArgs) {
       headers: request.headers,
       asResponse: true,
     });
+
+    const failure = await readAuthFailure(
+      response,
+      "That email and password did not match.",
+    );
+    if (failure) return { error: failure, intent };
+
     return redirectWithCookies(response, next);
   } catch (error) {
     return {

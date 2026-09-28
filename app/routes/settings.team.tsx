@@ -3,6 +3,7 @@ import { AlertCircle, Check, Clock, Send, Users, X } from "lucide-react";
 
 import type { Route } from "./+types/settings.team";
 import { auth } from "~/lib/auth.server";
+import { readFormData } from "~/lib/form.server";
 import { canSendEmail } from "~/lib/env.server";
 import { prisma } from "~/lib/db.server";
 import { Forbidden, can, requireSection } from "~/lib/authorize.server";
@@ -94,7 +95,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 export async function action({ request }: Route.ActionArgs) {
   const viewer = await requireSection(request, "settings", "view");
   const organizationId = viewer.organizationId;
-  const formData = await request.formData();
+  const formData = await readFormData(request);
   const intent = String(formData.get("intent") ?? "");
 
   // Every branch re-checks the permission it needs. The loader's answer

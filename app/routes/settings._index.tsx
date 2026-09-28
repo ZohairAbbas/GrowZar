@@ -3,6 +3,7 @@ import { AlertCircle, Check, User } from "lucide-react";
 
 import type { Route } from "./+types/settings._index";
 import { auth } from "~/lib/auth.server";
+import { readFormData } from "~/lib/form.server";
 import { readableAuthError, requireUser } from "~/lib/session.server";
 import { LoadingSpinner } from "~/components/ui/LoadingSpinner";
 
@@ -23,7 +24,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 export async function action({ request }: Route.ActionArgs) {
   await requireUser(request);
 
-  const formData = await request.formData();
+  const formData = await readFormData(request);
   const name = String(formData.get("name") ?? "").trim();
 
   if (!name) {

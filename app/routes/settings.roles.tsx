@@ -3,6 +3,7 @@ import { AlertCircle, Check, Plus, Shield, X } from "lucide-react";
 
 import type { Route } from "./+types/settings.roles";
 import { auth } from "~/lib/auth.server";
+import { readFormData } from "~/lib/form.server";
 import { requireSection } from "~/lib/authorize.server";
 import { readableAuthError } from "~/lib/session.server";
 import {
@@ -54,7 +55,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 export async function action({ request }: Route.ActionArgs) {
   const viewer = await requireSection(request, "settings", "manage");
 
-  const formData = await request.formData();
+  const formData = await readFormData(request);
   const intent = String(formData.get("intent") ?? "");
 
   try {

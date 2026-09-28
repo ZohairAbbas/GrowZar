@@ -2,6 +2,7 @@ import { redirect } from "react-router";
 
 import type { Route } from "./+types/switch";
 import { auth } from "~/lib/auth.server";
+import { readFormData } from "~/lib/form.server";
 import { prisma } from "~/lib/db.server";
 import { getViewer, listVisibleStores } from "~/lib/authorize.server";
 import { redirectWithCookies } from "~/lib/session.server";
@@ -19,7 +20,7 @@ import { STORE_COOKIE, STORE_COOKIE_MAX_AGE } from "~/lib/store-cookie.server";
 
 export async function action({ request }: Route.ActionArgs) {
   const viewer = await getViewer(request);
-  const formData = await request.formData();
+  const formData = await readFormData(request);
   const intent = String(formData.get("intent") ?? "");
   const back = safeRedirectPath(formData.get("returnTo"), "/home");
 

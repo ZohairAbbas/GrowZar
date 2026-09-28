@@ -92,11 +92,45 @@ export function findViewerMember<T extends { userId: string }>(
  * and, with cookie caching on, a signed data cookie beside it.
  */
 export function redirectWithCookies(response: Response, to: string) {
+  // `asResponse: true` makes Better Auth RETURN failures rather than throw
+  // them, so a 401 arrives here looking exactly like a success. Redirecting on
+  // one sends the person to a page as if they had signed in, with no session
+  // and no explanation. Callers that can show the user a message check
+  // `readAuthFailure` first; this is the backstop, and it is loud on purpose.
+  if (!response.ok) {
+    throw new Error(
+      `redirectWithCookies got a ${response.status} — call readAuthFailure first`,
+    );
+  }
+
   const headers = new Headers();
   for (const cookie of response.headers.getSetCookie()) {
     headers.append("Set-Cookie", cookie);
   }
   return redirect(to, { headers });
+}
+
+/**
+ * The human-readable reason a Better Auth call failed, or null if it did not.
+ *
+ * Consumes the body, so it is called once per response and before
+ * `redirectWithCookies`.
+ */
+export async function readAuthFailure(
+  response: Response,
+  fallback: string,
+): Promise<string | null> {
+  if (response.ok) return null;
+
+  try {
+    const body = (await response.clone().json()) as { message?: unknown };
+    if (typeof body.message === "string" && body.message) return body.message;
+  } catch {
+    /* not JSON */
+  }
+
+  console.error(`[auth] request failed with ${response.status}`);
+  return fallback;
 }
 
 /**

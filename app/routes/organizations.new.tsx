@@ -3,6 +3,7 @@ import { AlertCircle, Building2 } from "lucide-react";
 
 import type { Route } from "./+types/organizations.new";
 import { auth } from "~/lib/auth.server";
+import { readFormData } from "~/lib/form.server";
 import {
   readableAuthError,
   redirectWithCookies,
@@ -45,7 +46,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 export async function action({ request }: Route.ActionArgs) {
   await requireUser(request);
 
-  const formData = await request.formData();
+  const formData = await readFormData(request);
   const name = String(formData.get("name") ?? "").trim();
   const slug = String(formData.get("slug") ?? "").trim().toLowerCase();
   const baseCurrency = String(formData.get("baseCurrency") ?? "").toUpperCase();

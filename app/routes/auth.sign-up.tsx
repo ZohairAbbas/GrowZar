@@ -3,8 +3,14 @@ import { AlertCircle, UserPlus } from "lucide-react";
 
 import type { Route } from "./+types/auth.sign-up";
 import { auth } from "~/lib/auth.server";
+import { readFormData } from "~/lib/form.server";
 import { safeRedirectPath } from "~/lib/redirects";
-import { getSession, readableAuthError, redirectWithCookies } from "~/lib/session.server";
+import {
+  getSession,
+  readAuthFailure,
+  readableAuthError,
+  redirectWithCookies,
+} from "~/lib/session.server";
 import { LoadingSpinner } from "~/components/ui/LoadingSpinner";
 
 export function meta() {
@@ -22,7 +28,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const formData = await request.formData();
+  const formData = await readFormData(request);
   const name = String(formData.get("name") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
@@ -43,6 +49,12 @@ export async function action({ request }: Route.ActionArgs) {
       headers: request.headers,
       asResponse: true,
     });
+
+    const failure = await readAuthFailure(
+      response,
+      "Could not create that account.",
+    );
+    if (failure) return { error: failure };
     // A fresh account has no organization. `next` is honoured when it points
     // somewhere specific — an invitation, say — and otherwise the user goes to
     // create one, which is what requireOrganization would do anyway.

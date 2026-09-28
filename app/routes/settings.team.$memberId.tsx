@@ -3,6 +3,7 @@ import { AlertCircle, ArrowLeft, Check, Shield, Store as StoreIcon } from "lucid
 
 import type { Route } from "./+types/settings.team.$memberId";
 import { auth } from "~/lib/auth.server";
+import { readFormData } from "~/lib/form.server";
 import { prisma } from "~/lib/db.server";
 import { Forbidden, requireSection } from "~/lib/authorize.server";
 import { readableAuthError } from "~/lib/session.server";
@@ -105,7 +106,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     throw new Forbidden("Only an owner can change an owner.");
   }
 
-  const formData = await request.formData();
+  const formData = await readFormData(request);
   const role = String(formData.get("role") ?? "").trim();
   const scopeAllStores = formData.get("scopeAllStores") === "all";
   const storeIds = formData.getAll("storeIds").map(String);

@@ -1,6 +1,7 @@
 import { redirect } from "react-router";
 
 import type { Route } from "./+types/claim";
+import { readFormData } from "~/lib/form.server";
 import {
   CLAIM_FAILURE_MESSAGES,
   consumeClaimToken,
@@ -39,7 +40,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const formData = await request.formData();
+  const formData = await readFormData(request);
   const token = String(formData.get("token") ?? "").trim();
 
   if (!token) {

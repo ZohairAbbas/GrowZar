@@ -3,6 +3,7 @@ import { AlertCircle, Building2, Clock, Store as StoreIcon } from "lucide-react"
 
 import type { Route } from "./+types/claim.$pendingClaimId";
 import { auth } from "~/lib/auth.server";
+import { readFormData } from "~/lib/form.server";
 import { prisma } from "~/lib/db.server";
 import { attachStore, autoConnectApps } from "~/lib/claim.server";
 import { getSession, redirectWithCookies } from "~/lib/session.server";
@@ -104,7 +105,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     );
   }
 
-  const formData = await request.formData();
+  const formData = await readFormData(request);
   const organizationId = String(formData.get("organizationId") ?? "");
 
   // Membership is re-checked against the database rather than trusted from the
