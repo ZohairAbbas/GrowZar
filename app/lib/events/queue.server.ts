@@ -43,14 +43,56 @@ export function eventsQueue(): Queue<{ inboundEventId: string }> {
   return queue;
 }
 
+/**
+ * The job id for an event row.
+ *
+ * A hyphen, not a colon. BullMQ 6 rejects `:` in a custom job id — it uses the
+ * colon as its own key separator — and `add()` throws "Custom Id cannot
+ * contain :". Every enqueue in production threw for two days because of it.
+ *
+ * Exported so a test can assert the shape without needing Redis, because the
+ * whole failure was one character in a string nobody was checking.
+ */
+export function eventJobId(inboundEventId: string): string {
+  return `event-${inboundEventId}`;
+}
+
+/** Characters BullMQ 6 refuses in a custom job id. */
+export const ILLEGAL_JOB_ID_CHARS = [":"];
+
+/**
+ * How long to wait for Redis before calling an enqueue failed.
+ *
+ * BullMQ requires `maxRetriesPerRequest: null` on its connection, which makes
+ * ioredis retry a command forever. Without a bound, a dead Redis does not
+ * throw — it hangs, and the sweeper blocks silently instead of reporting a
+ * failure. A hang is the one outcome worse than an error, because nothing
+ * anywhere says a word.
+ */
+const ENQUEUE_TIMEOUT_MS = 10_000;
+
 export async function enqueueEvent(inboundEventId: string): Promise<void> {
-  // The job id is the row id, so an event enqueued twice — by the endpoint and
-  // then by the sweeper — is one job, not two.
-  await eventsQueue().add(
+  // The job id is derived from the row id, so an event enqueued twice — by the
+  // endpoint and then by the sweeper — is one job, not two.
+  const add = eventsQueue().add(
     "process",
     { inboundEventId },
-    { jobId: `event:${inboundEventId}` },
+    { jobId: eventJobId(inboundEventId) },
   );
+
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Redis did not accept the job within ${ENQUEUE_TIMEOUT_MS}ms`)),
+      ENQUEUE_TIMEOUT_MS,
+    );
+  });
+
+  try {
+    await Promise.race([add, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function closeEventsQueue(): Promise<void> {

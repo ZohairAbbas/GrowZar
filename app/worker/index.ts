@@ -13,6 +13,7 @@ import {
   unscheduleStore,
 } from "~/lib/sync/queue.server";
 import { processEvent } from "~/lib/events/process.server";
+import { describeSweep, sweepStrandedEvents } from "~/lib/events/sweep.server";
 
 /**
  * The sync worker.
@@ -126,32 +127,19 @@ eventsWorker.on("failed", (job, error) => {
  */
 const SWEEP_INTERVAL_MS = 60_000;
 
-async function sweepStrandedEvents() {
-  const stranded = await prisma.inboundEvent.findMany({
-    where: {
-      status: { in: ["PENDING", "FAILED"] },
-      // Give the endpoint's own enqueue a moment to win the race.
-      receivedAt: { lt: new Date(Date.now() - 30_000) },
-    },
-    select: { id: true },
-    take: 100,
-  });
+async function sweep() {
+  const result = await sweepStrandedEvents();
+  if (result.found === 0) return;
 
-  for (const event of stranded) {
-    // The job id is the row id, so re-enqueuing something already queued is a
-    // no-op rather than a second run.
-    await enqueueEvent(event.id).catch(() => {});
-  }
-
-  if (stranded.length > 0) {
-    console.log(`[events] swept ${stranded.length} stranded event(s)`);
+  if (result.failed > 0) {
+    console.error(`${describeSweep(result)} — first error: ${result.firstError}`);
+  } else {
+    console.log(describeSweep(result));
   }
 }
 
 const sweepTimer = setInterval(() => {
-  void sweepStrandedEvents().catch((error) =>
-    console.error("[events] sweep failed", error),
-  );
+  void sweep().catch((error) => console.error("[events] sweep failed", error));
 }, SWEEP_INTERVAL_MS);
 
 async function shutdown(signal: string) {
