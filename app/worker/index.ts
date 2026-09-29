@@ -14,6 +14,7 @@ import {
 } from "~/lib/sync/queue.server";
 import { processEvent } from "~/lib/events/process.server";
 import { describeSweep, sweepStrandedEvents } from "~/lib/events/sweep.server";
+import { rebuildOrderGrain } from "~/lib/metrics/order-grain.server";
 
 /**
  * The sync worker.
@@ -83,6 +84,23 @@ export const syncWorker = new Worker<SyncJob>(
     console.log(
       `[sync] store=${storeId} feeds=${results.length} written=${totals.written} dup=${totals.duplicates} tomb=${totals.tombstoned} skipped=${totals.skipped} snapshots=${totals.snapshots} errors=${totals.errors}`,
     );
+
+    // The order grain is derived from what was just synced (G-GZR2-2), so
+    // it is rebuilt whenever a cycle wrote anything — and when the store has
+    // no grain yet, which is every store the first time this code runs. A
+    // failed rebuild leaves the previous grain in place (it is one
+    // transaction) and is logged as a failure, not swallowed.
+    const hasGrain = await prisma.orderGrain.findFirst({ where: { storeId }, select: { orderId: true } });
+    if (totals.written > 0 || !hasGrain) {
+      try {
+        const grain = await rebuildOrderGrain(storeId);
+        console.log(
+          `[grain] store=${storeId} orders=${grain.orders} parcelsOnly=${grain.fromParcelsOnly} withCustomer=${grain.withCustomer} ms=${grain.ms}`,
+        );
+      } catch (error) {
+        console.error(`[grain] store=${storeId} rebuild FAILED:`, error instanceof Error ? error.message : error);
+      }
+    }
 
     return totals;
   },

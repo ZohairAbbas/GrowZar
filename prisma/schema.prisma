@@ -76,6 +76,7 @@ model Store {
   customers      Customer[]
   orderSnapshots OrderSnapshot[]
   shipmentEvents ShipmentEvent[]
+  orderGrain     OrderGrain[]
 
   @@index([organizationId])
   @@map("stores")
@@ -693,4 +694,68 @@ model ShipmentEvent {
   /// Also the index a parcel's timeline is read through.
   @@unique([storeId, shipmentId, eventKey])
   @@map("shipment_events")
+}
+
+/// The order grain (G-GZR2-2): one row per order, rebuilt from synced rows by
+/// app/lib/metrics/order-grain.server.ts. Every roll-up, screen and Phase 3
+/// detector reads this table; nothing recomputes an order-level fact from
+/// `raw_records` itself.
+///
+/// Derived, so it can always be dropped and rebuilt. `explain` holds, per
+/// field, the rule, the source and the exact input rows.
+model OrderGrain {
+  storeId   String
+  /// Shopify numeric order id, as a string (rule #6).
+  orderId   String
+  /// Display only, never a join key (rule #6).
+  orderName String?
+  createdAt DateTime?
+  /// The store's local day, `YYYY-MM-DD` (rule #5). A string on purpose: a
+  /// Date column invites someone to shift it by a timezone again.
+  localDay  String?
+
+  /// Rule #2: three kinds of revenue in three columns, never one.
+  /// Order money is in the order's own currency (rule #4).
+  currency        String?  @db.Char(3)
+  placedAmount    Decimal? @db.Decimal(18, 6)
+  deliveredAmount Decimal? @db.Decimal(18, 6)
+  refundedAmount  Decimal? @db.Decimal(18, 6)
+  discountsAmount Decimal? @db.Decimal(18, 6)
+  shippingAmount  Decimal? @db.Decimal(18, 6)
+  taxAmount       Decimal? @db.Decimal(18, 6)
+  /// Cash paid by the courier (rule #17), in the COD's currency.
+  collectedAmount   Decimal? @db.Decimal(18, 6)
+  collectedCurrency String?  @db.Char(3)
+  /// Costs are in the shop's currency, which can differ from the order's.
+  cogsAmount         Decimal? @db.Decimal(18, 6)
+  cogsCurrency       String?  @db.Char(3)
+  cogsComplete       Boolean?
+  courierFeeAmount   Decimal? @db.Decimal(18, 6)
+  courierFeeCurrency String?  @db.Char(3)
+  courierFeeSource   String?
+
+  /// delivered | returned | partially_delivered | in_transit | booked |
+  /// shipment_cancelled | order_cancelled | not_shipped | unknown
+  outcome          String
+  /// courierify | financify | none (rule #7)
+  outcomeAuthority String
+  /// happened_on | status_as_of (rule #9)
+  outcomeBasis     String?
+  outcomeAt        DateTime?
+  orderCancelled    Boolean
+  shipmentCancelled Boolean
+
+  confirmation String?
+  customerId   String?
+  parcelCount  Int
+  /// [{ variantId, productId, quantity }] — variant id is the product key (rule #30).
+  lines   Json
+  explain Json
+  builtAt DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@id([storeId, orderId])
+  @@index([storeId, localDay])
+  @@map("order_grain")
 }
