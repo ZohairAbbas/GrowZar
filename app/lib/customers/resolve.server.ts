@@ -49,6 +49,19 @@ export function buyerFromOrderPayload(payload: unknown): BuyerIdentity {
       ? (row.customer as Record<string, unknown>)
       : {};
 
+  // Financify's order rows (G-FIN-5) nest the buyer differently:
+  // `buyer: { phone: { e164, raw } | null, phoneSource }`, with no name or
+  // email. Reading only the flat shapes left every Financify order without a
+  // customer.
+  const buyer =
+    row.buyer && typeof row.buyer === "object"
+      ? (row.buyer as Record<string, unknown>)
+      : {};
+  const buyerPhone =
+    buyer.phone && typeof buyer.phone === "object"
+      ? (buyer.phone as Record<string, unknown>)
+      : {};
+
   const pick = (...candidates: unknown[]): string | null => {
     for (const candidate of candidates) {
       if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
@@ -60,7 +73,16 @@ export function buyerFromOrderPayload(payload: unknown): BuyerIdentity {
   };
 
   return {
-    phone: pick(row.customerPhone, row.phone, customer.phone, row.buyerPhone),
+    phone: pick(
+      row.customerPhone,
+      row.phone,
+      customer.phone,
+      row.buyerPhone,
+      // E.164 first; the raw string only when the app could not normalise it,
+      // so Growzar's own parser gets a go (rule #19).
+      buyerPhone.e164,
+      buyerPhone.raw,
+    ),
     email: pick(row.customerEmail, row.email, customer.email),
     shopifyCustomerId: pick(
       row.shopifyCustomerId,

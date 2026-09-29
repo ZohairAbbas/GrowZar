@@ -106,21 +106,19 @@ const COURIERIFY_FEEDS: EntityFeed[] = [
 ];
 
 /**
- * Financify. Not yet verified against a running app — it has no base URL on
- * this box — so these paths are the contract's reading and may need the same
- * correction Courierify's did.
+ * Financify, verified against the live app on 2026-09-29 for `0dscam-qn`.
+ *
+ * Only orders are a list feed. There is no `/api/v1/costs` — it 404'd — and
+ * COGS arrives on each order row instead (`cogs`, per line, at order-time
+ * cost). Profit settings and ad spend are not incremental lists: settings is
+ * one object per store and ad spend is a date-range read, so the metric layer
+ * reads them when it needs them rather than syncing them here.
  */
 const FINANCIFY_FEEDS: EntityFeed[] = [
   {
     entity: "ORDER",
     path: "/api/v1/orders",
     idFields: ["orderId", "shopifyOrderId", "id"],
-    tombstoneKeys: ["deletedIds"],
-  },
-  {
-    entity: "COST",
-    path: "/api/v1/costs",
-    idFields: ["costId", "id"],
     tombstoneKeys: ["deletedIds"],
   },
 ];
