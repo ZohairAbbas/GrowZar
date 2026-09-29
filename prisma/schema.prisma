@@ -75,6 +75,7 @@ model Store {
   inboundEvents  InboundEvent[]
   customers      Customer[]
   orderSnapshots OrderSnapshot[]
+  shipmentEvents ShipmentEvent[]
 
   @@index([organizationId])
   @@map("stores")
@@ -219,6 +220,11 @@ enum SyncEntity {
   /// OrderConfirmation / VoiceCallLog rather than an order's stage, and it is
   /// what I8 ("unconfirmed orders return more") is built on.
   CONFIRMATION
+  /// Courierify's shipment status event log (G-GZR2-1). Stored at event grain
+  /// in `shipment_events`, not in `raw_records`: it is immutable, it is the
+  /// largest thing Growzar stores, and a JSONB copy of every row would roughly
+  /// double its size for nothing.
+  SHIPMENT_EVENT
 }
 
 enum SyncRunStatus {
@@ -625,4 +631,66 @@ model Invitation {
   @@index([organizationId])
   @@index([email])
   @@map("invitation")
+}
+
+/// One status event of one parcel, from Courierify's event log (G-GZR2-1).
+///
+/// Courierify prunes its backfilled history 90 days after it ran (late
+/// December 2026), so this is Growzar's own copy, not a cache: once the source
+/// is pruned, these rows are the only record of it.
+///
+/// Events are immutable at the source, so there is no update path and no
+/// tombstone. A row here is written once and never changed.
+model ShipmentEvent {
+  id BigInt @id @default(autoincrement())
+  storeId String
+
+  /// Courierify's parcel id — the same id the PARCEL feed is keyed by. A
+  /// parcel is not an order (rule #1).
+  shipmentId String
+  status         String
+  previousStatus String?
+
+  /// `backfill` is reconstructed from Courierify's statusHistory, a
+  /// `tracking_poll` was observed, a `tracking_poll_correction` learned a
+  /// courier time later. A metric that cannot tell these apart cannot explain
+  /// itself, so the value is kept verbatim.
+  source String
+
+  /// When the courier says it happened. **Null when the courier said nothing,
+  /// and never filled in** — a null is what makes a screen say "status as of"
+  /// rather than "delivered on" (rule #9).
+  courierEventAt DateTime?
+  /// When Courierify saw it.
+  observedAt DateTime
+  /// The courier's own words for the status, when it gave any (≤160 chars).
+  raw String?
+
+  /// Courierify's event id. Not the dedupe key (see `eventKey`), but it is the
+  /// tie-break when two events share an `observedAt`, and it is what a person
+  /// tracing a row back to Courierify asks for.
+  sourceEventId BigInt
+  /// Courierify's `createdAt`: when the event was written, which is the
+  /// feed's cursor. For backfilled events it is the day the backfill ran, not
+  /// the day anything happened.
+  sourceCreatedAt DateTime
+  ingestedAt DateTime @default(now())
+
+  /// `status|courierEventAt|observedAt` (epoch ms), with `-` for a null
+  /// courier time.
+  ///
+  /// The pack keys an event by (shipmentId, status, courierEventAt,
+  /// observedAt). A plain unique index over those columns would not dedupe
+  /// anything whose courier time is null — Postgres treats NULLs as distinct —
+  /// and that is 14% of the log. `NULLS NOT DISTINCT` fixes it but cannot be
+  /// written in this schema, so the next `migrate dev` would drop it. This
+  /// column is the same key in a form Prisma knows about. The `-` lives only
+  /// here, never in `courierEventAt`.
+  eventKey String
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  /// Also the index a parcel's timeline is read through.
+  @@unique([storeId, shipmentId, eventKey])
+  @@map("shipment_events")
 }

@@ -13,6 +13,7 @@ import {
 import { recordOrderSnapshot } from "./snapshots.server";
 import { buyerFromOrderPayload, resolveCustomer } from "../customers/resolve.server";
 import { countryFromTimezone } from "../customers/phone";
+import { parseEvent, type ShipmentEventRecord } from "../shipments/events";
 
 /**
  * Incremental sync (API-CONTRACT §6.2).
@@ -29,6 +30,17 @@ const PAGE_LIMIT = 200;
 const MAX_PAGES_PER_RUN = 25;
 /** A run still marked RUNNING after this long is a crashed worker. */
 const LEASE_MS = 10 * 60 * 1000;
+/**
+ * How far before the high-water mark each run starts asking.
+ *
+ * `updatedSince` is already inclusive (§6.2), which covers rows sharing the
+ * boundary timestamp but not a row that committed late with an earlier one.
+ * Courierify's report (finding 11) recommends a five-minute overlap for every
+ * feed; the event log already holds rows back two minutes for the same
+ * reason, and this is the belt beside those braces. It is cheap because the
+ * repeats are deduplicated, not written.
+ */
+const UPDATED_SINCE_OVERLAP_MS = 5 * 60 * 1000;
 
 type ContractPage = {
   shop?: string;
@@ -201,7 +213,7 @@ async function writePage(options: {
 
   for (const row of page.data ?? []) {
     const externalId = extractId(row, feed);
-    const sourceUpdatedAt = extractUpdatedAt(row);
+    const sourceUpdatedAt = extractUpdatedAt(row, feed.updatedAtField);
 
     // A row with no canonical id or no updatedAt cannot be stored safely: it
     // could not be deduplicated, so every run would add another copy. It is
@@ -335,6 +347,67 @@ async function writePage(options: {
   };
 }
 
+type PageOutcome = Awaited<ReturnType<typeof writePage>>;
+
+/**
+ * Write one page of the shipment event log (G-GZR2-1).
+ *
+ * Events are immutable, so this is insert-or-ignore on the event key and
+ * nothing else: no update path, no `lastSeenAt`, no tombstones. One statement
+ * per page rather than one per row, because this feed is the largest thing
+ * Growzar stores and the worker has two connections.
+ *
+ * `courierEventAt` is written exactly as parsed. A null stays null: it is
+ * what makes a screen say "status as of" instead of "delivered on" (rule #9).
+ */
+async function writeShipmentEventsPage(options: {
+  storeId: string;
+  app: SuiteApp;
+  page: ContractPage;
+}): Promise<PageOutcome> {
+  const { storeId, app, page } = options;
+  const events: ShipmentEventRecord[] = [];
+  const rejected = new Map<string, number>();
+  let maxUpdatedAt: Date | null = null;
+
+  for (const row of page.data ?? []) {
+    const parsed = parseEvent(row);
+    if (!parsed.ok) {
+      rejected.set(parsed.reason, (rejected.get(parsed.reason) ?? 0) + 1);
+      continue;
+    }
+    events.push(parsed.event);
+    if (!maxUpdatedAt || parsed.event.sourceCreatedAt > maxUpdatedAt) {
+      maxUpdatedAt = parsed.event.sourceCreatedAt;
+    }
+  }
+
+  // Counted and named, never dropped quietly: a row the feed sends and we
+  // refuse is a contract finding.
+  if (rejected.size > 0) {
+    const detail = [...rejected].map(([reason, n]) => `${reason}=${n}`).join(", ");
+    console.warn(`[sync] ${app}/SHIPMENT_EVENT store=${storeId} rejected rows: ${detail}`);
+  }
+
+  const { count } = events.length
+    ? await prisma.shipmentEvent.createMany({
+        data: events.map((event) => ({ storeId, ...event })),
+        skipDuplicates: true,
+      })
+    : { count: 0 };
+
+  return {
+    written: count,
+    duplicates: events.length - count,
+    skipped: [...rejected.values()].reduce((a, b) => a + b, 0),
+    tombstoned: 0,
+    snapshots: 0,
+    customers: 0,
+    unparseablePhones: 0,
+    maxUpdatedAt,
+  };
+}
+
 /** Sync one feed for one store, resuming wherever the last run stopped. */
 export async function syncFeed(options: {
   storeId: string;
@@ -376,14 +449,15 @@ export async function syncFeed(options: {
 
   try {
     for (let page = 0; page < MAX_PAGES_PER_RUN; page += 1) {
-      const params = new URLSearchParams({ limit: String(PAGE_LIMIT) });
+      const params = new URLSearchParams({ limit: String(feed.pageLimit ?? PAGE_LIMIT) });
       for (const [key, value] of Object.entries(feed.query ?? {})) {
         params.set(key, value);
       }
       if (cursor) {
         params.set("cursor", cursor);
       } else if (state.updatedSince) {
-        params.set("updatedSince", state.updatedSince.toISOString());
+        const since = new Date(state.updatedSince.getTime() - UPDATED_SINCE_OVERLAP_MS);
+        params.set("updatedSince", since.toISOString());
       }
 
       const response = await appRequest<ContractPage>(app, {
@@ -416,13 +490,16 @@ export async function syncFeed(options: {
         select: { country: true },
       });
 
-      const result = await writePage({
-        storeId,
-        app,
-        feed,
-        page: response.data,
-        defaultRegion: store?.country ?? null,
-      });
+      const result =
+        feed.sink === "shipment_events"
+          ? await writeShipmentEventsPage({ storeId, app, page: response.data })
+          : await writePage({
+              storeId,
+              app,
+              feed,
+              page: response.data,
+              defaultRegion: store?.country ?? null,
+            });
       base.written += result.written;
       base.duplicates += result.duplicates;
       base.skipped += result.skipped;
@@ -521,4 +598,9 @@ export async function syncStore(storeId: string): Promise<FeedRunResult[]> {
   return results;
 }
 
-export const SYNC_SETTINGS = { PAGE_LIMIT, MAX_PAGES_PER_RUN, LEASE_MS };
+export const SYNC_SETTINGS = {
+  PAGE_LIMIT,
+  MAX_PAGES_PER_RUN,
+  LEASE_MS,
+  UPDATED_SINCE_OVERLAP_MS,
+};

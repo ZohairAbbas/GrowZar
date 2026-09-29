@@ -41,6 +41,19 @@ export type EntityFeed = {
    * be distinguishable or a mass delete looks like nothing happened.
    */
   tombstoneTruncatedKey?: string;
+  /**
+   * The row field holding its change time, which the cursor and dedupe run
+   * on. `updatedAt` everywhere except the event log, whose rows never change
+   * and so carry only `createdAt`.
+   */
+  updatedAtField?: string;
+  /** Rows per page, where the feed's own default suits it better than ours. */
+  pageLimit?: number;
+  /**
+   * Where rows land. `raw` is `raw_records`, verbatim JSONB, one row per id.
+   * `shipment_events` is the event log's own table (G-GZR2-1).
+   */
+  sink?: "raw" | "shipment_events";
 };
 
 /**
@@ -75,6 +88,20 @@ const COURIERIFY_FEEDS: EntityFeed[] = [
     query: { channel: "whatsapp" },
     idFields: ["confirmationId", "id"],
     tombstoneKeys: ["deletedIds"],
+  },
+  {
+    // The status event log (G-CFY-3). Its backfill is pruned 90 days after it
+    // ran — late December 2026 — so Growzar keeps its own copy.
+    entity: "SHIPMENT_EVENT",
+    path: "/api/v1/growzar/shipment-events",
+    idFields: ["id"],
+    // Events are immutable at the source; there is nothing to tombstone.
+    tombstoneKeys: [],
+    updatedAtField: "createdAt",
+    // Courierify's default and our largest page: 4M rows at 200 a page is
+    // 20k requests, at 500 it is 8k.
+    pageLimit: 500,
+    sink: "shipment_events",
   },
 ];
 
@@ -133,9 +160,9 @@ export function extractId(row: unknown, feed: EntityFeed): string | null {
 }
 
 /** `updatedAt` is mandatory: without it a row cannot be deduplicated (§6.2). */
-export function extractUpdatedAt(row: unknown): Date | null {
+export function extractUpdatedAt(row: unknown, field = "updatedAt"): Date | null {
   if (!row || typeof row !== "object") return null;
-  const value = (row as Record<string, unknown>).updatedAt;
+  const value = (row as Record<string, unknown>)[field];
   if (typeof value !== "string") return null;
 
   const parsed = new Date(value);
