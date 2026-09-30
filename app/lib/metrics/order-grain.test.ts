@@ -212,6 +212,21 @@ describe("rules #10 and #11: returned, cancelled and refunded stay apart", () =>
   });
 });
 
+describe("rule #12: courier, with Financify's carrier as the fallback", () => {
+  it("uses the Courierify parcel's courier when there is one", () => {
+    const g = grain({ parcels: [{ row: parcel("delivered", { courier: "TCS" }), events: [] }] });
+    expect(g.courier).toBe("tcs");
+    expect(g.explain.courier?.source).toContain("courierify");
+  });
+
+  it("falls back to Financify's carrier, prefixed so the spellings are not merged", () => {
+    const g = grain({ order: financify({ delivery: { category: "delivered", status: "DELIVERED", carrier: "NK Fulfilment" } }) });
+    expect(g.courier).toBe("financify:nk fulfilment");
+    expect(g.city).toBeNull();
+    expect(g.explain.city?.note).toMatch(/Financify does not expose a delivery city/);
+  });
+});
+
 describe("rules #13, #14: costs from Financify", () => {
   it("leaves an unpriced courier fee null with its reason, never zero", () => {
     const g = grain();

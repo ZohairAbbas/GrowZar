@@ -15,6 +15,7 @@ import {
 import { processEvent } from "~/lib/events/process.server";
 import { describeSweep, sweepStrandedEvents } from "~/lib/events/sweep.server";
 import { rebuildOrderGrain } from "~/lib/metrics/order-grain.server";
+import { refreshAdSpend } from "~/lib/metrics/ad-spend.server";
 
 /**
  * The sync worker.
@@ -100,6 +101,21 @@ export const syncWorker = new Worker<SyncJob>(
       } catch (error) {
         console.error(`[grain] store=${storeId} rebuild FAILED:`, error instanceof Error ? error.message : error);
       }
+    }
+
+    // Ad spend (G-GZR2-3): trailing days hourly, older days once each,
+    // outside business hours. Its own try, so a Financify hiccup costs the
+    // ad numbers and not the orders.
+    try {
+      const ads = await refreshAdSpend(storeId);
+      if (ads.fetched.length || ads.problems.length) {
+        console.log(
+          `[ads] store=${storeId} fetched=${ads.fetched.length} (${ads.fetched[0] ?? ""}…${ads.fetched.at(-1) ?? ""})` +
+            (ads.problems.length ? ` problems: ${ads.problems.slice(0, 3).join("; ")}` : ""),
+        );
+      }
+    } catch (error) {
+      console.error(`[ads] store=${storeId} refresh FAILED:`, error instanceof Error ? error.message : error);
     }
 
     return totals;

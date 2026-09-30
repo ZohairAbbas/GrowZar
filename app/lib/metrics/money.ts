@@ -69,6 +69,17 @@ export function addMoney(a: Money, b: Money): Money {
   };
 }
 
+/** An amount times a whole quantity, exactly. */
+export function timesQuantity(m: Money, quantity: number): Money {
+  if (!Number.isInteger(quantity)) throw new Error(`quantity must be whole, got ${quantity}`);
+  return { amount: formatAmount(parseAmount(m.amount)! * BigInt(quantity)), currency: m.currency };
+}
+
+export function subtractMoney(a: Money, b: Money): Money {
+  if (a.currency !== b.currency) throw new CurrencyMismatchError(a.currency, b.currency);
+  return { amount: formatAmount(parseAmount(a.amount)! - parseAmount(b.amount)!), currency: a.currency };
+}
+
 export function isPositive(m: Money | null): boolean {
   return m !== null && parseAmount(m.amount)! > 0n;
 }

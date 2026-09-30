@@ -117,6 +117,9 @@ function toRow(storeId: string, g: OrderGrain): Prisma.OrderGrainCreateManyInput
     confirmation: g.confirmation,
     customerId: g.customerId,
     parcelCount: g.parcelCount,
+    courier: g.courier,
+    city: g.city,
+    cityRaw: g.cityRaw,
     lines: g.lines as Prisma.InputJsonValue,
     explain: g.explain as Prisma.InputJsonValue,
   };

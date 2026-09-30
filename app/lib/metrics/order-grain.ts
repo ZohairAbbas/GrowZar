@@ -15,7 +15,7 @@ import {
   currentStatusTiming,
   type StatusTiming,
 } from "../shipments/events";
-import { formatAmount, isPositive, parseAmount, readMoney, type Money } from "./money";
+import { formatAmount, isPositive, parseAmount, readMoney, subtractMoney, timesQuantity, type Money } from "./money";
 
 /** A synced row as the grain sees it. */
 export type SourceRow = {
@@ -101,8 +101,35 @@ export type OrderGrain = {
   confirmation: string | null;
   customerId: string | null;
   parcelCount: number;
+  /**
+   * The courier that carried it: the first Courierify parcel that was not
+   * cancelled, else Financify's `delivery.carrier` (rule #7's fallback). The
+   * two apps spell couriers differently ("nkfulfillment" / "NK Fulfilment"),
+   * so a Financify carrier is kept as `financify:<lower-case name>` rather
+   * than merged by guesswork. Null when neither knows.
+   */
+  courier: string | null;
+  /**
+   * Courierify's canonical city (its tehsil mapping), or null when the raw
+   * spelling did not map — a roll-up groups those as "unmapped", never as a
+   * city of their own ("Lahore" arrives in 13 spellings on one store).
+   */
+  city: string | null;
+  cityRaw: string | null;
   /** Rule #30: variant id is the product key; SKU is display-only. */
-  lines: Array<{ variantId: string | null; productId: string | null; quantity: number }>;
+  /**
+   * `value` is the line's own price × quantity less its own discount; an
+   * order-level discount is not in it, so lines need not sum to `placed`.
+   * `cost` is the order-time unit cost × quantity (rule #14). Either is null
+   * when Financify did not send it.
+   */
+  lines: Array<{
+    variantId: string | null;
+    productId: string | null;
+    quantity: number;
+    value: Money | null;
+    cost: Money | null;
+  }>;
 
   explain: Record<string, Explain>;
 };
@@ -415,13 +442,56 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     note: input.customer ? `matched by ${input.customer.via}` : "no usable buyer identity",
   };
 
+  // ── Courier and city (rule #12) ─────────────────────────────────────────
+  // The first parcel that was not cancelled decides both; an order whose
+  // parcels were all cancelled still went somewhere, so fall back to the
+  // first parcel.
+  const deciding = parcels.find((p) => p.row.payload.status !== "cancelled") ?? parcels[0];
+  const couriers = [...new Set(parcels.map((p) => courierOf(p.row)).filter(Boolean))];
+  const carrier = typeof obj(fin?.delivery).carrier === "string" ? String(obj(fin?.delivery).carrier).trim() : "";
+  const financifyCarrier = carrier ? `financify:${carrier.toLowerCase()}` : null;
+  explain.courier = deciding
+    ? {
+        rule: ["#7", "#12"],
+        source: "courierify.shipments.courier",
+        inputs: [ref(deciding.row, "courier")],
+        note: couriers.length > 1 ? `parcels went with ${couriers.join(", ")}; the first live parcel's courier is used` : undefined,
+      }
+    : {
+        rule: ["#7", "#12"],
+        source: "financify.orders.delivery.carrier",
+        inputs: order && carrier ? [ref(order, "delivery.carrier")] : [],
+        note: carrier
+          ? "no Courierify parcel; Financify's carrier name, not merged with Courierify's spelling"
+          : "no parcel and no carrier",
+      };
+  const city = deciding ? cityOf(deciding.row) : null;
+  explain.city = {
+    rule: ["#12"],
+    source: "courierify.shipments.city.canonical",
+    inputs: deciding ? [ref(deciding.row, "city")] : [],
+    note: !deciding
+      ? "no Courierify parcel, and Financify does not expose a delivery city"
+      : city?.canonical
+        ? `mapped by ${city.match ?? "Courierify"}`
+        : "Courierify's tehsil mapping has no match for this spelling: unmapped",
+  };
+
   const lines = Array.isArray(fin?.lineItems)
     ? (fin!.lineItems as unknown[]).map((l) => {
         const line = obj(l);
+        const quantity = typeof line.quantity === "number" && Number.isInteger(line.quantity) ? line.quantity : 0;
+        const unitPrice = readMoney(line.unitPrice);
+        const unitCost = readMoney(line.unitCost);
+        const discount = readMoney(line.totalDiscount);
+        let value = unitPrice ? timesQuantity(unitPrice, quantity) : null;
+        if (value && discount && discount.currency === value.currency) value = subtractMoney(value, discount);
         return {
           variantId: typeof line.variantId === "string" ? line.variantId : null,
           productId: typeof line.productId === "string" ? line.productId : null,
-          quantity: typeof line.quantity === "number" ? line.quantity : 0,
+          quantity,
+          value,
+          cost: unitCost ? timesQuantity(unitCost, quantity) : null,
         };
       })
     : [];
@@ -451,6 +521,9 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     confirmation,
     customerId: input.customer?.id ?? null,
     parcelCount: parcels.length,
+    courier: deciding ? courierOf(deciding.row) : financifyCarrier,
+    city: deciding ? cityOf(deciding.row).canonical : null,
+    cityRaw: deciding ? cityOf(deciding.row).raw : null,
     lines,
     explain,
   };
@@ -458,3 +531,14 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
 
 /** Whether the order was refunded at all (rule #10), for counting. */
 export const wasRefunded = (row: Pick<OrderGrain, "refunded">) => isPositive(row.refunded);
+
+function courierOf(row: SourceRow): string | null {
+  const c = row.payload.courier;
+  return typeof c === "string" && c.trim() ? c.trim().toLowerCase() : null;
+}
+
+function cityOf(row: SourceRow): { canonical: string | null; raw: string | null; match: string | null } {
+  const c = obj(row.payload.city);
+  const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  return { canonical: text(c.canonical), raw: text(c.raw), match: text(c.match) };
+}

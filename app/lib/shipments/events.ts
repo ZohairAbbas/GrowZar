@@ -196,6 +196,22 @@ export function currentStatusTiming(
  */
 export const MIN_TIMED_PARCELS_PER_COURIER = 30;
 
+/**
+ * The one place that decides whether a courier has enough courier-timed
+ * history for a per-courier timing metric. Parcel-level coverage (above) and
+ * the order-level roll-up both call it, so the threshold cannot drift.
+ */
+export function coverageVerdict(
+  timed: number,
+  minimum = MIN_TIMED_PARCELS_PER_COURIER,
+):
+  | { verdict: "ok" }
+  | { verdict: "not_enough_data"; reason: "no_courier_history" | "too_few_parcels" } {
+  if (timed === 0) return { verdict: "not_enough_data", reason: "no_courier_history" };
+  if (timed < minimum) return { verdict: "not_enough_data", reason: "too_few_parcels" };
+  return { verdict: "ok" };
+}
+
 export type CourierCoverage =
   | {
       courier: string;
@@ -247,12 +263,7 @@ export function courierCoverage(
         parcelsWithEvents: c.withEvents,
         parcelsWithCourierTime: c.timed,
       };
-      if (c.timed === 0) {
-        return { ...base, verdict: "not_enough_data", reason: "no_courier_history" } as const;
-      }
-      if (c.timed < minimum) {
-        return { ...base, verdict: "not_enough_data", reason: "too_few_parcels" } as const;
-      }
-      return { ...base, verdict: "ok" } as const;
+      const verdict = coverageVerdict(c.timed, minimum);
+      return { ...base, ...verdict } as CourierCoverage;
     });
 }
