@@ -78,6 +78,7 @@ model Store {
   shipmentEvents ShipmentEvent[]
   orderGrain     OrderGrain[]
   adSpend        AdSpend[]
+  profitSettings StoreProfitSettings?
 
   @@index([organizationId])
   @@map("stores")
@@ -802,4 +803,25 @@ model AdSpend {
 
   @@id([storeId, day, level, key])
   @@map("ad_spend")
+}
+
+/// A store's profit settings in Financify, as last read from
+/// `/api/v1/settings/profit` (rule #15, G-GZR2-4).
+///
+/// Five hidden per-store settings change what Financify's "net profit"
+/// means. A roll-up across stores compares `settingsHash`; two different
+/// hashes are flagged, never silently added. A store without Financify has
+/// no row, which a roll-up reports as "settings unknown".
+model StoreProfitSettings {
+  storeId      String   @id
+  settingsHash String
+  /// `{ costBasis: { key, value }, … }` as Financify sent it.
+  settings     Json
+  /// Which settings are still Financify's defaults.
+  isDefault    Json
+  fetchedAt    DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@map("store_profit_settings")
 }

@@ -16,6 +16,7 @@ import { processEvent } from "~/lib/events/process.server";
 import { describeSweep, sweepStrandedEvents } from "~/lib/events/sweep.server";
 import { rebuildOrderGrain } from "~/lib/metrics/order-grain.server";
 import { refreshAdSpend } from "~/lib/metrics/ad-spend.server";
+import { refreshProfitSettings } from "~/lib/metrics/summaries.server";
 
 /**
  * The sync worker.
@@ -121,6 +122,16 @@ export const syncWorker = new Worker<SyncJob>(
       }
     } catch (error) {
       console.error(`[ads] store=${storeId} refresh FAILED:`, error instanceof Error ? error.message : error);
+    }
+
+    // Profit settings (rule #15), hourly: an organization roll-up compares
+    // them across stores.
+    try {
+      if ((await refreshProfitSettings(storeId)) === "fetched") {
+        console.log(`[settings] store=${storeId} profit settings refreshed`);
+      }
+    } catch (error) {
+      console.error(`[settings] store=${storeId} refresh FAILED:`, error instanceof Error ? error.message : error);
     }
 
     return totals;
