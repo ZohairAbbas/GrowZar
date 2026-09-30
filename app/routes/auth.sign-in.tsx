@@ -17,10 +17,10 @@ export function meta() {
   return [{ title: "Sign in · Growzar" }];
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, url }: Route.LoaderArgs) {
   const session = await getSession(request);
   if (session) {
-    throw redirect(safeRedirectPath(new URL(request.url).searchParams.get("next")));
+    throw redirect(safeRedirectPath(url.searchParams.get("next")));
   }
   return null;
 }

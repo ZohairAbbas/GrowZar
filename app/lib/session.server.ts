@@ -1,6 +1,7 @@
 import { redirect } from "react-router";
 
 import { auth } from "./auth.server";
+import { appPathWithSearch } from "./redirects";
 
 /**
  * Session helpers for loaders and actions.
@@ -17,8 +18,8 @@ export async function getSession(request: Request) {
 export async function requireUser(request: Request) {
   const session = await getSession(request);
   if (!session) {
-    const url = new URL(request.url);
-    const next = `${url.pathname}${url.search}`;
+    // The page, not the `.data` endpoint of a client-side navigation.
+    const next = appPathWithSearch(request);
     throw redirect(
       `/auth/sign-in?next=${encodeURIComponent(next)}`,
     );
@@ -66,8 +67,7 @@ export async function requireOrganization(request: Request): Promise<{
   // Returning here would render this page against a stale cookie and every
   // organization-scoped call in the loader would still see no active
   // organization. Bouncing through the same URL carries the cookie out.
-  const url = new URL(request.url);
-  throw redirectWithCookies(response, `${url.pathname}${url.search}`);
+  throw redirectWithCookies(response, appPathWithSearch(request));
 }
 
 /**

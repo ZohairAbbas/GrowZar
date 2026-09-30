@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { safeRedirectPath } from "./redirects";
+import { appPathWithSearch, appUrl, safeRedirectPath } from "./redirects";
 
 describe("safeRedirectPath", () => {
   it("keeps a path on this host", () => {
@@ -37,3 +37,26 @@ describe("safeRedirectPath", () => {
     );
   });
 });
+
+describe("appUrl: the page a request is for, not React Router's data endpoint", () => {
+  it("strips the .data suffix of a client-side navigation", () => {
+    expect(appUrl("https://portal.growzar.com/finance.data?_routes=routes%2Fshell%2Csection-finance").pathname).toBe("/finance");
+  });
+
+  it("strips the trailing-slash form /_.data", () => {
+    expect(appUrl("https://portal.growzar.com/_.data").pathname).toBe("/");
+  });
+
+  it("keeps the page's own query and drops _routes", () => {
+    expect(appPathWithSearch("https://portal.growzar.com/finance.data?days=90&_routes=x")).toBe("/finance?days=90");
+  });
+
+  it("leaves a document request alone", () => {
+    expect(appPathWithSearch("https://portal.growzar.com/orders?days=7")).toBe("/orders?days=7");
+  });
+
+  it("does not strip .data from the middle of a path", () => {
+    expect(appUrl("https://portal.growzar.com/stores/a.data.b").pathname).toBe("/stores/a.data.b");
+  });
+});
+

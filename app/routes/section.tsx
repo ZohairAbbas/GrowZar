@@ -51,8 +51,12 @@ function sectionFromPath(pathname: string): Section {
     : "home";
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
-  const section = sectionFromPath(new URL(request.url).pathname);
+export async function loader({ request, url }: Route.LoaderArgs) {
+  // `url`, not `request.url`: a client-side navigation requests
+  // `/finance.data?_routes=…`, and reading that raw path made every section
+  // fall back to Home's data while the address bar said Finance. React Router
+  // normalises `url` for exactly this; `request.url` is the raw wire request.
+  const section = sectionFromPath(url.pathname);
   const definition = SECTION_DEFINITIONS[section];
 
   const viewer = await requireSection(request, section, "view");
@@ -101,7 +105,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   // stay on the server.
   let metrics: Awaited<ReturnType<typeof buildMetrics>> = null;
   if (state.kind === "open" && active && METRIC_SECTIONS.has(section)) {
-    metrics = await buildMetrics(section, active.id, new URL(request.url));
+    metrics = await buildMetrics(section, active.id, url);
   }
 
   return {

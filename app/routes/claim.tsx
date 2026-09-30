@@ -23,8 +23,7 @@ export function meta() {
  * `<noscript>` path — a merchant with scripts blocked gets an explanation
  * rather than a blank screen.
  */
-export async function loader({ request }: Route.LoaderArgs) {
-  const url = new URL(request.url);
+export async function loader({ url }: Route.LoaderArgs) {
 
   // An app that puts the token in the query string is not following §10. Say
   // so rather than accepting it: honouring it here would make the logged copy

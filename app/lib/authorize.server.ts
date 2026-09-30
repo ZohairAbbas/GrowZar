@@ -1,6 +1,7 @@
 import { auth } from "./auth.server";
 import { prisma } from "./db.server";
 import { redirectWithCookies, requireOrganization } from "./session.server";
+import { appPathWithSearch } from "./redirects";
 import { isStoreInScope, resolveScopedStoreIds, storeScopeFilter } from "./scope";
 import type { Action, Section } from "./permissions";
 
@@ -164,8 +165,7 @@ export async function requireStore(
         headers: request.headers,
         asResponse: true,
       });
-      const url = new URL(request.url);
-      throw redirectWithCookies(activated, `${url.pathname}${url.search}`);
+      throw redirectWithCookies(activated, appPathWithSearch(request));
     }
 
     throw new Forbidden("That store is not available to you.");
