@@ -147,6 +147,30 @@ export function bucketOf(key: string, list: readonly RollupOrder[]): Bucket {
   return b;
 }
 
+/**
+ * Average order value (rule #3), derived from #1 and #2: placed revenue ÷ the
+ * orders that have a placed total, per currency, rounded half-up to the cent.
+ * An order with no total (Courierify-only, rule #2) is not counted as zero,
+ * which would drag the average down by the stores that lack Financify.
+ */
+export function averageOrderValue(orders: readonly RollupOrder[]): Money[] {
+  const by = new Map<string, { units: bigint; n: bigint }>();
+  for (const o of orders) {
+    if (!o.placed) continue;
+    const e = by.get(o.placed.currency) ?? { units: 0n, n: 0n };
+    e.units += parseAmount(o.placed.amount)!;
+    e.n += 1n;
+    by.set(o.placed.currency, e);
+  }
+  const CENT = 10_000n; // millionths per cent
+  return [...by]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, { units, n }]) => {
+      const cents = (units / CENT * 2n + n) / (2n * n); // half-up, in cents
+      return { amount: formatAmount(cents * CENT), currency };
+    });
+}
+
 // ── Keys ────────────────────────────────────────────────────────────────────
 
 export const byDay = (o: RollupOrder) => [o.localDay ?? "unknown day"];
