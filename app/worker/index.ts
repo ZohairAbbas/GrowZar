@@ -37,6 +37,9 @@ const connection = new IORedis(process.env.REDIS_URL ?? "redis://127.0.0.1:6379"
 });
 
 
+/** Stores whose grain this process has rebuilt; see the rebuild below. */
+const grainRebuiltSinceStart = new Set<string>();
+
 export const syncWorker = new Worker<SyncJob>(
   SYNC_QUEUE,
   async (job) => {
@@ -87,14 +90,16 @@ export const syncWorker = new Worker<SyncJob>(
     );
 
     // The order grain is derived from what was just synced (G-GZR2-2), so
-    // it is rebuilt whenever a cycle wrote anything — and when the store has
-    // no grain yet, which is every store the first time this code runs. A
-    // failed rebuild leaves the previous grain in place (it is one
-    // transaction) and is logged as a failure, not swallowed.
-    const hasGrain = await prisma.orderGrain.findFirst({ where: { storeId }, select: { orderId: true } });
-    if (totals.written > 0 || !hasGrain) {
+    // it is rebuilt whenever a cycle wrote anything, and once per store after
+    // the worker starts. The second condition is what carries a change to
+    // the grain's *code* into stored rows: without it, the G-GZR2-3 deploy
+    // left every store's grain on the old builder until new orders happened
+    // to arrive. A failed rebuild leaves the previous grain in place (it is
+    // one transaction) and is logged as a failure, not swallowed.
+    if (totals.written > 0 || !grainRebuiltSinceStart.has(storeId)) {
       try {
         const grain = await rebuildOrderGrain(storeId);
+        grainRebuiltSinceStart.add(storeId);
         console.log(
           `[grain] store=${storeId} orders=${grain.orders} parcelsOnly=${grain.fromParcelsOnly} withCustomer=${grain.withCustomer} ms=${grain.ms}`,
         );
