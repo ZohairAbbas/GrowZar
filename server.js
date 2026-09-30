@@ -51,6 +51,14 @@ app.all(
 const port = Number(process.env.PORT ?? 3020);
 const host = process.env.HOST ?? "127.0.0.1";
 
-app.listen(port, host, () => {
+// Express 5 calls this callback on failure too, with the error. Ignoring the
+// argument logged "listening" for a server that had failed to bind its port
+// (found 2026-09-30 when a second instance hit the port in use), so a failed
+// start has to say so and exit non-zero for systemd to see it.
+app.listen(port, host, (error) => {
+  if (error) {
+    console.error(`[web] could not listen on http://${host}:${port}: ${error.message}`);
+    process.exit(1);
+  }
   console.log(`[web] Growzar listening on http://${host}:${port}`);
 });
