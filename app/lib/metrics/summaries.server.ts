@@ -123,7 +123,13 @@ export async function storeSummary(storeId: string, from: string, to: string): P
     ? profitAfterReturns(orders, store.currency, complete ? spendWithFees : null)
     : null;
   if (profit && adSpend && !complete) {
-    profit.missing.push(`ad spend fetched for ${adSpend.daysFetched} of ${adSpend.daysInPeriod} day(s)`);
+    // One fact, one line: say how much of the period's ad spend is fetched
+    // instead of a bare "not available" beside it.
+    profit.missing = profit.missing.map((m) =>
+      m === "ad spend not available"
+        ? `ad spend fetched for ${adSpend.daysFetched} of ${adSpend.daysInPeriod} day(s), so not subtracted`
+        : m,
+    );
   }
 
   const shipped = rows.filter((r) => ["delivered", "returned", "partially_delivered", "in_transit"].includes(r.outcome));

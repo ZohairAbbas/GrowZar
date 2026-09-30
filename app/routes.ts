@@ -63,6 +63,7 @@ export default [
       route("team", "routes/settings.team.tsx"),
       route("team/:memberId", "routes/settings.team.$memberId.tsx"),
       route("roles", "routes/settings.roles.tsx"),
+      route("profit", "routes/settings.profit.tsx"),
     ]),
   ]),
 

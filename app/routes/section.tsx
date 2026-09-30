@@ -11,6 +11,24 @@ import {
   sectionState,
 } from "~/lib/sections";
 import { readStoreCookie } from "~/lib/store-cookie.server";
+import { storeSummary } from "~/lib/metrics/summaries.server";
+import {
+  PERIODS,
+  customersView,
+  financeView,
+  homeView,
+  ordersView,
+  periodFrom,
+  shippingView,
+} from "~/lib/metrics/screens.server";
+import {
+  CustomersPanel,
+  FinancePanel,
+  HomePanel,
+  OrdersPanel,
+  ShippingPanel,
+} from "~/components/metrics/SectionPanels";
+import { PeriodPicker } from "~/components/metrics/Metrics";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   return [{ title: loaderData ? `${loaderData.label} · Growzar` : "Growzar" }];
@@ -78,6 +96,14 @@ export async function loader({ request }: Route.LoaderArgs) {
         })
       : null;
 
+  // G-GZR2-5: an open section shows the metric layer for the active store.
+  // One view per request, built from storeSummary; the order rows it reads
+  // stay on the server.
+  let metrics: Awaited<ReturnType<typeof buildMetrics>> = null;
+  if (state.kind === "open" && active && METRIC_SECTIONS.has(section)) {
+    metrics = await buildMetrics(section, active.id, new URL(request.url));
+  }
+
   return {
     section,
     label: definition.label,
@@ -103,19 +129,60 @@ export async function loader({ request }: Route.LoaderArgs) {
       })),
     })),
     customerCount,
+    metrics,
   };
 }
 
+const METRIC_SECTIONS = new Set<Section>(["home", "finance", "orders", "shipping", "customers"]);
+
+async function buildMetrics(section: Section, storeId: string, url: URL) {
+  const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { timezone: true } });
+  const period = periodFrom(url, store.timezone);
+  const summary = await storeSummary(storeId, period.from, period.to);
+  const base = { period, periods: PERIODS };
+  switch (section) {
+    case "home":
+      return { ...base, kind: "home" as const, view: homeView(summary) };
+    case "finance":
+      return { ...base, kind: "finance" as const, view: financeView(summary) };
+    case "orders":
+      return { ...base, kind: "orders" as const, view: await ordersView(storeId, period.from, period.to) };
+    case "shipping":
+      return { ...base, kind: "shipping" as const, view: shippingView(summary) };
+    case "customers":
+      return { ...base, kind: "customers" as const, view: await customersView(storeId, summary) };
+    default:
+      return null;
+  }
+}
+
 export default function SectionPage({ loaderData }: Route.ComponentProps) {
-  const { label, blurb, preview, state, section, homeStores, customerCount } =
+  const { label, blurb, preview, state, section, homeStores, customerCount, metrics, storeName } =
     loaderData;
 
   return (
     <div>
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900">{label}</h1>
-        <p className="mt-1 text-sm text-gray-600">{blurb}</p>
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">{label}</h1>
+          <p className="mt-1 text-sm text-gray-600">{blurb}</p>
+        </div>
+        {metrics ? <PeriodPicker days={metrics.period.days} options={metrics.periods} /> : null}
       </header>
+
+      {metrics ? (
+        <div className="mb-6 space-y-4">
+          <p className="text-xs text-gray-500">
+            {storeName} · {metrics.period.from} to {metrics.period.to}, the store's own days (
+            {metrics.period.timezoneKnown ? metrics.period.timezone : "timezone not reported yet, shown in UTC"})
+          </p>
+          {metrics.kind === "home" ? <HomePanel view={metrics.view} /> : null}
+          {metrics.kind === "finance" ? <FinancePanel view={metrics.view} /> : null}
+          {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} /> : null}
+          {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} /> : null}
+          {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} /> : null}
+        </div>
+      ) : null}
 
       {state.kind === "locked" ? (
         <section className="rounded-2xl border border-gray-200 bg-white p-8">
@@ -226,7 +293,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
         </section>
       ) : null}
 
-      {state.kind === "open" && section !== "home" ? (
+      {state.kind === "open" && section !== "home" && !metrics ? (
         <section className="rounded-2xl border border-gray-200 bg-white p-8">
           <h2 className="text-lg font-semibold text-gray-900">
             Connected and collecting

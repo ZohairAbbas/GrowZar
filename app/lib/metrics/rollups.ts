@@ -31,6 +31,8 @@ export type RollupOrder = Pick<
   | "courier"
   | "city"
   | "lines"
+  | "confirmation"
+  | "customerId"
 >;
 
 const OPEN: Outcome[] = ["in_transit", "booked", "not_shipped"];

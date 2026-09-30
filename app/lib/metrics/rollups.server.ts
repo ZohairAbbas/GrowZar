@@ -38,6 +38,8 @@ export function toRollupOrder(row: OrderGrainRow): RollupOrder {
     parcelCount: row.parcelCount,
     courier: row.courier,
     city: row.city,
+    confirmation: row.confirmation,
+    customerId: row.customerId,
     lines: lines.map((l) => ({
       variantId: l.variantId ?? null,
       productId: l.productId ?? null,

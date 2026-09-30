@@ -37,6 +37,8 @@ function order(o: Partial<RollupOrder> = {}): RollupOrder {
     courier: "tcs",
     city: "Lahore",
     lines: [{ variantId: "v1", productId: "p1", quantity: 1, value: pkr("1000.00"), cost: pkr("300.00") }],
+    confirmation: "confirmed",
+    customerId: null,
     ...o,
   };
 }
