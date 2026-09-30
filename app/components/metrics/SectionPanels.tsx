@@ -111,8 +111,9 @@ export function FinancePanel({ view }: { view: FinanceView }) {
               {!p.complete ? <span className="ml-2 align-middle text-sm font-medium text-amber-700">at most</span> : null}
             </p>
             <p className="mt-1 text-sm text-gray-600">
-              Delivered revenue {p.parts.deliveredRevenue} − product cost {p.parts.cogsDelivered} − courier fees{" "}
-              {p.parts.courierFees} − ads {p.parts.adSpend ?? "not subtracted"}
+              Delivered revenue {formatAmount(p.parts.deliveredRevenue)} − product cost {formatAmount(p.parts.cogsDelivered)} −
+              courier fees {formatAmount(p.parts.courierFees)} − ads{" "}
+              {p.parts.adSpend !== null ? formatAmount(p.parts.adSpend) : "not subtracted"}
               {view.roas !== null ? ` · ROAS ${view.roas.toFixed(2)} (delivered revenue ÷ ad spend)` : ""}
             </p>
             {p.missing.length ? (
