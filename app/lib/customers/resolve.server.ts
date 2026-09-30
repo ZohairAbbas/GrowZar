@@ -82,6 +82,11 @@ export function buyerFromOrderPayload(payload: unknown): BuyerIdentity {
       // so Growzar's own parser gets a go (rule #19).
       buyerPhone.e164,
       buyerPhone.raw,
+      // Courierify sends `phone` in E.164 only "when unambiguous" and null
+      // otherwise — foreign numbers, on the pilot store — with the original
+      // in `phoneRaw`. Ignoring it left those buyers with no customer at all
+      // (found by the Courierify reconciliation, 2026-09-30).
+      customer.phoneRaw,
     ),
     email: pick(row.customerEmail, row.email, customer.email),
     shopifyCustomerId: pick(

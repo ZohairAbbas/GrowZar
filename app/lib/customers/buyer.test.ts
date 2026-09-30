@@ -27,4 +27,10 @@ describe("buyerFromOrderPayload", () => {
   it("has no phone when Financify sends buyer.phone null", () => {
     expect(buyerFromOrderPayload({ buyer: { phone: null } }).phone).toBeNull();
   });
+
+  it("falls back to Courierify's phoneRaw when it sent no E.164 phone", () => {
+    expect(
+      buyerFromOrderPayload({ customer: { name: "Test Buyer", phone: null, phoneRaw: "+91 90000 00001" } }).phone,
+    ).toBe("+91 90000 00001");
+  });
 });
