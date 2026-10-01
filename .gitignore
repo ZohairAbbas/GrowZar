@@ -10,3 +10,9 @@ coverage/
 
 # Build output
 build/
+
+# curl cookie jars written by the acceptance scripts (session tokens)
+c_*.txt
+own.txt
+stf.txt
+*.cookies
