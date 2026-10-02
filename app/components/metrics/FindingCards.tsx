@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { Link } from "react-router";
+import { useState, type ReactNode } from "react";
+import { Link, useFetcher } from "react-router";
 import { ArrowRight } from "lucide-react";
 
 import type {
@@ -11,7 +11,63 @@ import type {
   VariantReturnsFinding,
   VariantRate,
 } from "~/lib/metrics/findings";
+import type { InboxView } from "~/lib/insights/inbox.server";
+import { DISMISS_REASONS } from "~/lib/insights/actions";
 import { formatAmount, MoneyList, outcomeLabel } from "./Metrics";
+
+/** Through the click-through route, which records the click (G-GZR3-3). */
+const via = (id: string, to: string) => `/insights/${id}/open?to=${encodeURIComponent(to)}`;
+
+const REASONS = Object.entries(DISMISS_REASONS);
+
+function InsightActions({ id }: { id: string }) {
+  const fetcher = useFetcher();
+  const [dismissing, setDismissing] = useState(false);
+  const busy = fetcher.state !== "idle";
+  const button = "rounded-md border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:border-gray-300 hover:text-gray-900 disabled:opacity-50";
+  return (
+    <div className="mt-4 border-t border-gray-100 pt-3">
+      {dismissing ? (
+        <fetcher.Form method="post" action={`/insights/${id}`} className="flex flex-wrap items-center gap-2">
+          <input type="hidden" name="intent" value="dismiss" />
+          <label className="text-xs text-gray-600" htmlFor={`reason-${id}`}>
+            Why?
+          </label>
+          <select id={`reason-${id}`} name="reason" required defaultValue="" className="rounded-md border border-gray-200 px-2 py-1 text-xs">
+            <option value="" disabled>
+              Choose a reason
+            </option>
+            {REASONS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <input name="note" maxLength={500} placeholder="Note (optional)" className="min-w-0 flex-1 rounded-md border border-gray-200 px-2 py-1 text-xs" />
+          <button type="submit" disabled={busy} className={button}>
+            Dismiss
+          </button>
+          <button type="button" onClick={() => setDismissing(false)} className="text-xs text-gray-500 hover:underline">
+            Cancel
+          </button>
+        </fetcher.Form>
+      ) : (
+        <fetcher.Form method="post" action={`/insights/${id}`} className="flex flex-wrap items-center gap-2">
+          <input type="hidden" name="intent" value="snooze" />
+          <button type="button" disabled={busy} onClick={() => setDismissing(true)} className={button}>
+            Dismiss…
+          </button>
+          <button type="submit" name="days" value="7" disabled={busy} className={button}>
+            Snooze 7 days
+          </button>
+          <button type="submit" name="days" value="30" disabled={busy} className={button}>
+            Snooze 30 days
+          </button>
+        </fetcher.Form>
+      )}
+    </div>
+  );
+}
 
 /**
  * Home's cross-app findings (G-GZR3-1). Plain cards: what was found, the
@@ -24,16 +80,31 @@ type Money = { amount: string; currency: string };
 const money = (m: Money) => `${formatAmount(m.amount)} ${m.currency}`;
 const n = (x: number) => x.toLocaleString("en-GB");
 
-function Card({ title, children, link }: { title: ReactNode; children: ReactNode; link?: { to: string; label: string } }) {
+type CardProps = { id: string; days: number; canManage: boolean };
+
+function Card({
+  title,
+  children,
+  link,
+  id,
+  canManage,
+}: {
+  title: ReactNode;
+  children: ReactNode;
+  link?: { to: string; label: string };
+  id: string;
+  canManage: boolean;
+}) {
   return (
     <article className="rounded-2xl border border-gray-200 bg-white p-5">
       <h3 className="text-base font-semibold text-gray-900">{title}</h3>
       <div className="mt-2 space-y-2 text-sm text-gray-700">{children}</div>
       {link ? (
-        <Link to={link.to} className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary-600 hover:underline">
+        <Link to={via(id, link.to)} className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary-600 hover:underline">
           {link.label} <ArrowRight className="h-3.5 w-3.5" />
         </Link>
       ) : null}
+      {canManage ? <InsightActions id={id} /> : null}
     </article>
   );
 }
@@ -61,9 +132,11 @@ function Sources({ by, extra }: { by: DecidedBy; extra?: string }) {
   );
 }
 
-function DisagreementCard({ f, days }: { f: DisagreementFinding; days: number }) {
+function DisagreementCard({ f, days, id, canManage }: { f: DisagreementFinding } & CardProps) {
   return (
     <Card
+      id={id}
+      canManage={canManage}
       title={`Courierify and Financify disagree on what happened to ${n(f.total)} orders`}
       link={{ to: `/orders?days=${days}&disagree=1`, label: `See the ${n(f.total)} orders` }}
     >
@@ -79,9 +152,11 @@ function DisagreementCard({ f, days }: { f: DisagreementFinding; days: number })
               Financify says <strong>{outcomeLabel(g.financify).toLowerCase()}</strong>, the courier says{" "}
               <strong>{outcomeLabel(g.courier).toLowerCase()}</strong>
             </span>
-            <span className="text-xs text-gray-500">
-              placed value <MoneyList values={g.placed} />
-            </span>
+            {g.placed.length ? (
+              <span className="text-xs text-gray-500">
+                placed value <MoneyList values={g.placed} />
+              </span>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -96,14 +171,14 @@ function DisagreementCard({ f, days }: { f: DisagreementFinding; days: number })
 const rateLine = (v: VariantRate) =>
   `${v.returnRate.toFixed(1)}% returned (${n(v.returned)} of ${n(v.decided)} decided orders${v.stillOpen ? `, ${n(v.stillOpen)} still open` : ""})`;
 
-function VariantCard({ f, days }: { f: VariantReturnsFinding; days: number }) {
+function VariantCard({ f, days, id, canManage }: { f: VariantReturnsFinding } & CardProps) {
   return (
-    <Card title={`${f.flagged.length === 1 ? "A product comes" : `${f.flagged.length} products come`} back far more often than the rest`}>
+    <Card id={id} canManage={canManage} title={`${f.flagged.length === 1 ? "A product comes" : `${f.flagged.length} products come`} back far more often than the rest`}>
       <ul className="space-y-1.5">
         {f.flagged.map((v) => (
           <li key={v.variantId}>
             <span className="font-medium">{v.title ?? `Variant ${v.variantId}`}</span>: {rateLine(v)}{" "}
-            <Link to={`/orders?days=${days}&variant=${v.variantId}`} className="whitespace-nowrap text-primary-600 hover:underline">
+            <Link to={via(id, `/orders?days=${days}&variant=${v.variantId}`)} className="whitespace-nowrap text-primary-600 hover:underline">
               see orders
             </Link>
           </li>
@@ -135,7 +210,7 @@ function VariantCard({ f, days }: { f: VariantReturnsFinding; days: number }) {
   );
 }
 
-function MarginCard({ f, days }: { f: MarginFinding; days: number }) {
+function MarginCard({ f, days, id, canManage }: { f: MarginFinding } & CardProps) {
   const negative = f.ceiling.amount.startsWith("-");
   const leaves: ReactNode[] = [
     `Courier fees on ${n(f.feesUnknown.orders)} of ${n(f.feesUnknown.shipped)} shipped orders: not recorded.`,
@@ -145,6 +220,8 @@ function MarginCard({ f, days }: { f: MarginFinding; days: number }) {
   if (f.excludedCurrencies.length) leaves.push(`Orders in ${f.excludedCurrencies.join(", ")} are left out, not converted.`);
   return (
     <Card
+      id={id}
+      canManage={canManage}
       title={`Ads took ${f.adsShareOfDelivered.toFixed(1)}% of delivered revenue`}
       link={{ to: `/finance?days=${days}`, label: "See the arithmetic" }}
     >
@@ -169,9 +246,11 @@ function MarginCard({ f, days }: { f: MarginFinding; days: number }) {
   );
 }
 
-function CourierifyStoppedCard({ f, days }: { f: CourierifyStoppedFinding; days: number }) {
+function CourierifyStoppedCard({ f, days, id, canManage }: { f: CourierifyStoppedFinding } & CardProps) {
   return (
     <Card
+      id={id}
+      canManage={canManage}
       title={`Orders stopped going through Courierify after ${f.lastParcelDay}`}
       link={{ to: `/orders?days=${days}&decidedBy=financify`, label: "See the orders Courierify did not ship" }}
     >
@@ -187,7 +266,8 @@ function CourierifyStoppedCard({ f, days }: { f: CourierifyStoppedFinding; days:
   );
 }
 
-export function FindingCards({ findings, days, from, to }: { findings: Finding[]; days: number; from: string; to: string }) {
+export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string; to: string }) {
+  const reopen = useFetcher();
   return (
     <section className="space-y-3" aria-labelledby="findings-heading">
       <div>
@@ -196,28 +276,71 @@ export function FindingCards({ findings, days, from, to }: { findings: Finding[]
         </h2>
         <p className="text-xs text-gray-500">
           {from} to {to}. Measured from your connected apps, each with the orders behind it. Recommendations and
-          estimates of what each is worth come once each finding has been checked against past data.
+          estimates of what each is worth come once each finding has been checked against past data. Every finding so far
+          comes from one store's history.
         </p>
       </div>
-      {findings.length === 0 ? (
+      {inbox.items.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-gray-300 bg-white p-5 text-sm text-gray-600">
-          Nothing in this period passed its checks. Each finding needs enough orders before it says anything; try a
-          longer period.
+          Nothing to show in this period. What was checked, and why it found nothing, is listed below.
         </p>
       ) : (
-        findings.map((f) => {
+        inbox.items.map(({ id, insight }) => {
+          const props = { id, days: inbox.days, canManage: inbox.canManage };
+          const f = insight.finding;
           switch (f.kind) {
             case "disagreements":
-              return <DisagreementCard key={f.kind} f={f} days={days} />;
+              return <DisagreementCard key={id} f={f} {...props} />;
             case "variant_returns":
-              return <VariantCard key={f.kind} f={f} days={days} />;
+              return <VariantCard key={id} f={f} {...props} />;
             case "margin":
-              return <MarginCard key={f.kind} f={f} days={days} />;
+              return <MarginCard key={id} f={f} {...props} />;
             case "courierify_stopped":
-              return <CourierifyStoppedCard key={f.kind} f={f} days={days} />;
+              return <CourierifyStoppedCard key={id} f={f} {...props} />;
           }
         })
       )}
+      {inbox.overflow ? (
+        <p className="text-xs text-gray-500">{n(inbox.overflow)} more found; dismiss or snooze one to see the next.</p>
+      ) : null}
+      {inbox.hidden.length ? (
+        <details className="rounded-xl border border-gray-200 bg-white p-3.5 text-sm">
+          <summary className="cursor-pointer text-gray-700">Dismissed and snoozed ({n(inbox.hidden.length)})</summary>
+          <ul className="mt-2 space-y-1.5">
+            {inbox.hidden.map((h) => (
+              <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
+                <span>
+                  {h.label} ·{" "}
+                  {h.status === "dismissed"
+                    ? `dismissed: ${REASONS.find(([v]) => v === h.reason)?.[1] ?? "no reason"}`
+                    : `snoozed until ${h.snoozedUntil?.slice(0, 10)}`}
+                </span>
+                {inbox.canManage ? (
+                  <reopen.Form method="post" action={`/insights/${h.id}`}>
+                    <input type="hidden" name="intent" value="reopen" />
+                    <button type="submit" className="text-primary-600 hover:underline">
+                      Reopen
+                    </button>
+                  </reopen.Form>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+      {inbox.checked.length ? (
+        <details className="rounded-xl border border-gray-200 bg-white p-3.5 text-sm">
+          <summary className="cursor-pointer text-gray-700">Also checked ({n(inbox.checked.length)})</summary>
+          <ul className="mt-2 space-y-1.5 text-xs text-gray-600">
+            {inbox.checked.map((c) => (
+              <li key={c.label}>
+                <span className="font-medium text-gray-700">{c.label}</span>:{" "}
+                {c.status === "nothing_found" ? "nothing found" : c.status === "not_enough_data" ? "not enough data" : "locked"} ({c.text}).
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </section>
   );
 }

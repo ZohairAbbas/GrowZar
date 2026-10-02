@@ -4,8 +4,8 @@ import { prisma } from "../db.server";
 import { localDayOf } from "./order-grain";
 import { byCity, byCourier, courierTiming, rollup, type DeliveryRate } from "./rollups";
 import { storeSummary, type StoreSummary } from "./summaries.server";
-import { formatAmount, parseAmount, sumByCurrency, type Money } from "./money";
-import { findings, matchesFilter, type Finding, type OrderFilter } from "./findings";
+import { formatAmount, parseAmount, type Money } from "./money";
+import { matchesFilter, type OrderFilter } from "./findings";
 import { toRollupOrder } from "./rollups.server";
 
 /**
@@ -21,11 +21,11 @@ import { toRollupOrder } from "./rollups.server";
 export const PERIODS = [7, 30, 60, 90] as const;
 export type PeriodDays = (typeof PERIODS)[number];
 
-export function periodFrom(url: URL, timezone: string | null) {
+export function periodFrom(url: URL, timezone: string | null, at: Date = new Date()) {
   const asked = Number(url.searchParams.get("days"));
   const days: PeriodDays = (PERIODS as readonly number[]).includes(asked) ? (asked as PeriodDays) : 30;
   const tz = timezone ?? "UTC";
-  const now = Date.now();
+  const now = at.getTime();
   return {
     days,
     from: localDayOf(new Date(now - (days - 1) * 86_400_000), tz),
@@ -218,39 +218,6 @@ export async function ordersView(
     shown: latest.length,
     filter: null,
     financifySays: {},
-  };
-}
-
-// ── Home: cross-app findings (G-GZR3-1) ─────────────────────────────────────
-
-export type FindingsView = { findings: Finding[]; days: number };
-
-export async function findingsView(s: StoreSummary, days: number): Promise<FindingsView> {
-  const [courierify, lastParcel] = await Promise.all([
-    prisma.appConnection.findFirst({
-      where: { storeId: s.store.id, app: "COURIERIFY", status: "CONNECTED" },
-      select: { app: true },
-    }),
-    prisma.orderGrain.findFirst({
-      where: { storeId: s.store.id, parcelCount: { gt: 0 }, localDay: { not: null } },
-      orderBy: { localDay: "desc" },
-      select: { localDay: true },
-    }),
-  ]);
-  const ads = s.adSpend;
-  const complete = ads && ads.daysFetched === ads.daysInPeriod;
-  return {
-    days,
-    findings: findings({
-      currency: s.store.currency,
-      rows: s.rows,
-      orders: s.orders,
-      profit: s.profit,
-      // The same ad spend the profit subtracted: with platform fees, and only
-      // when every day of the period is fetched.
-      adSpend: complete ? sumByCurrency([...ads.spend, ...ads.fees]) : null,
-      courierify: { connected: courierify !== null, lastParcelDay: lastParcel?.localDay ?? null },
-    }),
   };
 }
 

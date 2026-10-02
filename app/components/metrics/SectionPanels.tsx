@@ -2,7 +2,6 @@ import { Link } from "react-router";
 import type {
   CustomersView,
   FinanceView,
-  FindingsView,
   HomeView,
   OrdersView,
   ShippingView,
@@ -17,7 +16,8 @@ import {
   outcomeLabel,
   Stat,
 } from "./Metrics";
-import { FindingCards } from "./FindingCards";
+import { InboxCards } from "./FindingCards";
+import type { InboxView } from "~/lib/insights/inbox.server";
 
 /**
  * The open state of each section (G-GZR2-5): read-only, from the metric
@@ -29,18 +29,18 @@ import { FindingCards } from "./FindingCards";
 
 export function HomePanel({
   view,
-  findings,
+  inbox,
   period,
 }: {
   view: HomeView;
-  findings: FindingsView;
+  inbox: InboxView;
   period: { from: string; to: string };
 }) {
   // The Courierify card says what the coverage notice says, with a link.
-  const stopped = findings.findings.some((f) => f.kind === "courierify_stopped");
+  const stopped = inbox.items.some((i) => i.insight.finding.kind === "courierify_stopped");
   return (
     <section className="space-y-6">
-      <FindingCards findings={findings.findings} days={findings.days} from={period.from} to={period.to} />
+      <InboxCards inbox={inbox} from={period.from} to={period.to} />
       <div className="space-y-3">
       <div className="rounded-2xl border border-gray-200 bg-white p-5">
         <ol className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

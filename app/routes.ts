@@ -43,6 +43,10 @@ export default [
 
   route("switch", "routes/switch.ts"),
 
+  // The insight inbox's actions and click-through (G-GZR3-3).
+  route("insights/:insightId", "routes/insights.$insightId.tsx"),
+  route("insights/:insightId/open", "routes/insights.$insightId.open.tsx"),
+
   // The app shell and its sections (G-GZR-6). One module serves all eight
   // non-settings sections; each needs its own route id because they share it.
   layout("routes/shell.tsx", [

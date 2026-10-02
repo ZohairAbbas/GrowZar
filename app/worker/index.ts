@@ -15,6 +15,7 @@ import {
 import { processEvent } from "~/lib/events/process.server";
 import { describeSweep, sweepStrandedEvents } from "~/lib/events/sweep.server";
 import { rebuildOrderGrain } from "~/lib/metrics/order-grain.server";
+import { evaluateStore } from "~/lib/insights/inbox.server";
 import { refreshAdSpend } from "~/lib/metrics/ad-spend.server";
 import { refreshProfitSettings } from "~/lib/metrics/summaries.server";
 
@@ -104,6 +105,17 @@ export const syncWorker = new Worker<SyncJob>(
         console.log(
           `[grain] store=${storeId} orders=${grain.orders} parcelsOnly=${grain.fromParcelsOnly} withCustomer=${grain.withCustomer} ms=${grain.ms}`,
         );
+        // Insights read the grain, so they are evaluated when it changes
+        // (G-GZR3-3). Its own try: a detector failing must not look like a
+        // grain failure, nor stop the rest of the cycle.
+        try {
+          const e = await evaluateStore(storeId);
+          console.log(
+            `[insights] store=${storeId} found=${e.found} new=${e.created} resolved=${e.resolved} reappeared=${e.reappeared} ms=${e.ms}`,
+          );
+        } catch (error) {
+          console.error(`[insights] store=${storeId} evaluation FAILED:`, error instanceof Error ? error.message : error);
+        }
       } catch (error) {
         console.error(`[grain] store=${storeId} rebuild FAILED:`, error instanceof Error ? error.message : error);
       }

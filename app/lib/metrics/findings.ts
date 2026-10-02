@@ -112,6 +112,16 @@ export type CourierifyStoppedFinding = {
 
 export type Finding = MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding;
 
+/**
+ * Why a finding is absent (G-GZR3-3). "Not enough data" and "checked, nothing
+ * found" are different answers, and the inbox shows which one it was rather
+ * than an empty space.
+ */
+export type Skip = { kind: "skip"; status: "not_enough_data" | "nothing_found"; reason: string };
+const notEnough = (reason: string): Skip => ({ kind: "skip", status: "not_enough_data", reason });
+const nothing = (reason: string): Skip => ({ kind: "skip", status: "nothing_found", reason });
+export const isSkip = (x: Finding | Skip): x is Skip => x.kind === "skip";
+
 export type FindingsInput = {
   /** The store's own currency (rule #4); a finding about money needs it. */
   currency: string | null;
@@ -147,16 +157,21 @@ function pick(list: Money[], currency: string): Money {
  * courier fees are unknown on most orders and no source records the cost of
  * a return; but open orders can still raise it, so it says that too.
  */
-export function marginFinding(input: FindingsInput): MarginFinding | null {
+export function marginFinding(input: FindingsInput): MarginFinding | Skip {
   const { currency, profit, adSpend, orders, rows } = input;
-  if (!currency || !profit || !adSpend) return null;
+  if (!currency || !profit) return notEnough("the store's currency has not been reported");
+  if (!adSpend) return notEnough("ad spend is not fetched for every day of this period");
   const revenue = parseAmount(pick(orders.deliveredRevenue, currency).amount)!;
-  if (revenue <= 0n) return null;
+  if (revenue <= 0n) return notEnough("no delivered revenue in this period");
   const ads = pick(adSpend, currency);
 
   const inCurrency = rows.filter((o) => o.currency === currency);
   const open = inCurrency.filter((o) => OPEN.includes(o.outcome));
-  if (open.length > MAX_OPEN_SHARE_FOR_MARGIN * inCurrency.length) return null;
+  if (open.length > MAX_OPEN_SHARE_FOR_MARGIN * inCurrency.length) {
+    return notEnough(
+      `${open.length} of ${inCurrency.length} orders are still open; this needs at most ${MAX_OPEN_SHARE_FOR_MARGIN * 100}%, so try a longer period`,
+    );
+  }
   return {
     kind: "margin",
     ceiling: { amount: profit.amount, currency },
@@ -197,13 +212,13 @@ function variantTitle(rows: readonly RollupOrder[], variantId: string): string |
  * rate. By order (rule #29): no source says which line of a returned order
  * came back, so a returned order counts against every variant in it.
  */
-export function variantReturnsFinding(input: FindingsInput): VariantReturnsFinding | null {
+export function variantReturnsFinding(input: FindingsInput): VariantReturnsFinding | Skip {
   const { currency } = input;
-  if (!currency) return null;
+  if (!currency) return notEnough("the store's currency has not been reported");
   const rows = input.rows.filter(domestic(currency));
   const decided = rows.filter((o) => DECIDED.includes(o.outcome));
   const returned = decided.filter((o) => o.outcome === "returned").length;
-  if (!decided.length) return null;
+  if (!decided.length) return notEnough("no delivered or returned orders in this period");
   const storeRate = pct(returned, decided.length);
 
   const rates: VariantRate[] = productLines(rows)
@@ -225,7 +240,12 @@ export function variantReturnsFinding(input: FindingsInput): VariantReturnsFindi
   const flagged = rates
     .filter((v) => v.returnRate - storeRate >= MIN_RETURN_GAP_POINTS)
     .sort((a, b) => b.returnRate - a.returnRate);
-  if (!flagged.length) return null;
+  if (!rates.length) return notEnough(`no product has ${MIN_DECIDED_PER_VARIANT} delivered or returned orders in this period`);
+  if (!flagged.length) {
+    return nothing(
+      `none of ${rates.length} product(s) returns ${MIN_RETURN_GAP_POINTS}+ points above the store's ${storeRate.toFixed(1)}%`,
+    );
+  }
 
   const flaggedIds = new Set(flagged.map((v) => v.variantId));
   const behind = rows.filter((o) => DECIDED.includes(o.outcome) && o.lines.some((l) => l.variantId && flaggedIds.has(l.variantId)));
@@ -254,10 +274,13 @@ export function disagrees(o: RollupOrder): boolean {
  * disagree on what happened. Courierify decides (rule #7); the card shows
  * what Financify's own screens count differently.
  */
-export function disagreementFinding(input: FindingsInput): DisagreementFinding | null {
+export function disagreementFinding(input: FindingsInput): DisagreementFinding | Skip {
   const both = input.rows.filter((o) => fromCourierify(o) && o.financifyOutcome);
+  if (!both.length) return notEnough("no order in this period is known to both Courierify and Financify");
   const found = both.filter(disagrees);
-  if (found.length < MIN_DISAGREEMENTS) return null;
+  if (found.length < MIN_DISAGREEMENTS) {
+    return nothing(`${found.length} material disagreement(s) among ${both.length} orders both apps know; it takes ${MIN_DISAGREEMENTS}`);
+  }
 
   const groups = new Map<string, RollupOrder[]>();
   for (const o of found) {
@@ -283,12 +306,16 @@ export function disagreementFinding(input: FindingsInput): DisagreementFinding |
  * still arrive, from Financify, but courier times, city and courier fees do
  * not, and every other card loses its Courierify half.
  */
-export function courierifyStoppedFinding(input: FindingsInput): CourierifyStoppedFinding | null {
+export function courierifyStoppedFinding(input: FindingsInput): CourierifyStoppedFinding | Skip {
   const { connected, lastParcelDay } = input.courierify;
-  if (!connected || !lastParcelDay) return null;
+  if (!connected) return nothing("Courierify is not connected");
+  if (!lastParcelDay) return nothing("the store has never shipped through Courierify");
   const shipped = input.rows.filter((o) => SHIPPED.includes(o.outcome));
   const withParcel = shipped.filter(fromCourierify).length;
-  if (shipped.length < MIN_SHIPPED_FOR_COVERAGE || withParcel / shipped.length >= 0.5) return null;
+  if (shipped.length < MIN_SHIPPED_FOR_COVERAGE) {
+    return notEnough(`${shipped.length} shipped order(s) in this period; it takes ${MIN_SHIPPED_FOR_COVERAGE}`);
+  }
+  if (withParcel / shipped.length >= 0.5) return nothing(`${withParcel} of ${shipped.length} shipped orders went through Courierify`);
   return {
     kind: "courierify_stopped",
     lastParcelDay,
@@ -298,14 +325,14 @@ export function courierifyStoppedFinding(input: FindingsInput): CourierifyStoppe
   };
 }
 
-/** Every finding that passes its gate, in a fixed order until G-GZR3-3 ranks them. */
+/** Every finding that passes its gate. Ranking lives in app/lib/insights. */
 export function findings(input: FindingsInput): Finding[] {
   return [
     disagreementFinding(input),
     variantReturnsFinding(input),
     marginFinding(input),
     courierifyStoppedFinding(input),
-  ].filter((f): f is Finding => f !== null);
+  ].filter((f): f is Finding => !isSkip(f));
 }
 
 // ── Drill-down: the same predicates, for the Orders list ─────────────────────

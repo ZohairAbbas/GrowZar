@@ -79,6 +79,7 @@ model Store {
   orderGrain     OrderGrain[]
   adSpend        AdSpend[]
   profitSettings StoreProfitSettings?
+  insights       Insight[]
 
   @@index([organizationId])
   @@map("stores")
@@ -832,4 +833,69 @@ model StoreProfitSettings {
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
   @@map("store_profit_settings")
+}
+
+/// The insight inbox (G-GZR3-3): one row per store × finding subject, so a
+/// dismissal or snooze sticks to "this product's returns" across runs.
+///
+/// Written by the worker's evaluation after each grain rebuild (90 days,
+/// which decides `lastSeenAt` and `resolvedAt`) and by Home, which creates a
+/// row the first time it shows a finding so it can be acted on.
+model Insight {
+  id          String @id @default(uuid())
+  storeId     String
+  /// `detector:subject`, e.g. `variant_returns:45428908949606`.
+  fingerprint String
+  detector    String
+  subject     String
+
+  /// open | dismissed | snoozed. A snooze past `snoozedUntil` reads as open.
+  status          String    @default("open")
+  snoozedUntil    DateTime?
+  /// wrong | already_knew | not_relevant | other: training data (DECISION-LAYER §5).
+  dismissedReason String?
+  dismissedNote   String?
+  /// Who last dismissed, snoozed or reopened it.
+  actedByUserId   String?
+  actedAt         DateTime?
+
+  firstSeenAt  DateTime  @default(now())
+  /// The last evaluation that found it.
+  lastSeenAt   DateTime  @default(now())
+  /// Set when an evaluation stops finding it; cleared if it comes back. The
+  /// success measure's "underlying state changed" (PLAN.md §9), observed,
+  /// not attributed to any action.
+  resolvedAt   DateTime?
+  /// The few numbers the last evaluation saw (`evidenceOf`).
+  lastEvidence Json      @default("{}")
+
+  store  Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  events InsightEvent[]
+
+  @@unique([storeId, fingerprint])
+  @@index([storeId, status])
+  @@map("insights")
+}
+
+/// What happened to an insight: shown → clicked → dismissed | snoozed |
+/// reopened, and resolved | reappeared from evaluations (PLAN.md §9).
+/// "shown" is recorded at most once per user, insight and store-local day.
+model InsightEvent {
+  id         String   @id @default(uuid())
+  insightId  String
+  storeId    String
+  kind       String
+  userId     String?
+  /// The period the viewer had chosen (7, 30, 60 or 90 days).
+  periodDays Int?
+  /// Set only on "shown", as the store-local day: the dedupe key.
+  day        String?
+  detail     Json?
+  at         DateTime @default(now())
+
+  insight Insight @relation(fields: [insightId], references: [id], onDelete: Cascade)
+
+  @@unique([insightId, kind, userId, day])
+  @@index([storeId, at])
+  @@map("insight_events")
 }

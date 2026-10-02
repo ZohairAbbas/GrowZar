@@ -3,7 +3,8 @@ import { Check, Clock, Lock } from "lucide-react";
 
 import type { Route } from "./+types/section";
 import { prisma } from "~/lib/db.server";
-import { listVisibleStores, requireSection } from "~/lib/authorize.server";
+import { hasPermission, listVisibleStores, requireSection } from "~/lib/authorize.server";
+import { inboxView } from "~/lib/insights/inbox.server";
 import { SECTIONS, type Section } from "~/lib/permissions";
 import {
   APP_LABELS,
@@ -16,7 +17,6 @@ import {
   PERIODS,
   customersView,
   financeView,
-  findingsView,
   homeView,
   ordersView,
   periodFrom,
@@ -107,7 +107,12 @@ export async function loader({ request, url }: Route.LoaderArgs) {
   // stay on the server.
   let metrics: Awaited<ReturnType<typeof buildMetrics>> = null;
   if (state.kind === "open" && active && METRIC_SECTIONS.has(section)) {
-    metrics = await buildMetrics(section, active.id, url);
+    metrics = await buildMetrics(section, active.id, url, async () => ({
+      userId: viewer.userId,
+      // Money on Home only for a role that may see Finance (staff may not).
+      canSeeMoney: await hasPermission(request, viewer.organizationId, "finance", "view"),
+      canManage: await hasPermission(request, viewer.organizationId, "home", "manage"),
+    }));
   }
 
   return {
@@ -141,7 +146,12 @@ export async function loader({ request, url }: Route.LoaderArgs) {
 
 const METRIC_SECTIONS = new Set<Section>(["home", "finance", "orders", "shipping", "customers"]);
 
-async function buildMetrics(section: Section, storeId: string, url: URL) {
+async function buildMetrics(
+  section: Section,
+  storeId: string,
+  url: URL,
+  inboxViewer: () => Promise<Parameters<typeof inboxView>[2]>,
+) {
   const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { timezone: true } });
   const period = periodFrom(url, store.timezone);
   const summary = await storeSummary(storeId, period.from, period.to);
@@ -154,7 +164,7 @@ async function buildMetrics(section: Section, storeId: string, url: URL) {
         ...base,
         kind: "home" as const,
         view: homeView(summary),
-        findings: await findingsView(summary, period.days),
+        inbox: await inboxView(summary, period.days, await inboxViewer()),
       };
     case "finance":
       return { ...base, kind: "finance" as const, view: financeView(summary) };
@@ -189,7 +199,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             {storeName} · {metrics.period.from} to {metrics.period.to}, the store's own days (
             {metrics.period.timezoneKnown ? metrics.period.timezone : "timezone not reported yet, shown in UTC"})
           </p>
-          {metrics.kind === "home" ? <HomePanel view={metrics.view} findings={metrics.findings} period={metrics.period} /> : null}
+          {metrics.kind === "home" ? <HomePanel view={metrics.view} inbox={metrics.inbox} period={metrics.period} /> : null}
           {metrics.kind === "finance" ? <FinancePanel view={metrics.view} /> : null}
           {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} days={metrics.period.days} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} /> : null}

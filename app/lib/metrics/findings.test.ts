@@ -8,7 +8,9 @@ import {
   matchesFilter,
   parseOrderFilter,
   variantReturnsFinding,
+  type Finding,
   type FindingsInput,
+  type Skip,
 } from "./findings";
 import { bucketOf, profitAfterReturns, type RollupOrder } from "./rollups";
 
@@ -52,6 +54,11 @@ const line = (variantId: string, title: string) => [
   { variantId, productId: `p${variantId}`, title, quantity: 1, value: pkr("1000.00"), cost: pkr("300.00") },
 ];
 
+function found<T extends Finding>(x: T | Skip): T {
+  if (x.kind === "skip") throw new Error(`expected a finding, got: ${x.reason}`);
+  return x;
+}
+
 function input(rows: RollupOrder[], o: Partial<FindingsInput> = {}): FindingsInput {
   const orders = bucketOf("store", rows);
   const adSpend = "adSpend" in o ? o.adSpend! : [pkr("600.00")];
@@ -68,7 +75,7 @@ function input(rows: RollupOrder[], o: Partial<FindingsInput> = {}): FindingsInp
 
 describe("card (a): where delivered revenue went, as a ceiling", () => {
   it("subtracts COGS and ads from delivered revenue, and says how much ads took", () => {
-    const f = marginFinding(input([order(), order(), returned()]))!;
+    const f = found(marginFinding(input([order(), order(), returned()])));
     expect(f.deliveredRevenue).toEqual(pkr("2000.00"));
     expect(f.cogsDelivered).toEqual(pkr("600.00"));
     expect(f.ceiling).toEqual(pkr("800.00"));
@@ -77,7 +84,7 @@ describe("card (a): where delivered revenue went, as a ceiling", () => {
 
   it("says fees are unknown, and counts open orders as able to raise it, not lower it", () => {
     const rows = [...times(6, () => order()), returned(), open({ placed: pkr("450.00") })];
-    const f = marginFinding(input(rows))!;
+    const f = found(marginFinding(input(rows)));
     expect(f.feesUnknown).toEqual({ orders: 8, shipped: 8 });
     expect(f.stillOpen).toEqual({ orders: 1, placed: pkr("450.00") });
   });
@@ -85,20 +92,20 @@ describe("card (a): where delivered revenue went, as a ceiling", () => {
   it("is absent while more than 15% of the period's orders are still open, rather than reading as a loss", () => {
     // 2 of 12 open (16.7%): ads are counted in full, most revenue is not in yet.
     const young = [...times(10, () => order()), open(), open()];
-    expect(marginFinding(input(young))).toBeNull();
-    expect(marginFinding(input([...young, order(), order()]))).not.toBeNull(); // 2 of 14
+    expect(marginFinding(input(young))).toMatchObject({ kind: "skip", status: "not_enough_data" });
+    expect(marginFinding(input([...young, order(), order()]))).not.toHaveProperty("kind", "skip"); // 2 of 14
   });
 
   it("is absent without the whole period's ad spend, rather than a figure that leaves ads out", () => {
-    expect(marginFinding(input([order()], { adSpend: null }))).toBeNull();
+    expect(marginFinding(input([order()], { adSpend: null }))).toMatchObject({ kind: "skip", status: "not_enough_data" });
   });
 
   it("is absent with no delivered revenue", () => {
-    expect(marginFinding(input([open(), returned()]))).toBeNull();
+    expect(marginFinding(input([open(), returned()]))).toMatchObject({ kind: "skip", status: "not_enough_data" });
   });
 
   it("names which app decided the outcomes", () => {
-    const f = marginFinding(input([order({ parcelCount: 1 }), ...times(6, () => order())]))!;
+    const f = found(marginFinding(input([order({ parcelCount: 1 }), ...times(6, () => order())])));
     expect(f.decidedBy).toEqual({ courierify: 1, financify: 6 });
   });
 });
@@ -114,7 +121,7 @@ describe("card (b): variants that return far more than the store", () => {
   ];
 
   it("flags a variant ≥ 10 points above the store's own return rate, with its sample", () => {
-    const f = variantReturnsFinding(input(rows))!;
+    const f = found(variantReturnsFinding(input(rows)));
     expect(f.store).toEqual({ returned: 38, decided: 100, returnRate: 38 });
     expect(f.flagged).toEqual([
       { variantId: "2", title: "Desk lamp", returned: 18, decided: 30, stillOpen: 0, returnRate: 60 },
@@ -127,12 +134,16 @@ describe("card (b): variants that return far more than the store", () => {
       times(5, () => order({ lines: line("3", "Rare vase") })),
       times(24, () => returned({ lines: line("3", "Rare vase") })),
     );
-    expect(variantReturnsFinding(input(small))).toBeNull();
+    // The vase (29 decided) is not compared; the mug is, and is not flagged.
+    expect(variantReturnsFinding(input(small))).toMatchObject({ kind: "skip", status: "nothing_found", reason: expect.stringMatching(/none of 1 product/) });
+    // With no product at 30, it is not enough data rather than "nothing found".
+    const tiny = times(29, () => returned({ lines: line("3", "Rare vase") }));
+    expect(variantReturnsFinding(input(tiny))).toMatchObject({ kind: "skip", status: "not_enough_data" });
   });
 
   it("leaves international orders out instead of counting them as open", () => {
     const aed = times(40, () => open({ currency: "AED", placed: { amount: "50.00", currency: "AED" }, lines: line("2", "Desk lamp") }));
-    const f = variantReturnsFinding(input([...rows, ...aed]))!;
+    const f = found(variantReturnsFinding(input([...rows, ...aed])));
     expect(f.internationalExcluded).toBe(40);
     expect(f.flagged[0]!.stillOpen).toBe(0);
   });
@@ -158,7 +169,7 @@ describe("card (c): where Courierify and Financify disagree", () => {
   ];
 
   it("counts only material disagreements on orders both apps know", () => {
-    const f = disagreementFinding(input(rows))!;
+    const f = found(disagreementFinding(input(rows)));
     expect(f.total).toBe(5);
     expect(f.bothApps).toBe(15);
     expect(f.groups).toEqual([
@@ -168,7 +179,7 @@ describe("card (c): where Courierify and Financify disagree", () => {
   });
 
   it("stays silent below five", () => {
-    expect(disagreementFinding(input(rows.slice(1)))).toBeNull();
+    expect(disagreementFinding(input(rows.slice(1)))).toMatchObject({ kind: "skip", status: "nothing_found" });
   });
 
   it("lists exactly the orders it counted when its link is followed", () => {
@@ -180,17 +191,17 @@ describe("card (d): the store stopped booking through Courierify", () => {
   const shipped = [...times(3, () => order({ parcelCount: 1 })), ...times(17, () => order())];
 
   it("says so when under half of shipped orders had a parcel", () => {
-    const f = courierifyStoppedFinding(input(shipped, { courierify: { connected: true, lastParcelDay: "2026-09-01" } }))!;
+    const f = found(courierifyStoppedFinding(input(shipped, { courierify: { connected: true, lastParcelDay: "2026-09-01" } })));
     expect(f).toMatchObject({ lastParcelDay: "2026-09-01", shipped: 20, withParcel: 3 });
   });
 
   it("says nothing for a store that never used Courierify, or isn't connected to it", () => {
-    expect(courierifyStoppedFinding(input(shipped, { courierify: { connected: true, lastParcelDay: null } }))).toBeNull();
-    expect(courierifyStoppedFinding(input(shipped, { courierify: { connected: false, lastParcelDay: "2026-09-01" } }))).toBeNull();
+    expect(courierifyStoppedFinding(input(shipped, { courierify: { connected: true, lastParcelDay: null } }))).toMatchObject({ kind: "skip", status: "nothing_found" });
+    expect(courierifyStoppedFinding(input(shipped, { courierify: { connected: false, lastParcelDay: "2026-09-01" } }))).toMatchObject({ kind: "skip", status: "nothing_found" });
   });
 
   it("needs 20 shipped orders", () => {
-    expect(courierifyStoppedFinding(input(shipped.slice(1), { courierify: { connected: true, lastParcelDay: "2026-09-01" } }))).toBeNull();
+    expect(courierifyStoppedFinding(input(shipped.slice(1), { courierify: { connected: true, lastParcelDay: "2026-09-01" } }))).toMatchObject({ kind: "skip", status: "not_enough_data" });
   });
 });
 
