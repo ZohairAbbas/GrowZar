@@ -412,8 +412,11 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     inputs: order ? [ref(order, "cogs")] : [],
     note: cogsObj.complete === false ? `${String(cogsObj.linesMissingCost)} line(s) have no cost` : undefined,
   };
+  // Financify nests the money: `courierFee: { amount: { amount, currency },
+  // source }`. Reading `courierFee` itself as money dropped all 908 priced
+  // fees on 0dscam-qn until G-GZR3-1 (the rule #13 fixture had it flat).
   const feeObj = obj(fin?.courierFee);
-  const courierFee = readMoney(feeObj);
+  const courierFee = readMoney(feeObj.amount);
   explain.courierFee = {
     rule: ["#13"],
     source: "financify.orders.courierFee (Courierify's courier_costs metafield, per the 2026-09-25 decision)",

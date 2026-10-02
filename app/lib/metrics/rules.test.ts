@@ -47,7 +47,8 @@ function financify(payload: Record<string, unknown> = {}, id = "5100000000001"):
       createdAt: "2026-09-20T12:00:00.000Z",
       money: { placed: pkr("1000.00"), refunded: pkr("0.00") },
       cogs: { total: pkr("300.00"), complete: true, linesMissingCost: 0 },
-      courierFee: { amount: "200.00", currency: "PKR", source: "courierify_metafield" },
+      // Financify's live shape: the money is nested under `amount`.
+      courierFee: { amount: { amount: "200.00", currency: "PKR" }, source: "courierify_metafield" },
       delivery: { category: "delivered", status: "DELIVERED" },
       lineItems: [{ variantId: "v1", productId: "p1", quantity: 1, unitPrice: pkr("1000.00"), unitCost: pkr("300.00"), sku: "DUP" }],
       ...payload,
