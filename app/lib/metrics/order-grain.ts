@@ -118,6 +118,14 @@ export type OrderGrain = {
    */
   courier: string | null;
   /**
+   * Who booked the deciding parcel, from Courierify's `fulfilledVia`:
+   * "orio" (a 3PL) or "shopify" (another fulfilment app), or null when the
+   * merchant booked through Courierify directly. Non-null means Courierify
+   * read the status from Shopify's fulfilment, never polled the courier, so
+   * there are no courier times: "not available", never "slow" (G-GZR3-2).
+   */
+  fulfilledVia: string | null;
+  /**
    * Courierify's canonical city (its tehsil mapping), or null when the raw
    * spelling did not map — a roll-up groups those as "unmapped", never as a
    * city of their own ("Lahore" arrives in 13 spellings on one store).
@@ -464,6 +472,19 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
   const couriers = [...new Set(parcels.map((p) => courierOf(p.row)).filter(Boolean))];
   const carrier = typeof obj(fin?.delivery).carrier === "string" ? String(obj(fin?.delivery).carrier).trim() : "";
   const financifyCarrier = carrier ? `financify:${carrier.toLowerCase()}` : null;
+  const via = deciding && typeof deciding.row.payload.fulfilledVia === "string" && deciding.row.payload.fulfilledVia.trim()
+    ? deciding.row.payload.fulfilledVia.trim().toLowerCase()
+    : null;
+  explain.fulfilledVia = {
+    rule: ["#9", "#12"],
+    source: "courierify.shipments.fulfilledVia",
+    inputs: deciding ? [ref(deciding.row, "fulfilledVia")] : [],
+    note: !deciding
+      ? "no Courierify parcel"
+      : via
+        ? `booked through ${via}: status mirrored from Shopify's fulfilment, so no courier times`
+        : "booked through Courierify directly",
+  };
   explain.courier = deciding
     ? {
         rule: ["#7", "#12"],
@@ -540,6 +561,7 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     customerId: input.customer?.id ?? null,
     parcelCount: parcels.length,
     courier: deciding ? courierOf(deciding.row) : financifyCarrier,
+    fulfilledVia: via,
     city: deciding ? cityOf(deciding.row).canonical : null,
     cityRaw: deciding ? cityOf(deciding.row).raw : null,
     lines,

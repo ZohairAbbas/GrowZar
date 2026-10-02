@@ -135,6 +135,23 @@ describe("rule #7: Courierify is the delivery authority when connected", () => {
     expect(g.explain.outcome?.note).toMatch(/Financify says delivered/);
   });
 
+  it("carries who booked the deciding parcel, so a 3PL parcel reads as 'not available', not slow", () => {
+    const viaOrio = grain({ parcels: [{ row: parcel("delivered", { fulfilledVia: "orio" }), events: [] }] });
+    expect(viaOrio.fulfilledVia).toBe("orio");
+    expect(viaOrio.explain.fulfilledVia?.note).toMatch(/booked through orio/);
+    expect(grain({ parcels: [{ row: parcel("delivered", { fulfilledVia: "Shopify" }), events: [] }] }).fulfilledVia).toBe("shopify");
+    expect(grain({ parcels: [{ row: parcel("delivered", { fulfilledVia: null }), events: [] }] }).fulfilledVia).toBeNull();
+    expect(grain().fulfilledVia).toBeNull();
+    // A cancelled parcel does not decide: the live one does.
+    const rebooked = grain({
+      parcels: [
+        { row: parcel("cancelled", { fulfilledVia: "orio" }), events: [] },
+        { row: parcel("delivered", { fulfilledVia: null }), events: [] },
+      ],
+    });
+    expect(rebooked.fulfilledVia).toBeNull();
+  });
+
   it("keeps Financify's own outcome beside the authority's, so a disagreement can be counted", () => {
     const g = grain({ parcels: [{ row: parcel("returned"), events: [] }] });
     expect(g.outcome).toBe("returned");

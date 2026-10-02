@@ -36,6 +36,7 @@ function order(o: Partial<RollupOrder> = {}): RollupOrder {
     financifyOutcome: "delivered",
     parcelCount: 1,
     courier: "tcs",
+    fulfilledVia: null,
     city: "Lahore",
     lines: [{ variantId: "v1", productId: "p1", quantity: 1, value: pkr("1000.00"), cost: pkr("300.00") }],
     confirmation: "confirmed",
@@ -152,6 +153,49 @@ describe("per-courier timing is gated, never a number from no history", () => {
   it("gives a median once the courier has enough timed deliveries", () => {
     const orders = Array.from({ length: 30 }, () => order({ courier: "tcs" }));
     expect(courierTiming(orders)[0]).toMatchObject({ courier: "tcs", verdict: "ok", medianDaysToDeliver: 3 });
+  });
+});
+
+describe("courier timing says why it has no number (G-GZR3-2), never 'slow'", () => {
+  const untimed = (o: Partial<RollupOrder>) => order({ outcomeTiming: { basis: "status_as_of", at: new Date("2026-09-25T06:00:00Z") }, ...o });
+
+  it("names the 3PL when most of a courier's deliveries were booked through it", () => {
+    const orders = [
+      ...Array.from({ length: 8 }, () => untimed({ courier: "trax", fulfilledVia: "orio" })),
+      untimed({ courier: "trax", fulfilledVia: null }),
+      order({ courier: "trax", fulfilledVia: null }),
+    ];
+    expect(courierTiming(orders)).toEqual([
+      {
+        courier: "trax",
+        verdict: "not_enough_data",
+        reason: "shipped_via_3pl",
+        timedOrders: 1,
+        via: { name: "orio", orders: 8, delivered: 10 },
+      },
+    ]);
+  });
+
+  it("keeps the coverage reason when the 3PL booked only some of them", () => {
+    const orders = [
+      ...Array.from({ length: 4 }, () => untimed({ courier: "leopards", fulfilledVia: "orio" })),
+      ...Array.from({ length: 6 }, () => order({ courier: "leopards", fulfilledVia: null })),
+    ];
+    expect(courierTiming(orders)[0]).toMatchObject({ reason: "too_few_parcels", timedOrders: 6 });
+    expect(courierTiming(orders)[0]).not.toHaveProperty("via");
+  });
+
+  it("says a carrier only Financify names was not shipped through Courierify", () => {
+    const orders = [untimed({ courier: "financify:trax", parcelCount: 0 })];
+    expect(courierTiming(orders)[0]).toMatchObject({ reason: "not_via_courierify", timedOrders: 0 });
+  });
+
+  it("still gives a median for a courier with enough timed deliveries, from those alone", () => {
+    const orders = [
+      ...Array.from({ length: 30 }, () => order({ courier: "nkfulfillment" })),
+      ...Array.from({ length: 5 }, () => untimed({ courier: "nkfulfillment", fulfilledVia: "orio" })),
+    ];
+    expect(courierTiming(orders)[0]).toMatchObject({ verdict: "ok", timedOrders: 30, medianDaysToDeliver: 3 });
   });
 });
 

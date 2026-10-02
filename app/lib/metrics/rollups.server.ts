@@ -38,6 +38,7 @@ export function toRollupOrder(row: OrderGrainRow): RollupOrder {
     financifyOutcome: (row.financifyOutcome as RollupOrder["financifyOutcome"]) ?? null,
     parcelCount: row.parcelCount,
     courier: row.courier,
+    fulfilledVia: row.fulfilledVia,
     city: row.city,
     confirmation: row.confirmation,
     customerId: row.customerId,

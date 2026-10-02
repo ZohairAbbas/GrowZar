@@ -757,6 +757,9 @@ model OrderGrain {
   parcelCount  Int
   /// The first live parcel's courier, lower-cased (rule #12).
   courier      String?
+  /// Courierify's `fulfilledVia` for the deciding parcel: "orio" | "shopify"
+  /// | null (booked directly). Non-null means no courier times (G-GZR3-2).
+  fulfilledVia String?
   /// Courierify's canonical city, or null = "unmapped" (rule #12).
   city         String?
   cityRaw      String?

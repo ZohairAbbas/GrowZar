@@ -264,6 +264,22 @@ export type ShippingView = {
   coverage: Coverage;
 };
 
+const THIRD_PARTY: Record<string, string> = { orio: "Orio", shopify: "another fulfilment app" };
+
+/** Never "slow": say why there is no time (G-GZR3-2). */
+function timingReason(t: Extract<ReturnType<typeof courierTiming>[number], { verdict: "not_enough_data" }>): string {
+  switch (t.reason) {
+    case "not_via_courierify":
+      return "not available: not shipped through Courierify";
+    case "shipped_via_3pl":
+      return `not available: shipped through ${THIRD_PARTY[t.via!.name] ?? t.via!.name} (${t.via!.orders} of ${t.via!.delivered} delivered), which sends no courier times`;
+    case "no_courier_history":
+      return "not enough data: no courier-timed deliveries";
+    case "too_few_parcels":
+      return `not enough data: ${t.timedOrders} timed deliveries`;
+  }
+}
+
 export function shippingView(s: StoreSummary): ShippingView {
   const timing = new Map(courierTiming(s.rows).map((t) => [t.courier, t]));
   return {
@@ -279,9 +295,7 @@ export function shippingView(s: StoreSummary): ShippingView {
           ? "—"
           : t.verdict === "ok"
             ? `${t.medianDaysToDeliver.toFixed(1)} days (median, ${t.timedOrders} timed)`
-            : t.reason === "no_courier_history"
-              ? "not enough data: no courier-timed deliveries"
-              : `not enough data: ${t.timedOrders} timed deliveries`,
+            : timingReason(t),
       };
     }),
     cities: rollup(s.rows, byCity).slice(0, 12).map((b) => ({ city: b.key, orders: b.orders, deliveryRate: b.deliveryRate })),
