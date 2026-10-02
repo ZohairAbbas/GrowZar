@@ -112,6 +112,8 @@ function toRow(storeId: string, g: OrderGrain): Prisma.OrderGrainCreateManyInput
     outcomeAuthority: g.outcomeAuthority,
     outcomeBasis: g.outcomeTiming?.basis ?? null,
     outcomeAt: g.outcomeTiming?.at ?? null,
+    financifyOutcome: g.financifyOutcome,
+    financifyStatus: g.financifyStatus,
     orderCancelled: g.orderCancelled,
     shipmentCancelled: g.shipmentCancelled,
     confirmation: g.confirmation,

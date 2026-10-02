@@ -1,8 +1,12 @@
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "../db.server";
 import { localDayOf } from "./order-grain";
 import { byCity, byCourier, courierTiming, rollup, type DeliveryRate } from "./rollups";
 import { storeSummary, type StoreSummary } from "./summaries.server";
-import { formatAmount, parseAmount, type Money } from "./money";
+import { formatAmount, parseAmount, sumByCurrency, type Money } from "./money";
+import { findings, matchesFilter, type Finding, type OrderFilter } from "./findings";
+import { toRollupOrder } from "./rollups.server";
 
 /**
  * View models for the read-only screens (G-GZR2-5).
@@ -14,7 +18,7 @@ import { formatAmount, parseAmount, type Money } from "./money";
  * Periods are the store's own local days (rule #5), ending today.
  */
 
-export const PERIODS = [7, 30, 90] as const;
+export const PERIODS = [7, 30, 60, 90] as const;
 export type PeriodDays = (typeof PERIODS)[number];
 
 export function periodFrom(url: URL, timezone: string | null) {
@@ -131,12 +135,72 @@ export type OrdersView = {
   byOutcome: Array<{ outcome: string; count: number }>;
   rows: OrderRow[];
   shown: number;
+  /** Set when the list is a finding's evidence (G-GZR3-1). */
+  filter: OrderFilter | null;
+  /** Financify's own outcome per shown order, for the disagreement list. */
+  financifySays: Record<string, string | null>;
 };
 
 const LIST_LIMIT = 50;
+/** A filtered list is a finding's evidence, so it shows more of it. */
+const FILTERED_LIST_LIMIT = 200;
 
-export async function ordersView(storeId: string, from: string, to: string): Promise<OrdersView> {
+const ORDER_ROW_SELECT = {
+  orderId: true, orderName: true, localDay: true, currency: true, placedAmount: true,
+  outcome: true, outcomeAuthority: true, outcomeBasis: true, outcomeAt: true, confirmation: true,
+  courier: true, city: true, refundedAmount: true, orderCancelled: true, shipmentCancelled: true,
+} as const;
+
+export async function ordersView(
+  storeId: string,
+  from: string,
+  to: string,
+  filter: OrderFilter | null = null,
+): Promise<OrdersView> {
   const where = { storeId, localDay: { gte: from, lte: to } };
+  const money = (a: { toFixed(n: number): string } | null, c: string | null): Money | null =>
+    a && c ? { amount: formatAmount(parseAmount(a.toFixed(6))!), currency: c } : null;
+  type Row = Prisma.OrderGrainGetPayload<{ select: typeof ORDER_ROW_SELECT }>;
+  const toRow = (r: Row): OrderRow => ({
+    orderId: r.orderId,
+    orderName: r.orderName,
+    localDay: r.localDay,
+    placed: money(r.placedAmount, r.currency),
+    outcome: r.outcome,
+    authority: r.outcomeAuthority,
+    timing: r.outcomeBasis && r.outcomeAt ? { basis: r.outcomeBasis, at: r.outcomeAt.toISOString() } : null,
+    confirmation: r.confirmation,
+    courier: r.courier,
+    city: r.city,
+    refunded: money(r.refundedAmount, r.currency),
+    orderCancelled: r.orderCancelled,
+    shipmentCancelled: r.shipmentCancelled,
+  });
+  const countOutcomes = (outcomes: string[]) =>
+    [...outcomes.reduce((m, o) => m.set(o, (m.get(o) ?? 0) + 1), new Map<string, number>())]
+      .map(([outcome, count]) => ({ outcome, count }))
+      .sort((a, b) => b.count - a.count);
+
+  if (filter) {
+    // The same predicate the Home card counted with, applied to the same
+    // grain rows, so the list is exactly the card's evidence.
+    const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { currency: true } });
+    const all = await prisma.orderGrain.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { orderId: "desc" }],
+    });
+    const hit = all.filter((r) => matchesFilter(toRollupOrder(r), filter, store.currency));
+    const shown = hit.slice(0, FILTERED_LIST_LIMIT);
+    return {
+      total: hit.length,
+      byOutcome: countOutcomes(hit.map((r) => r.outcome)),
+      rows: shown.map(toRow),
+      shown: shown.length,
+      filter,
+      financifySays: Object.fromEntries(shown.map((r) => [r.orderId, r.financifyOutcome])),
+    };
+  }
+
   const [total, groups, latest] = await Promise.all([
     prisma.orderGrain.count({ where }),
     prisma.orderGrain.groupBy({ by: ["outcome"], where, _count: { _all: true } }),
@@ -144,34 +208,49 @@ export async function ordersView(storeId: string, from: string, to: string): Pro
       where,
       orderBy: [{ createdAt: "desc" }, { orderId: "desc" }],
       take: LIST_LIMIT,
-      select: {
-        orderId: true, orderName: true, localDay: true, currency: true, placedAmount: true,
-        outcome: true, outcomeAuthority: true, outcomeBasis: true, outcomeAt: true, confirmation: true,
-        courier: true, city: true, refundedAmount: true, orderCancelled: true, shipmentCancelled: true,
-      },
+      select: ORDER_ROW_SELECT,
     }),
   ]);
-  const money = (a: { toFixed(n: number): string } | null, c: string | null): Money | null =>
-    a && c ? { amount: formatAmount(parseAmount(a.toFixed(6))!), currency: c } : null;
   return {
     total,
     byOutcome: groups.map((g) => ({ outcome: g.outcome, count: g._count._all })).sort((a, b) => b.count - a.count),
-    rows: latest.map((r) => ({
-      orderId: r.orderId,
-      orderName: r.orderName,
-      localDay: r.localDay,
-      placed: money(r.placedAmount, r.currency),
-      outcome: r.outcome,
-      authority: r.outcomeAuthority,
-      timing: r.outcomeBasis && r.outcomeAt ? { basis: r.outcomeBasis, at: r.outcomeAt.toISOString() } : null,
-      confirmation: r.confirmation,
-      courier: r.courier,
-      city: r.city,
-      refunded: money(r.refundedAmount, r.currency),
-      orderCancelled: r.orderCancelled,
-      shipmentCancelled: r.shipmentCancelled,
-    })),
+    rows: latest.map(toRow),
     shown: latest.length,
+    filter: null,
+    financifySays: {},
+  };
+}
+
+// ── Home: cross-app findings (G-GZR3-1) ─────────────────────────────────────
+
+export type FindingsView = { findings: Finding[]; days: number };
+
+export async function findingsView(s: StoreSummary, days: number): Promise<FindingsView> {
+  const [courierify, lastParcel] = await Promise.all([
+    prisma.appConnection.findFirst({
+      where: { storeId: s.store.id, app: "COURIERIFY", status: "CONNECTED" },
+      select: { app: true },
+    }),
+    prisma.orderGrain.findFirst({
+      where: { storeId: s.store.id, parcelCount: { gt: 0 }, localDay: { not: null } },
+      orderBy: { localDay: "desc" },
+      select: { localDay: true },
+    }),
+  ]);
+  const ads = s.adSpend;
+  const complete = ads && ads.daysFetched === ads.daysInPeriod;
+  return {
+    days,
+    findings: findings({
+      currency: s.store.currency,
+      rows: s.rows,
+      orders: s.orders,
+      profit: s.profit,
+      // The same ad spend the profit subtracted: with platform fees, and only
+      // when every day of the period is fetched.
+      adSpend: complete ? sumByCurrency([...ads.spend, ...ads.fees]) : null,
+      courierify: { connected: courierify !== null, lastParcelDay: lastParcel?.localDay ?? null },
+    }),
   };
 }
 

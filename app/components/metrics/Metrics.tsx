@@ -69,6 +69,8 @@ const OUTCOME_LABEL: Record<string, string> = {
   unknown: "Unknown",
 };
 
+export const outcomeLabel = (outcome: string) => OUTCOME_LABEL[outcome] ?? outcome.replace(/_/g, " ");
+
 const day = (iso: string) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
@@ -121,13 +123,13 @@ export function Notice({ tone = "info", children }: { tone?: "info" | "warn"; ch
   );
 }
 
-export function PeriodPicker({ days, options }: { days: number; options: readonly number[] }) {
+export function PeriodPicker({ days, options, keep = "" }: { days: number; options: readonly number[]; keep?: string }) {
   return (
     <nav aria-label="Period" className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 text-sm">
       {options.map((d) => (
         <Link
           key={d}
-          to={`?days=${d}`}
+          to={`?days=${d}${keep ? `&${keep}` : ""}`}
           preventScrollReset
           aria-current={d === days ? "page" : undefined}
           className={`rounded-md px-3 py-1 ${d === days ? "bg-gray-900 text-white" : "text-gray-600 hover:text-gray-900"}`}

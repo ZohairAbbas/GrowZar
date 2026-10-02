@@ -1,6 +1,8 @@
+import { Link } from "react-router";
 import type {
   CustomersView,
   FinanceView,
+  FindingsView,
   HomeView,
   OrdersView,
   ShippingView,
@@ -12,8 +14,10 @@ import {
   MoneyList,
   Notice,
   OutcomeText,
+  outcomeLabel,
   Stat,
 } from "./Metrics";
+import { FindingCards } from "./FindingCards";
 
 /**
  * The open state of each section (G-GZR2-5): read-only, from the metric
@@ -23,9 +27,21 @@ import {
 
 // ── Home ────────────────────────────────────────────────────────────────────
 
-export function HomePanel({ view }: { view: HomeView }) {
+export function HomePanel({
+  view,
+  findings,
+  period,
+}: {
+  view: HomeView;
+  findings: FindingsView;
+  period: { from: string; to: string };
+}) {
+  // The Courierify card says what the coverage notice says, with a link.
+  const stopped = findings.findings.some((f) => f.kind === "courierify_stopped");
   return (
-    <section className="space-y-3">
+    <section className="space-y-6">
+      <FindingCards findings={findings.findings} days={findings.days} from={period.from} to={period.to} />
+      <div className="space-y-3">
       <div className="rounded-2xl border border-gray-200 bg-white p-5">
         <ol className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {view.funnel.map((step, i) => (
@@ -45,7 +61,8 @@ export function HomePanel({ view }: { view: HomeView }) {
           <span className="text-gray-500"> — delivered ÷ (delivered + returned), by order, grouped by order date</span>
         </p>
       </div>
-      <CoverageNotice coverage={view.coverage} />
+      {stopped ? null : <CoverageNotice coverage={view.coverage} />}
+      </div>
     </section>
   );
 }
@@ -138,9 +155,27 @@ export function FinancePanel({ view }: { view: FinanceView }) {
 
 // ── Orders ──────────────────────────────────────────────────────────────────
 
-export function OrdersPanel({ view }: { view: OrdersView }) {
+const FILTER_LABEL = (f: NonNullable<OrdersView["filter"]>) =>
+  f.kind === "variant"
+    ? `orders containing variant ${f.variantId} (international orders left out)`
+    : f.kind === "disagree"
+      ? "orders where Courierify and Financify disagree on the outcome"
+      : f.app === "financify"
+        ? "orders with no Courierify parcel, decided by Financify"
+        : "orders decided by Courierify";
+
+export function OrdersPanel({ view, days }: { view: OrdersView; days: number }) {
+  const disagree = view.filter?.kind === "disagree";
   return (
     <section className="space-y-3">
+      {view.filter ? (
+        <Notice>
+          Showing {view.total.toLocaleString()} {FILTER_LABEL(view.filter)}.{" "}
+          <Link to={`/orders?days=${days}`} className="font-medium text-primary-600 hover:underline">
+            Show all orders
+          </Link>
+        </Notice>
+      ) : null}
       <div className="flex flex-wrap gap-2 text-sm">
         <span className="rounded-full bg-gray-900 px-3 py-1 text-white">{view.total.toLocaleString()} orders</span>
         {view.byOutcome.map((o) => (
@@ -161,6 +196,7 @@ export function OrdersPanel({ view }: { view: OrdersView }) {
               <th className="px-4 py-2.5">Day</th>
               <th className="px-4 py-2.5 text-right">Placed</th>
               <th className="px-4 py-2.5">Outcome</th>
+              {disagree ? <th className="px-4 py-2.5">Financify says</th> : null}
               <th className="px-4 py-2.5">Confirmation</th>
               <th className="px-4 py-2.5">Courier · city</th>
             </tr>
@@ -179,6 +215,11 @@ export function OrdersPanel({ view }: { view: OrdersView }) {
                     <span className="ml-2 rounded bg-rose-50 px-1.5 py-0.5 text-xs text-rose-700">refunded {r.refunded.amount}</span>
                   ) : null}
                 </td>
+                {disagree ? (
+                  <td className="px-4 py-2.5 text-gray-600">
+                    {view.financifySays[r.orderId] ? outcomeLabel(view.financifySays[r.orderId]!) : "—"}
+                  </td>
+                ) : null}
                 <td className="px-4 py-2.5 text-gray-600">{r.confirmation?.replace(/_/g, " ") ?? "—"}</td>
                 <td className="px-4 py-2.5 text-gray-600">
                   {r.courier?.replace(/^financify:/, "") ?? "—"} · {r.city ?? "—"}
@@ -189,7 +230,7 @@ export function OrdersPanel({ view }: { view: OrdersView }) {
         </table>
         {view.total > view.shown ? (
           <p className="border-t border-gray-100 px-4 py-2.5 text-xs text-gray-500">
-            Latest {view.shown} of {view.total.toLocaleString()} orders in this period.
+            Latest {view.shown} of {view.total.toLocaleString()} {view.filter ? "matching " : ""}orders in this period.
           </p>
         ) : null}
       </div>

@@ -27,6 +27,7 @@ export type RollupOrder = Pick<
   | "courierFee"
   | "outcome"
   | "outcomeTiming"
+  | "financifyOutcome"
   | "parcelCount"
   | "courier"
   | "city"

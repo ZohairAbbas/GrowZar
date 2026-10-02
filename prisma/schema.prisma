@@ -744,6 +744,11 @@ model OrderGrain {
   /// happened_on | status_as_of (rule #9)
   outcomeBasis     String?
   outcomeAt        DateTime?
+  /// Financify's own outcome (same vocabulary) and raw delivery status, kept
+  /// even when Courierify is the authority, so disagreements are countable
+  /// (G-GZR3-1). Null without a Financify row.
+  financifyOutcome String?
+  financifyStatus  String?
   orderCancelled    Boolean
   shipmentCancelled Boolean
 

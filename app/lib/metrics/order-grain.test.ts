@@ -135,6 +135,13 @@ describe("rule #7: Courierify is the delivery authority when connected", () => {
     expect(g.explain.outcome?.note).toMatch(/Financify says delivered/);
   });
 
+  it("keeps Financify's own outcome beside the authority's, so a disagreement can be counted", () => {
+    const g = grain({ parcels: [{ row: parcel("returned"), events: [] }] });
+    expect(g.outcome).toBe("returned");
+    expect(g.financifyOutcome).toBe("delivered");
+    expect(grain({ order: null, parcels: [{ row: parcel("returned"), events: [] }] }).financifyOutcome).toBeNull();
+  });
+
   it("falls back to Financify without a parcel, flagging a failed attempt filed as returned", () => {
     const g = grain({
       order: financify({ delivery: { category: "returned", status: "FAILED_DELIVERY" } }),

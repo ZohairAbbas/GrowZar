@@ -103,6 +103,7 @@ function row(o: Partial<RollupOrder> = {}): RollupOrder {
     courierFee: pkr("200.00"),
     outcome: "delivered",
     outcomeTiming: { basis: "happened_on", at: new Date("2026-09-23T06:00:00Z") },
+    financifyOutcome: "delivered",
     parcelCount: 1,
     courier: "tcs",
     city: "Lahore",

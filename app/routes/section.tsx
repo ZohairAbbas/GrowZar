@@ -16,6 +16,7 @@ import {
   PERIODS,
   customersView,
   financeView,
+  findingsView,
   homeView,
   ordersView,
   periodFrom,
@@ -29,6 +30,7 @@ import {
   ShippingPanel,
 } from "~/components/metrics/SectionPanels";
 import { PeriodPicker } from "~/components/metrics/Metrics";
+import { orderFilterQuery, parseOrderFilter } from "~/lib/metrics/findings";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   return [{ title: loaderData ? `${loaderData.label} · Growzar` : "Growzar" }];
@@ -143,14 +145,21 @@ async function buildMetrics(section: Section, storeId: string, url: URL) {
   const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { timezone: true } });
   const period = periodFrom(url, store.timezone);
   const summary = await storeSummary(storeId, period.from, period.to);
-  const base = { period, periods: PERIODS };
+  // A filter (a finding's evidence) survives a change of period.
+  const filter = section === "orders" ? parseOrderFilter(url.searchParams) : null;
+  const base = { period, periods: PERIODS, keep: filter ? orderFilterQuery(filter) : "" };
   switch (section) {
     case "home":
-      return { ...base, kind: "home" as const, view: homeView(summary) };
+      return {
+        ...base,
+        kind: "home" as const,
+        view: homeView(summary),
+        findings: await findingsView(summary, period.days),
+      };
     case "finance":
       return { ...base, kind: "finance" as const, view: financeView(summary) };
     case "orders":
-      return { ...base, kind: "orders" as const, view: await ordersView(storeId, period.from, period.to) };
+      return { ...base, kind: "orders" as const, view: await ordersView(storeId, period.from, period.to, filter) };
     case "shipping":
       return { ...base, kind: "shipping" as const, view: shippingView(summary) };
     case "customers":
@@ -171,7 +180,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           <h1 className="text-2xl font-semibold text-gray-900">{label}</h1>
           <p className="mt-1 text-sm text-gray-600">{blurb}</p>
         </div>
-        {metrics ? <PeriodPicker days={metrics.period.days} options={metrics.periods} /> : null}
+        {metrics ? <PeriodPicker days={metrics.period.days} options={metrics.periods} keep={metrics.keep} /> : null}
       </header>
 
       {metrics ? (
@@ -180,9 +189,9 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             {storeName} · {metrics.period.from} to {metrics.period.to}, the store's own days (
             {metrics.period.timezoneKnown ? metrics.period.timezone : "timezone not reported yet, shown in UTC"})
           </p>
-          {metrics.kind === "home" ? <HomePanel view={metrics.view} /> : null}
+          {metrics.kind === "home" ? <HomePanel view={metrics.view} findings={metrics.findings} period={metrics.period} /> : null}
           {metrics.kind === "finance" ? <FinancePanel view={metrics.view} /> : null}
-          {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} /> : null}
+          {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} days={metrics.period.days} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} /> : null}
           {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} /> : null}
         </div>

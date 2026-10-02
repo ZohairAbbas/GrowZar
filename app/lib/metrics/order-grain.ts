@@ -95,6 +95,14 @@ export type OrderGrain = {
   outcomeAuthority: "courierify" | "financify" | "none";
   /** Rule #9: "happened on" only with a courier time; else "status as of". */
   outcomeTiming: { basis: StatusTiming["basis"]; at: Date } | null;
+  /**
+   * Financify's own outcome and raw status, kept beside the authority's even
+   * when Courierify decides (G-GZR3-1), so "the apps disagree" is a column a
+   * finding can count, not a sentence in `explain`. Null without a Financify
+   * row.
+   */
+  financifyOutcome: Outcome | null;
+  financifyStatus: string | null;
   orderCancelled: boolean;
   shipmentCancelled: boolean;
 
@@ -126,6 +134,9 @@ export type OrderGrain = {
   lines: Array<{
     variantId: string | null;
     productId: string | null;
+    /** Display only (rule #30): Financify's product and variant titles. */
+    title?: string | null;
+    variantTitle?: string | null;
     quantity: number;
     value: Money | null;
     cost: Money | null;
@@ -492,6 +503,8 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
         return {
           variantId: typeof line.variantId === "string" ? line.variantId : null,
           productId: typeof line.productId === "string" ? line.productId : null,
+          title: typeof line.title === "string" ? line.title : null,
+          variantTitle: typeof line.variantTitle === "string" ? line.variantTitle : null,
           quantity,
           value,
           cost: unitCost ? timesQuantity(unitCost, quantity) : null,
@@ -519,6 +532,8 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     outcome,
     outcomeAuthority,
     outcomeTiming,
+    financifyOutcome: fin ? financifyOutcome(obj(fin.delivery).category) : null,
+    financifyStatus: fin && typeof obj(fin.delivery).status === "string" ? (obj(fin.delivery).status as string) : null,
     orderCancelled,
     shipmentCancelled,
     confirmation,

@@ -35,6 +35,7 @@ export function toRollupOrder(row: OrderGrainRow): RollupOrder {
       row.outcomeBasis && row.outcomeAt
         ? { basis: row.outcomeBasis as "happened_on" | "status_as_of", at: row.outcomeAt }
         : null,
+    financifyOutcome: (row.financifyOutcome as RollupOrder["financifyOutcome"]) ?? null,
     parcelCount: row.parcelCount,
     courier: row.courier,
     city: row.city,
@@ -43,6 +44,8 @@ export function toRollupOrder(row: OrderGrainRow): RollupOrder {
     lines: lines.map((l) => ({
       variantId: l.variantId ?? null,
       productId: l.productId ?? null,
+      title: l.title ?? null,
+      variantTitle: l.variantTitle ?? null,
       quantity: l.quantity ?? 0,
       value: l.value ?? null,
       cost: l.cost ?? null,
