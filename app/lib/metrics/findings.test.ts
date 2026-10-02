@@ -9,6 +9,7 @@ import {
   missingFeesFinding,
   cashHeldFindings,
   unconfirmedFinding,
+  courierCityFindings,
   parseOrderFilter,
   variantReturnsFinding,
   type Finding,
@@ -59,6 +60,11 @@ const line = (variantId: string, title: string) => [
 
 function found<T extends Finding>(x: T | Skip): T {
   if (x.kind === "skip") throw new Error(`expected a finding, got: ${x.reason}`);
+  return x;
+}
+
+function found2<T extends Finding>(x: T[] | Skip): T[] {
+  if (!Array.isArray(x)) throw new Error(`expected findings, got: ${x.reason}`);
   return x;
 }
 
@@ -357,6 +363,51 @@ describe("I8: orders nobody confirmed come back more often", () => {
   });
 });
 
+describe("I1: a route that delivers better in a city", () => {
+  // A route is a courier as booked: directly, or through a 3PL.
+  const r = (courier: string, via: string | null, d: number, ret: number, city = "Karachi", day = "2026-08-10") => [
+    ...times(d, () => order({ parcelCount: 1, courier, fulfilledVia: via, city, localDay: day })),
+    ...times(ret, () => returned({ parcelCount: 1, courier, fulfilledVia: via, city, localDay: day })),
+  ];
+
+  it("compares routes, so the same courier booked two ways is two routes", () => {
+    const rows = [...r("nk", null, 131, 32), ...r("nk", "orio", 68, 30)]; // 80.4% vs 69.4%
+    const [f] = found2(courierCityFindings(input(rows)));
+    expect(f!.best).toMatchObject({ courier: "nk", via: "direct", decided: 163, rate: 80.4 });
+    expect(f!.worse).toEqual([expect.objectContaining({ courier: "nk", via: "orio", gapPoints: 11, z: expect.any(Number) })]);
+    expect(f!.worse[0]!.z).toBeGreaterThanOrEqual(1.96);
+  });
+
+  it("says nothing about a gap that could be chance, however wide in points", () => {
+    const rows = [...r("nk", null, 131, 32), ...r("trax", "orio", 89, 34)]; // 80.4% vs 72.4%, z about 1.6
+    expect(courierCityFindings(input(rows))).toMatchObject({ kind: "skip", status: "nothing_found" });
+  });
+
+  it("needs 50 decided orders on each route", () => {
+    const rows = [...r("nk", null, 45, 4), ...r("trax", "orio", 25, 24)];
+    expect(courierCityFindings(input(rows))).toMatchObject({ kind: "skip", status: "not_enough_data" });
+  });
+
+  it("only compares within a city, and ignores orders with no city", () => {
+    // Two city-less routes that would differ significantly if they were compared.
+    const noCity = [
+      ...times(131, () => order({ parcelCount: 1, courier: "nk", city: null })),
+      ...times(32, () => returned({ parcelCount: 1, courier: "nk", city: null })),
+      ...times(68, () => order({ parcelCount: 1, courier: "nk", fulfilledVia: "orio", city: null })),
+      ...times(30, () => returned({ parcelCount: 1, courier: "nk", fulfilledVia: "orio", city: null })),
+    ];
+    const rows = [...r("nk", null, 131, 32, "Karachi"), ...r("trax", null, 50, 50, "Lahore"), ...noCity];
+    expect(courierCityFindings(input(rows))).toMatchObject({ kind: "skip", status: "not_enough_data" });
+  });
+
+  it("says when its data ends, and lists exactly a route's orders when its link is followed", () => {
+    const rows = [...r("nk", null, 131, 32, "Karachi", "2026-09-01"), ...r("nk", "orio", 68, 30, "Karachi", "2026-08-20")];
+    const [f] = found2(courierCityFindings(input(rows)));
+    expect(f!.lastDay).toBe("2026-09-01");
+    expect(rows.filter((o) => matchesFilter(o, { kind: "city_route", city: "Karachi", courier: "nk", via: "orio" }, "PKR"))).toHaveLength(98);
+  });
+});
+
 describe("findings(), and the Orders filters behind each link", () => {
   it("returns nothing for an empty period rather than a card of zeros", () => {
     expect(findings(input([]))).toEqual([]);
@@ -372,5 +423,7 @@ describe("findings(), and the Orders filters behind each link", () => {
     expect(parseOrderFilter(new URLSearchParams("awaitingPayout=orio"))).toEqual({ kind: "awaiting_payout", payer: "orio" });
     expect(parseOrderFilter(new URLSearchParams("awaitingPayout=a'b"))).toBeNull();
     expect(parseOrderFilter(new URLSearchParams("unanswered=waiting"))).toEqual({ kind: "unanswered_waiting" });
+    expect(parseOrderFilter(new URLSearchParams("city=D.I.+Khan&courier=tcs&via=direct"))).toEqual({ kind: "city_route", city: "D.I. Khan", courier: "tcs", via: "direct" });
+    expect(parseOrderFilter(new URLSearchParams("city=%3Cscript%3E&courier=tcs&via=direct"))).toBeNull();
   });
 });

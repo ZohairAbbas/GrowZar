@@ -21,6 +21,7 @@ import {
   marginFinding,
   missingFeesFinding,
   unconfirmedFinding,
+  courierCityFindings,
   variantReturnsFinding,
   type Finding,
   type FindingsInput,
@@ -37,7 +38,8 @@ export type DetectorId =
   | "courierify_stopped"
   | "missing_courier_fees"
   | "cash_held"
-  | "unconfirmed_returns";
+  | "unconfirmed_returns"
+  | "courier_for_city";
 
 export type Insight = {
   detector: DetectorId;
@@ -178,6 +180,24 @@ export const DETECTORS: readonly Detector[] = [
       return [insight("unconfirmed_returns", "store", f, { group: "specific", ordersAffected: f.excessReturns }, false)];
     },
   },
+  {
+    id: "courier_for_city",
+    // Rates alone are Courierify's; Financify's profit per order is what
+    // PLAN's impact formula adds once it is validated.
+    needs: ["COURIERIFY", "FINANCIFY"],
+    label: "A route that delivers better in a city (I1)",
+    preview: "Which courier, booked how, delivers best in each city",
+    run(input) {
+      const list = courierCityFindings(input);
+      if (!Array.isArray(list)) return list;
+      return list.map((f) => {
+        const w = f.worse[0]!;
+        // Returns a switch would have avoided on the worse route's own volume.
+        const ordersAffected = Math.round((w.decided * w.gapPoints) / 100);
+        return insight("courier_for_city", f.city.toLowerCase(), f, { group: "specific", ordersAffected }, false);
+      });
+    },
+  },
 ];
 
 export function runDetectors(input: FindingsInput, connected: ReadonlySet<App>): DetectorOutcome[] {
@@ -235,5 +255,7 @@ export function evidenceOf(i: Insight): Record<string, number | string> {
       return { orders: f.orders, daysLate: f.daysLate, lastPaidDay: f.lastPaidDay };
     case "unconfirmed_returns":
       return { unanswered: f.unanswered.returnRate, confirmed: f.confirmed.returnRate, waiting: f.waiting };
+    case "courier_for_city":
+      return { best: `${f.best.courier}/${f.best.via}`, bestRate: f.best.rate, worst: `${f.worse[0]!.courier}/${f.worse[0]!.via}`, gap: f.worse[0]!.gapPoints };
   }
 }

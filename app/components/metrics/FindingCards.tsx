@@ -4,6 +4,7 @@ import { ArrowRight } from "lucide-react";
 
 import type {
   CashHeldFinding,
+  CourierCityFinding,
   UnconfirmedFinding,
   CourierifyStoppedFinding,
   DecidedBy,
@@ -285,7 +286,7 @@ function MissingFeesCard({ f, days, id, canManage }: { f: MissingFeesFinding } &
       <ul className="space-y-0.5 text-xs text-gray-600">
         {top.map((c) => (
           <li key={c.courier}>
-            {c.courier}: {n(c.missing)} of {n(c.shipped)} without a fee
+            {payerName(c.courier)}: {n(c.missing)} of {n(c.shipped)} without a fee
           </li>
         ))}
         {f.byCourier.length > top.length ? <li>and {n(f.byCourier.length - top.length)} more courier(s)</li> : null}
@@ -301,7 +302,19 @@ function MissingFeesCard({ f, days, id, canManage }: { f: MissingFeesFinding } &
   );
 }
 
-const payerName = (p: string) => (p === "orio" ? "Orio" : p === "tcs" ? "TCS" : p.charAt(0).toUpperCase() + p.slice(1));
+/** Display names for the identifiers Courierify uses; anything else is capitalised. */
+const COURIER_NAMES: Record<string, string> = {
+  orio: "Orio",
+  tcs: "TCS",
+  nkfulfillment: "NK Fulfilment",
+  blueex: "BlueEx",
+  postex: "PostEx",
+  smartlane: "SmartLane",
+  trax: "Trax",
+  leopards: "Leopards",
+  bouraq: "Bouraq",
+};
+const payerName = (p: string) => COURIER_NAMES[p] ?? p.charAt(0).toUpperCase() + p.slice(1);
 
 function CashHeldCard({ f, days, id, canManage }: { f: CashHeldFinding } & CardProps) {
   const who = payerName(f.payer);
@@ -378,6 +391,43 @@ function UnconfirmedCard({ f, days, id, canManage }: { f: UnconfirmedFinding } &
   );
 }
 
+const routeName = (r: { courier: string; via: string }) =>
+  `${payerName(r.courier)}${r.via === "direct" ? ", booked directly" : ` through ${payerName(r.via)}`}`;
+
+function CourierCityCard({ f, days, id, canManage }: { f: CourierCityFinding } & CardProps) {
+  const w = f.worse[0]!;
+  const list = (r: { courier: string; via: string }) =>
+    via(id, `/orders?days=${days}&city=${encodeURIComponent(f.city)}&courier=${r.courier}&via=${r.via}`);
+  return (
+    <Card
+      id={id}
+      canManage={canManage}
+      title={`In ${f.city}, ${routeName(f.best)} delivered ${w.gapPoints.toFixed(1)} points more than ${routeName(w)}`}
+    >
+      <ul className="space-y-1">
+        {[f.best, ...f.worse].map((r) => (
+          <li key={`${r.courier}|${r.via}`} className="flex flex-wrap items-baseline gap-x-2">
+            <span className="font-medium">{routeName(r)}</span>
+            <span>
+              {r.rate.toFixed(1)}% delivered ({n(r.delivered)} of {n(r.decided)})
+            </span>
+            <Link to={list(r)} className="text-xs text-primary-600 hover:underline">
+              see orders
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <Leaves
+        items={[
+          `Orders placed ${[f.best, ...f.worse].map((r) => r.firstDay).sort()[0]} to ${f.lastDay}. City is known only for orders shipped through Courierify, so nothing later is compared.`,
+          "The gap is unlikely to be chance alone (95%), but what was sent each way, and when, can also differ.",
+          "Fees are not compared: they are recorded on only part of these orders. What the gap is worth is not estimated yet.",
+        ]}
+      />
+    </Card>
+  );
+}
+
 export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string; to: string }) {
   const reopen = useFetcher();
   return (
@@ -415,6 +465,8 @@ export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string
               return <CashHeldCard key={id} f={f} {...props} />;
             case "unconfirmed_returns":
               return <UnconfirmedCard key={id} f={f} {...props} />;
+            case "courier_for_city":
+              return <CourierCityCard key={id} f={f} {...props} />;
           }
         })
       )}

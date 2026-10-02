@@ -47,6 +47,17 @@ export const WAITING_MAX_AGE_DAYS = 7;
 /** I8: declined-but-shipped orders needed before their line is shown. */
 export const MIN_DECLINED_SHIPPED = 10;
 
+/** I1 (PLAN.md §4): delivered-or-returned orders a route needs in a city. */
+export const MIN_DECIDED_PER_ROUTE = 50;
+/** I1: the smallest gap worth saying, in points (PLAN.md §4). */
+export const MIN_ROUTE_GAP_POINTS = 3;
+/**
+ * I1: the gap must also be unlikely to be chance: a two-proportion z-test at
+ * 95%. PLAN's 3 points alone is too loose at these sizes: on 0dscam-qn,
+ * 80.4% of 163 against 72.4% of 123 in Karachi is z = 1.6, within chance.
+ */
+export const MIN_ROUTE_Z = 1.96;
+
 /** I4 (PLAN.md §4): outstanding COD above this, or a payout this many days late. */
 export const CASH_HELD_MIN_PKR = 50_000n * 1_000_000n;
 export const CASH_HELD_LATE_DAYS = 7;
@@ -64,7 +75,8 @@ export type OrderFilter =
   | { kind: "decided_by"; app: "financify" | "courierify" }
   | { kind: "fee_missing" }
   | { kind: "awaiting_payout"; payer: string }
-  | { kind: "unanswered_waiting" };
+  | { kind: "unanswered_waiting" }
+  | { kind: "city_route"; city: string; courier: string; via: string };
 
 export type MarginFinding = {
   kind: "margin";
@@ -171,6 +183,21 @@ export type CashHeldFinding = {
   filter: OrderFilter;
 };
 
+/** A courier as booked: directly, or through a 3PL ("orio"). */
+export type Route = { courier: string; via: string };
+
+export type RouteRate = Route & { decided: number; delivered: number; rate: number; firstDay: string; lastDay: string };
+
+export type CourierCityFinding = {
+  kind: "courier_for_city";
+  city: string;
+  best: RouteRate;
+  /** Routes significantly worse than `best` in this city, worst first. */
+  worse: Array<RouteRate & { gapPoints: number; z: number }>;
+  /** The latest order day compared: city is known only for Courierify-booked orders. */
+  lastDay: string;
+};
+
 export type ConfirmationGroup = { orders: number; returned: number; decided: number; returnRate: number };
 
 export type UnconfirmedFinding = {
@@ -191,7 +218,7 @@ export type UnconfirmedFinding = {
   filter: OrderFilter;
 };
 
-export type Finding = UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding;
+export type Finding = CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding;
 
 /**
  * Why a finding is absent (G-GZR3-3). "Not enough data" and "checked, nothing
@@ -469,6 +496,68 @@ export function missingFeesFinding(input: FindingsInput): MissingFeesFinding | S
   };
 }
 
+const routeOf = (o: RollupOrder): Route => ({ courier: o.courier ?? "unknown", via: o.fulfilledVia ?? "direct" });
+const inCityRoute = (o: RollupOrder, city: string, r: Route) =>
+  fromCourierify(o) && o.city === city && routeOf(o).courier === r.courier && routeOf(o).via === r.via;
+
+/** Two-proportion z for p1 > p2 (pooled). */
+function zScore(d1: number, n1: number, d2: number, n2: number): number {
+  const p = (d1 + d2) / (n1 + n2);
+  const se = Math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2));
+  return se ? (d1 / n1 - d2 / n2) / se : 0;
+}
+
+/**
+ * I1: a better route (courier, and whether booked directly or through a 3PL)
+ * for a city, by delivery rate (rule #8, by order). Only Courierify-booked
+ * orders have a city (rule #12), so the card says when its data ends. Fees
+ * are not compared: they are recorded on only part of these orders (I13).
+ * No money: PLAN's impact formula waits for its backtest.
+ */
+export function courierCityFindings(input: FindingsInput): CourierCityFinding[] | Skip {
+  if (!input.currency) return notEnough("the store's currency has not been reported");
+  const rows = input.rows.filter((o) => fromCourierify(o) && o.city && o.currency === input.currency);
+  if (!rows.length) return notEnough("no order in this period has a city: city comes only with orders shipped through Courierify");
+  const cities = new Map<string, Map<string, RollupOrder[]>>();
+  for (const o of rows) {
+    const r = routeOf(o);
+    const key = `${r.courier}|${r.via}`;
+    const byRoute = cities.get(o.city!) ?? new Map<string, RollupOrder[]>();
+    byRoute.set(key, [...(byRoute.get(key) ?? []), o]);
+    cities.set(o.city!, byRoute);
+  }
+  const out: CourierCityFinding[] = [];
+  let comparable = 0;
+  for (const [city, byRoute] of cities) {
+    const rates: RouteRate[] = [...byRoute.entries()]
+      .map(([key, list]) => {
+        const [courier, via] = key.split("|") as [string, string];
+        const decided = list.filter((o) => DECIDED.includes(o.outcome));
+        const delivered = decided.filter((o) => o.outcome === "delivered").length;
+        const days = list.map((o) => o.localDay ?? "").filter(Boolean).sort();
+        return { courier, via, decided: decided.length, delivered, rate: decided.length ? pct(delivered, decided.length) : 0, firstDay: days[0] ?? "", lastDay: days.at(-1) ?? "" };
+      })
+      .filter((r) => r.decided >= MIN_DECIDED_PER_ROUTE)
+      .sort((a, b) => b.rate - a.rate || b.decided - a.decided);
+    if (rates.length < 2) continue;
+    comparable += 1;
+    const best = rates[0]!;
+    const worse = rates
+      .slice(1)
+      .map((r) => ({ ...r, gapPoints: Math.round((best.rate - r.rate) * 10) / 10, z: Math.round(zScore(best.delivered, best.decided, r.delivered, r.decided) * 100) / 100 }))
+      .filter((r) => r.gapPoints >= MIN_ROUTE_GAP_POINTS && r.z >= MIN_ROUTE_Z)
+      .sort((a, b) => b.gapPoints - a.gapPoints);
+    if (!worse.length) continue;
+    out.push({ kind: "courier_for_city", city, best, worse, lastDay: [best, ...worse].map((r) => r.lastDay).sort().at(-1)! });
+  }
+  if (!out.length) {
+    return comparable
+      ? nothing(`in ${comparable} city(ies) with two routes of ${MIN_DECIDED_PER_ROUTE}+ orders, no gap of ${MIN_ROUTE_GAP_POINTS}+ points that is unlikely to be chance`)
+      : notEnough(`no city has two routes with ${MIN_DECIDED_PER_ROUTE} delivered or returned orders each in this period`);
+  }
+  return out.sort((a, b) => b.worse[0]!.gapPoints - a.worse[0]!.gapPoints || a.city.localeCompare(b.city));
+}
+
 const UNANSWERED = ["timed_out", "expired"];
 const isUnanswered = (o: RollupOrder) => !!o.confirmation && UNANSWERED.includes(o.confirmation);
 /** Not yet with the courier, so a call can still stop or fix it. */
@@ -608,8 +697,9 @@ export function findings(input: FindingsInput): Finding[] {
     missingFeesFinding(input),
     unconfirmedFinding(input),
   ];
-  const cash = cashHeldFindings(input);
-  return [...single.filter((f): f is Finding => !isSkip(f)), ...(Array.isArray(cash) ? cash : [])];
+  const many = (l: Finding[] | Skip): Finding[] => (Array.isArray(l) ? l : []);
+  const lists = [...many(cashHeldFindings(input)), ...many(courierCityFindings(input))];
+  return [...single.filter((f): f is Finding => !isSkip(f)), ...lists];
 }
 
 // ── Drill-down: the same predicates, for the Orders list ─────────────────────
@@ -622,6 +712,12 @@ export function parseOrderFilter(params: URLSearchParams): OrderFilter | null {
   const awaiting = params.get("awaitingPayout");
   if (awaiting && /^[a-z0-9_-]{1,40}$/.test(awaiting)) return { kind: "awaiting_payout", payer: awaiting };
   if (params.get("unanswered") === "waiting") return { kind: "unanswered_waiting" };
+  const city = params.get("city");
+  const courier = params.get("courier");
+  const via = params.get("via");
+  if (city && courier && via && /^[\p{L}\p{N} .'()-]{1,60}$/u.test(city) && /^[a-z0-9_-]{1,40}$/.test(courier) && /^[a-z0-9_-]{1,40}$/.test(via)) {
+    return { kind: "city_route", city, courier, via };
+  }
   const by = params.get("decidedBy");
   if (by === "financify" || by === "courierify") return { kind: "decided_by", app: by };
   return null;
@@ -641,6 +737,8 @@ export function orderFilterQuery(filter: OrderFilter): string {
       return `awaitingPayout=${filter.payer}`;
     case "unanswered_waiting":
       return "unanswered=waiting";
+    case "city_route":
+      return `city=${encodeURIComponent(filter.city)}&courier=${filter.courier}&via=${filter.via}`;
   }
 }
 
@@ -665,6 +763,8 @@ export function matchesFilter(
       return feeMissing(o);
     case "unanswered_waiting":
       return o.currency === currency && unansweredWaiting(o, ctx?.asOf ?? new Date());
+    case "city_route":
+      return o.currency === currency && inCityRoute(o, filter.city, filter);
     case "awaiting_payout": {
       const h = ctx?.payers?.find((p) => p.payer === filter.payer);
       return !!h && o.outcome === "delivered" && fromCourierify(o) && payerOf(o) === filter.payer && isDue(o, h, ctx!.asOf ?? new Date());
