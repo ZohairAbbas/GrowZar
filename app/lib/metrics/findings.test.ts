@@ -8,6 +8,7 @@ import {
   matchesFilter,
   missingFeesFinding,
   cashHeldFindings,
+  unconfirmedFinding,
   parseOrderFilter,
   variantReturnsFinding,
   type Finding,
@@ -301,8 +302,58 @@ describe("I4: COD a courier or 3PL has not paid, against its own rhythm", () => 
 
   it("lists exactly the orders it counted when its link is followed", () => {
     const rows = [...times(4, () => delivered(30)), ...times(3, () => delivered(1)), delivered(30, { courier: "tcs", fulfilledVia: null })];
-    const cash = { payers: [orio, tcs], asOf };
-    expect(rows.filter((o) => matchesFilter(o, { kind: "awaiting_payout", payer: "orio" }, "PKR", cash))).toHaveLength(4);
+    expect(rows.filter((o) => matchesFilter(o, { kind: "awaiting_payout", payer: "orio" }, "PKR", { payers: [orio, tcs], asOf }))).toHaveLength(4);
+  });
+});
+
+describe("I8: orders nobody confirmed come back more often", () => {
+  const c = (confirmation: string | null, outcome: "delivered" | "returned" | "not_shipped" | "booked" | "in_transit" = "delivered", o: Partial<RollupOrder> = {}) =>
+    outcome === "returned" ? returned({ confirmation, ...o })
+      : outcome === "delivered" ? order({ confirmation, ...o })
+        : order({ confirmation, outcome, delivered: null, ...o });
+  // Confirmed: 25 of 100 returned. Unanswered: 40 of 100 (timed out and expired).
+  const rows = [
+    ...times(75, () => c("confirmed")), ...times(25, () => c("confirmed", "returned")),
+    ...times(50, () => c("timed_out")), ...times(30, () => c("timed_out", "returned")),
+    ...times(10, () => c("expired")), ...times(10, () => c("expired", "returned")),
+    ...times(4, () => c("timed_out", "not_shipped")), ...times(2, () => c("expired", "booked")),
+    ...times(3, () => c("timed_out", "in_transit")), // already with the courier: too late to call
+    ...times(5, () => c("declined")), ...times(7, () => c("declined", "returned")),
+    ...times(30, () => c(null, "returned")), // no record: voice may have confirmed
+  ];
+
+  it("compares unanswered with confirmed, by order, and counts the returns beyond the confirmed rate", () => {
+    const f = found(unconfirmedFinding(input(rows)));
+    expect(f.confirmed).toMatchObject({ decided: 100, returned: 25, returnRate: 25 });
+    expect(f.unanswered).toMatchObject({ decided: 100, returned: 40, returnRate: 40 });
+    expect(f.excessReturns).toBe(15);
+    expect(f.declinedShipped).toMatchObject({ decided: 12, returned: 7 });
+    expect(f.noRecord).toBe(30);
+  });
+
+  it("counts as waiting only recent unanswered orders not yet with the courier, and links to exactly those", () => {
+    const asOf = new Date("2026-09-22T06:00:00Z"); // fixture orders are from 2026-09-20
+    const stale = times(5, () => c("timed_out", "not_shipped", { createdAt: new Date("2026-09-01T06:00:00Z") }));
+    const all = [...rows, ...stale];
+    expect(found(unconfirmedFinding(input(all, { asOf }))).waiting).toBe(6);
+    expect(all.filter((o) => matchesFilter(o, { kind: "unanswered_waiting" }, "PKR", { asOf }))).toHaveLength(6);
+  });
+
+  it("never counts an order with no confirmation record as unconfirmed", () => {
+    const f = found(unconfirmedFinding(input([...rows, ...times(100, () => c(null, "returned"))])));
+    expect(f.unanswered.decided).toBe(100);
+  });
+
+  it("needs 100 decided orders in each group, and a 5-point gap", () => {
+    expect(unconfirmedFinding(input(rows.slice(1)))).toMatchObject({ kind: "skip", status: "not_enough_data" });
+    const close = [...times(75, () => c("confirmed")), ...times(25, () => c("confirmed", "returned")),
+      ...times(71, () => c("timed_out")), ...times(29, () => c("timed_out", "returned"))]; // 29% vs 25%
+    expect(unconfirmedFinding(input(close))).toMatchObject({ kind: "skip", status: "nothing_found" });
+  });
+
+  it("leaves international orders out", () => {
+    const aed = times(50, () => c("timed_out", "returned", { currency: "AED", placed: { amount: "50.00", currency: "AED" } }));
+    expect(found(unconfirmedFinding(input([...rows, ...aed]))).unanswered.decided).toBe(100);
   });
 });
 
@@ -320,5 +371,6 @@ describe("findings(), and the Orders filters behind each link", () => {
     expect(parseOrderFilter(new URLSearchParams("feeMissing=1"))).toEqual({ kind: "fee_missing" });
     expect(parseOrderFilter(new URLSearchParams("awaitingPayout=orio"))).toEqual({ kind: "awaiting_payout", payer: "orio" });
     expect(parseOrderFilter(new URLSearchParams("awaitingPayout=a'b"))).toBeNull();
+    expect(parseOrderFilter(new URLSearchParams("unanswered=waiting"))).toEqual({ kind: "unanswered_waiting" });
   });
 });

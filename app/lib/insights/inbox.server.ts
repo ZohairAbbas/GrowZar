@@ -72,6 +72,7 @@ export async function detectorInput(
       adSpend: complete ? sumByCurrency([...ads.spend, ...ads.fees]) : null,
       courierify: { connected: connected.has("COURIERIFY"), lastParcelDay: lastParcel?.localDay ?? null },
       cash: { asOf: now, payers, awaiting: awaiting.map(toRollupOrder) },
+      asOf: now,
     },
   };
 }

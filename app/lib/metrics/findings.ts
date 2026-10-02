@@ -34,6 +34,19 @@ export const MIN_DISAGREEMENTS = 5;
 export const MAX_OPEN_SHARE_FOR_MARGIN = 0.15;
 /** I13: Courierify-booked shipped orders without a fee needed to say so. */
 export const MIN_MISSING_FEES = 25;
+/** I8 (PLAN.md §4): decided orders needed in each group compared. */
+export const MIN_DECIDED_PER_CONFIRMATION_GROUP = 100;
+/** I8: how much more often unanswered orders must come back, in points. */
+export const MIN_CONFIRMATION_GAP_POINTS = 5;
+/**
+ * I8: an unanswered order still worth a call was placed this recently. Older
+ * ones that never shipped are abandoned, not waiting (on 0dscam-qn, 22 of 43
+ * "not shipped" unanswered orders in 90 days were over a week old).
+ */
+export const WAITING_MAX_AGE_DAYS = 7;
+/** I8: declined-but-shipped orders needed before their line is shown. */
+export const MIN_DECLINED_SHIPPED = 10;
+
 /** I4 (PLAN.md §4): outstanding COD above this, or a payout this many days late. */
 export const CASH_HELD_MIN_PKR = 50_000n * 1_000_000n;
 export const CASH_HELD_LATE_DAYS = 7;
@@ -50,7 +63,8 @@ export type OrderFilter =
   | { kind: "disagree" }
   | { kind: "decided_by"; app: "financify" | "courierify" }
   | { kind: "fee_missing" }
-  | { kind: "awaiting_payout"; payer: string };
+  | { kind: "awaiting_payout"; payer: string }
+  | { kind: "unanswered_waiting" };
 
 export type MarginFinding = {
   kind: "margin";
@@ -157,7 +171,27 @@ export type CashHeldFinding = {
   filter: OrderFilter;
 };
 
-export type Finding = CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding;
+export type ConfirmationGroup = { orders: number; returned: number; decided: number; returnRate: number };
+
+export type UnconfirmedFinding = {
+  kind: "unconfirmed_returns";
+  confirmed: ConfirmationGroup;
+  /** Asked over WhatsApp and never answered (timed out or expired). */
+  unanswered: ConfirmationGroup;
+  /** Declined, shipped anyway; null below MIN_DECLINED_SHIPPED decided. */
+  declinedShipped: ConfirmationGroup | null;
+  /** Unanswered and not yet with the courier: the ones a call can still save. */
+  waiting: number;
+  /** Returns among unanswered orders beyond what the confirmed rate would give. */
+  excessReturns: number;
+  /** Orders with no WhatsApp confirmation record (voice is not synced): left out. */
+  noRecord: number;
+  /** Who decided the outcomes compared (rule #7). */
+  decidedBy: DecidedBy;
+  filter: OrderFilter;
+};
+
+export type Finding = UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding;
 
 /**
  * Why a finding is absent (G-GZR3-3). "Not enough data" and "checked, nothing
@@ -191,6 +225,8 @@ export type FindingsInput = {
   courierify: { connected: boolean; lastParcelDay: string | null };
   /** I4 only; absent where it was not loaded. */
   cash?: CashInput;
+  /** "Now", for anything judged by age (I8's waiting orders). */
+  asOf?: Date;
 };
 
 const DECIDED: Outcome[] = ["delivered", "returned"];
@@ -433,6 +469,60 @@ export function missingFeesFinding(input: FindingsInput): MissingFeesFinding | S
   };
 }
 
+const UNANSWERED = ["timed_out", "expired"];
+const isUnanswered = (o: RollupOrder) => !!o.confirmation && UNANSWERED.includes(o.confirmation);
+/** Not yet with the courier, so a call can still stop or fix it. */
+const NOT_YET_SHIPPED: Outcome[] = ["not_shipped", "booked"];
+const unansweredWaiting = (o: RollupOrder, asOf: Date) =>
+  isUnanswered(o) &&
+  NOT_YET_SHIPPED.includes(o.outcome) &&
+  !!o.createdAt &&
+  asOf.getTime() - o.createdAt.getTime() <= WAITING_MAX_AGE_DAYS * 86_400_000;
+
+function group(list: readonly RollupOrder[]): ConfirmationGroup {
+  const decided = list.filter((o) => DECIDED.includes(o.outcome));
+  const returned = decided.filter((o) => o.outcome === "returned").length;
+  return { orders: list.length, returned, decided: decided.length, returnRate: decided.length ? pct(returned, decided.length) : 0 };
+}
+
+/**
+ * I8: orders the buyer never answered on WhatsApp come back more often than
+ * confirmed ones. Confirmation from Courierify, outcome by rule #7. Only
+ * WhatsApp confirmations are synced, so an order with no record is unknown
+ * (a voice call may have confirmed it), never counted as unconfirmed.
+ * Counts only: "× cost of a return" waits for its backtest.
+ */
+export function unconfirmedFinding(input: FindingsInput): UnconfirmedFinding | Skip {
+  if (!input.currency) return notEnough("the store's currency has not been reported");
+  const rows = input.rows.filter(domestic(input.currency));
+  const confirmed = group(rows.filter((o) => o.confirmation === "confirmed"));
+  const unanswered = group(rows.filter(isUnanswered));
+  const min = MIN_DECIDED_PER_CONFIRMATION_GROUP;
+  if (confirmed.decided < min || unanswered.decided < min) {
+    return notEnough(
+      `${confirmed.decided} confirmed and ${unanswered.decided} unanswered orders delivered or returned; each needs ${min}`,
+    );
+  }
+  const gap = unanswered.returnRate - confirmed.returnRate;
+  if (gap < MIN_CONFIRMATION_GAP_POINTS) {
+    return nothing(
+      `unanswered orders return ${unanswered.returnRate.toFixed(1)}% against ${confirmed.returnRate.toFixed(1)}% confirmed; it takes ${MIN_CONFIRMATION_GAP_POINTS} points`,
+    );
+  }
+  const declined = group(rows.filter((o) => o.confirmation === "declined"));
+  return {
+    kind: "unconfirmed_returns",
+    confirmed,
+    unanswered,
+    declinedShipped: declined.decided >= MIN_DECLINED_SHIPPED ? declined : null,
+    waiting: rows.filter((o) => unansweredWaiting(o, input.asOf ?? new Date())).length,
+    excessReturns: Math.max(0, unanswered.returned - Math.round((unanswered.decided * confirmed.returnRate) / 100)),
+    noRecord: rows.filter((o) => !o.confirmation).length,
+    decidedBy: decidedBy(rows.filter((o) => DECIDED.includes(o.outcome) && (o.confirmation === "confirmed" || isUnanswered(o)))),
+    filter: { kind: "unanswered_waiting" },
+  };
+}
+
 /** The 3PL that booked it if there was one (it pays), else the courier. */
 export const payerOf = (o: RollupOrder) => o.fulfilledVia ?? o.courier ?? "unknown";
 
@@ -516,6 +606,7 @@ export function findings(input: FindingsInput): Finding[] {
     marginFinding(input),
     courierifyStoppedFinding(input),
     missingFeesFinding(input),
+    unconfirmedFinding(input),
   ];
   const cash = cashHeldFindings(input);
   return [...single.filter((f): f is Finding => !isSkip(f)), ...(Array.isArray(cash) ? cash : [])];
@@ -530,6 +621,7 @@ export function parseOrderFilter(params: URLSearchParams): OrderFilter | null {
   if (params.get("feeMissing") === "1") return { kind: "fee_missing" };
   const awaiting = params.get("awaitingPayout");
   if (awaiting && /^[a-z0-9_-]{1,40}$/.test(awaiting)) return { kind: "awaiting_payout", payer: awaiting };
+  if (params.get("unanswered") === "waiting") return { kind: "unanswered_waiting" };
   const by = params.get("decidedBy");
   if (by === "financify" || by === "courierify") return { kind: "decided_by", app: by };
   return null;
@@ -547,6 +639,8 @@ export function orderFilterQuery(filter: OrderFilter): string {
       return "feeMissing=1";
     case "awaiting_payout":
       return `awaitingPayout=${filter.payer}`;
+    case "unanswered_waiting":
+      return "unanswered=waiting";
   }
 }
 
@@ -558,7 +652,7 @@ export function matchesFilter(
   o: RollupOrder,
   filter: OrderFilter,
   currency: string | null,
-  cash?: { payers: PayerHistory[]; asOf: Date },
+  ctx?: { payers?: PayerHistory[]; asOf?: Date },
 ): boolean {
   switch (filter.kind) {
     case "variant":
@@ -569,9 +663,11 @@ export function matchesFilter(
       return filter.app === "courierify" ? fromCourierify(o) : !fromCourierify(o);
     case "fee_missing":
       return feeMissing(o);
+    case "unanswered_waiting":
+      return o.currency === currency && unansweredWaiting(o, ctx?.asOf ?? new Date());
     case "awaiting_payout": {
-      const h = cash?.payers.find((p) => p.payer === filter.payer);
-      return !!h && o.outcome === "delivered" && fromCourierify(o) && payerOf(o) === filter.payer && isDue(o, h, cash!.asOf);
+      const h = ctx?.payers?.find((p) => p.payer === filter.payer);
+      return !!h && o.outcome === "delivered" && fromCourierify(o) && payerOf(o) === filter.payer && isDue(o, h, ctx!.asOf ?? new Date());
     }
   }
 }

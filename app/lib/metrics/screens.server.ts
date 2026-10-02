@@ -192,8 +192,8 @@ export async function ordersView(
       where: cashFilter ? { storeId, outcome: "delivered", uncollectedAmount: { not: null } } : where,
       orderBy: [{ createdAt: "desc" }, { orderId: "desc" }],
     });
-    const cash = cashFilter ? { payers: await loadPayerHistories(storeId), asOf: new Date() } : undefined;
-    const hit = all.filter((r) => matchesFilter(toRollupOrder(r), filter, store.currency, cash));
+    const ctx = { payers: cashFilter ? await loadPayerHistories(storeId) : [], asOf: new Date() };
+    const hit = all.filter((r) => matchesFilter(toRollupOrder(r), filter, store.currency, ctx));
     const shown = hit.slice(0, FILTERED_LIST_LIMIT);
     return {
       total: hit.length,

@@ -20,6 +20,7 @@ import {
   cashHeldFindings,
   marginFinding,
   missingFeesFinding,
+  unconfirmedFinding,
   variantReturnsFinding,
   type Finding,
   type FindingsInput,
@@ -35,7 +36,8 @@ export type DetectorId =
   | "margin_ceiling"
   | "courierify_stopped"
   | "missing_courier_fees"
-  | "cash_held";
+  | "cash_held"
+  | "unconfirmed_returns";
 
 export type Insight = {
   detector: DetectorId;
@@ -165,6 +167,17 @@ export const DETECTORS: readonly Detector[] = [
       return list.map((f) => insight("cash_held", f.payer, f, { group: "specific", ordersAffected: f.orders }, true));
     },
   },
+  {
+    id: "unconfirmed_returns",
+    needs: ["COURIERIFY", "FINANCIFY"],
+    label: "Orders the buyer never confirmed, and how often they come back (I8)",
+    preview: "How much more often orders the buyer never confirmed come back",
+    run(input) {
+      const f = unconfirmedFinding(input);
+      if (isSkip(f)) return f;
+      return [insight("unconfirmed_returns", "store", f, { group: "specific", ordersAffected: f.excessReturns }, false)];
+    },
+  },
 ];
 
 export function runDetectors(input: FindingsInput, connected: ReadonlySet<App>): DetectorOutcome[] {
@@ -220,5 +233,7 @@ export function evidenceOf(i: Insight): Record<string, number | string> {
       return { missing: f.missing, viaCourierify: f.viaCourierify };
     case "cash_held":
       return { orders: f.orders, daysLate: f.daysLate, lastPaidDay: f.lastPaidDay };
+    case "unconfirmed_returns":
+      return { unanswered: f.unanswered.returnRate, confirmed: f.confirmed.returnRate, waiting: f.waiting };
   }
 }

@@ -4,6 +4,7 @@ import { ArrowRight } from "lucide-react";
 
 import type {
   CashHeldFinding,
+  UnconfirmedFinding,
   CourierifyStoppedFinding,
   DecidedBy,
   DisagreementFinding,
@@ -339,6 +340,44 @@ function CashHeldCard({ f, days, id, canManage }: { f: CashHeldFinding } & CardP
   );
 }
 
+function UnconfirmedCard({ f, days, id, canManage }: { f: UnconfirmedFinding } & CardProps) {
+  const ratio = f.confirmed.returnRate ? f.unanswered.returnRate / f.confirmed.returnRate : null;
+  return (
+    <Card
+      id={id}
+      canManage={canManage}
+      title={`Orders nobody confirmed come back ${ratio ? `${ratio.toFixed(1)}× as often` : "more often"}`}
+      link={f.waiting ? { to: `/orders?days=${days}&unanswered=waiting`, label: `See the ${n(f.waiting)} waiting to be confirmed` } : undefined}
+    >
+      <p>
+        Asked on WhatsApp and never answered: <strong>{f.unanswered.returnRate.toFixed(1)}%</strong> returned (
+        {n(f.unanswered.returned)} of {n(f.unanswered.decided)}). Confirmed: {f.confirmed.returnRate.toFixed(1)}% (
+        {n(f.confirmed.returned)} of {n(f.confirmed.decided)}). That is {n(f.excessReturns)} more returns than the confirmed
+        rate would give.
+      </p>
+      {f.waiting ? (
+        <p>
+          {n(f.waiting)} unanswered order{f.waiting === 1 ? "" : "s"} from the last 7 days {f.waiting === 1 ? "has" : "have"} not gone
+          to the courier yet: a call before booking can still confirm or cancel {f.waiting === 1 ? "it" : "them"}.
+        </p>
+      ) : null}
+      {f.declinedShipped ? (
+        <p>
+          {n(f.declinedShipped.decided)} orders the buyer <strong>declined</strong> were shipped anyway, and{" "}
+          {f.declinedShipped.returnRate.toFixed(1)}% of them came back.
+        </p>
+      ) : null}
+      <Leaves
+        items={[
+          `${n(f.noRecord)} order(s) have no WhatsApp confirmation record and are left out: voice confirmations are not synced, so they may have been confirmed.`,
+          "Counted by order outcome, domestic orders only. What these returns cost is not estimated yet.",
+        ]}
+      />
+      <Sources by={f.decidedBy} extra="Confirmations from Courierify." />
+    </Card>
+  );
+}
+
 export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string; to: string }) {
   const reopen = useFetcher();
   return (
@@ -374,6 +413,8 @@ export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string
               return <MissingFeesCard key={id} f={f} {...props} />;
             case "cash_held":
               return <CashHeldCard key={id} f={f} {...props} />;
+            case "unconfirmed_returns":
+              return <UnconfirmedCard key={id} f={f} {...props} />;
           }
         })
       )}

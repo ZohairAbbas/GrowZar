@@ -162,7 +162,9 @@ const FILTER_LABEL = (f: NonNullable<OrdersView["filter"]>) =>
       ? "orders where Courierify and Financify disagree on the outcome"
       : f.kind === "fee_missing"
         ? "orders shipped through Courierify with no courier fee recorded"
-        : f.kind === "awaiting_payout"
+        : f.kind === "unanswered_waiting"
+          ? "orders the buyer never answered on WhatsApp, not yet with the courier"
+          : f.kind === "awaiting_payout"
           ? `delivered orders with no ${f.payer} payout recorded, past its usual gap (any order date, as of today)`
         : f.app === "financify"
           ? "orders with no Courierify parcel, decided by Financify"
