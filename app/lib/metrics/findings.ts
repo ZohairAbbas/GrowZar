@@ -14,7 +14,7 @@
  *  - shows measured money only. No "worth PKR X" estimate appears before a
  *    detector's backtest passes (PLAN.md §3, the money rule).
  */
-import { isPositive, parseAmount, sumByCurrency, type Money } from "./money";
+import { formatAmount, isPositive, parseAmount, sumByCurrency, type Money } from "./money";
 import type { Outcome } from "./order-grain";
 import { productLines, type Bucket, type Profit, type RollupOrder } from "./rollups";
 import type { PayerHistory } from "./settlements";
@@ -47,6 +47,13 @@ export const WAITING_MAX_AGE_DAYS = 7;
 /** I8: declined-but-shipped orders needed before their line is shown. */
 export const MIN_DECLINED_SHIPPED = 10;
 
+/** I2 (PLAN.md §4): decided orders a product needs, and the loss per 30 days worth saying. */
+export const MIN_DECIDED_FOR_PRODUCT_LOSS = 30;
+export const MIN_PRODUCT_LOSS_PER_30_DAYS = 15_000n * 1_000_000n;
+/** I12 (PLAN.md §4): decided orders a city needs, and how far above the rest it must return. */
+export const MIN_DECIDED_FOR_CITY = 100;
+export const MIN_CITY_GAP_POINTS = 10;
+
 /** I1 (PLAN.md §4): delivered-or-returned orders a route needs in a city. */
 export const MIN_DECIDED_PER_ROUTE = 50;
 /** I1: the smallest gap worth saying, in points (PLAN.md §4). */
@@ -76,7 +83,8 @@ export type OrderFilter =
   | { kind: "fee_missing" }
   | { kind: "awaiting_payout"; payer: string }
   | { kind: "unanswered_waiting" }
-  | { kind: "city_route"; city: string; courier: string; via: string };
+  | { kind: "city_route"; city: string; courier: string; via: string }
+  | { kind: "city"; city: string };
 
 export type MarginFinding = {
   kind: "margin";
@@ -183,6 +191,45 @@ export type CashHeldFinding = {
   filter: OrderFilter;
 };
 
+export type ProductLossFinding = {
+  kind: "product_loss";
+  variantId: string;
+  title: string | null;
+  /** Domestic orders in the period containing it (what its link lists). */
+  orders: number;
+  decided: number;
+  returned: number;
+  returnRate: number;
+  stillOpen: number;
+  /** Financify's allocation of ad spend to this product, before platform fees. */
+  adSpend: Money;
+  /** Had every order been delivered: placed line value − its cost − ads. */
+  ifAllDelivered: Money;
+  /** As delivered: delivered line value − its cost − ads. A ceiling. */
+  ceiling: Money;
+  deliveredValue: Money;
+  deliveredCost: Money;
+  /** The ceiling scaled to 30 days of this period. */
+  per30Days: Money;
+  periodDays: number;
+  /** Delivered lines with no cost: not subtracted, so the ceiling flatters. */
+  linesWithoutCost: number;
+};
+
+export type CityReturnsFinding = {
+  kind: "city_returns";
+  city: string;
+  decided: number;
+  returned: number;
+  returnRate: number;
+  /** The rest of the store, over the same period, for comparison. */
+  rest: { decided: number; returned: number; returnRate: number };
+  z: number;
+  lastDay: string;
+  /** Orders in the city (what its link lists). */
+  orders: number;
+};
+
 /** A courier as booked: directly, or through a 3PL ("orio"). */
 export type Route = { courier: string; via: string };
 
@@ -218,7 +265,7 @@ export type UnconfirmedFinding = {
   filter: OrderFilter;
 };
 
-export type Finding = CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding;
+export type Finding = ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding;
 
 /**
  * Why a finding is absent (G-GZR3-3). "Not enough data" and "checked, nothing
@@ -254,6 +301,12 @@ export type FindingsInput = {
   cash?: CashInput;
   /** "Now", for anything judged by age (I8's waiting orders). */
   asOf?: Date;
+  /**
+   * I2: Financify's ad spend allocated per variant over the period (before
+   * platform fees), only when every day of the period is fetched.
+   */
+  adByVariant?: Record<string, Money[]>;
+  periodDays?: number;
 };
 
 const DECIDED: Outcome[] = ["delivered", "returned"];
@@ -558,6 +611,120 @@ export function courierCityFindings(input: FindingsInput): CourierCityFinding[] 
   return out.sort((a, b) => b.worse[0]!.gapPoints - a.worse[0]!.gapPoints || a.city.localeCompare(b.city));
 }
 
+const units = (m: Money | null | undefined, currency: string) => (m && m.currency === currency ? parseAmount(m.amount)! : 0n);
+const asMoney = (u: bigint, currency: string): Money => ({ amount: formatAmount(u), currency });
+
+/**
+ * I2: a product that would be profitable if every order were delivered, and
+ * is not, as delivered. One-sided on purpose: the "as delivered" figure is a
+ * ceiling (no courier fees, no return costs, ads before platform fees, lines
+ * without a cost not subtracted), so a negative ceiling is a loss whatever
+ * the missing numbers turn out to be. Lines carry their own value and
+ * order-time cost (rule #14); returns are by order (rule #29).
+ */
+export function productLossFindings(input: FindingsInput): ProductLossFinding[] | Skip {
+  const currency = input.currency;
+  if (!currency) return notEnough("the store's currency has not been reported");
+  if (!input.adByVariant || !input.periodDays) return notEnough("ad spend per product is not fetched for every day of this period");
+  const rows = input.rows.filter(domestic(currency));
+  const out: ProductLossFinding[] = [];
+  let compared = 0;
+  for (const p of productLines(rows)) {
+    if (p.variantId.startsWith("product:")) continue;
+    const decided = p.deliveryRate.delivered + p.deliveryRate.returned;
+    if (decided < MIN_DECIDED_FOR_PRODUCT_LOSS) continue;
+    const mine = rows.filter((o) => o.lines.some((l) => l.variantId === p.variantId));
+    const live = mine.filter((o) => !["order_cancelled", "shipment_cancelled"].includes(o.outcome));
+    // Ads count in full from day one, revenue only on delivery: a young
+    // period reads as a loss (the margin card's rule, for the same reason).
+    if (p.deliveryRate.stillOpen > MAX_OPEN_SHARE_FOR_MARGIN * live.length) continue;
+    compared += 1;
+    const lines = (list: RollupOrder[]) => list.flatMap((o) => o.lines.filter((l) => l.variantId === p.variantId));
+    const placedLines = lines(live);
+    const deliveredLines = lines(mine.filter((o) => o.outcome === "delivered"));
+    const ads = (input.adByVariant[p.variantId] ?? []).reduce((a, m) => a + units(m, currency), 0n);
+    const sum = (ls: typeof placedLines, f: "value" | "cost") => ls.reduce((a, l) => a + units(l[f], currency), 0n);
+    const ifAll = sum(placedLines, "value") - sum(placedLines, "cost") - ads;
+    const ceiling = sum(deliveredLines, "value") - sum(deliveredLines, "cost") - ads;
+    const per30 = (ceiling * 30n) / BigInt(input.periodDays);
+    if (!(ifAll > 0n && ceiling < 0n && -per30 >= MIN_PRODUCT_LOSS_PER_30_DAYS)) continue;
+    out.push({
+      kind: "product_loss",
+      variantId: p.variantId,
+      title: variantTitle(rows, p.variantId),
+      orders: mine.length,
+      decided,
+      returned: p.deliveryRate.returned,
+      returnRate: pct(p.deliveryRate.returned, decided),
+      stillOpen: p.deliveryRate.stillOpen,
+      adSpend: asMoney(ads, currency),
+      ifAllDelivered: asMoney(ifAll, currency),
+      ceiling: asMoney(ceiling, currency),
+      deliveredValue: asMoney(sum(deliveredLines, "value"), currency),
+      deliveredCost: asMoney(sum(deliveredLines, "cost"), currency),
+      per30Days: asMoney(per30, currency),
+      periodDays: input.periodDays,
+      linesWithoutCost: deliveredLines.filter((l) => !l.cost).length,
+    });
+  }
+  if (!out.length) {
+    return compared
+      ? nothing(`none of ${compared} product(s) with ${MIN_DECIDED_FOR_PRODUCT_LOSS}+ decided orders loses money as delivered while looking profitable as placed`)
+      : notEnough(`no product has ${MIN_DECIDED_FOR_PRODUCT_LOSS} delivered or returned orders with most of its orders resolved`);
+  }
+  return out.sort((a, b) => parseAmount(a.ceiling.amount)! < parseAmount(b.ceiling.amount)! ? -1 : 1);
+}
+
+/**
+ * I12: a city whose orders come back far more often than the rest of the
+ * store's. Profit per city is not computed: ad spend is not allocated by
+ * city, and courier fees and return costs are mostly unrecorded, so the
+ * PLAN's "negative profit" cannot be shown honestly; the return rate can.
+ * City exists only for Courierify-booked orders (rule #12).
+ */
+export function cityReturnsFindings(input: FindingsInput): CityReturnsFinding[] | Skip {
+  const currency = input.currency;
+  if (!currency) return notEnough("the store's currency has not been reported");
+  const rows = input.rows.filter(domestic(currency));
+  const decidedAll = rows.filter((o) => DECIDED.includes(o.outcome));
+  const withCity = rows.filter((o) => fromCourierify(o) && o.city);
+  if (!withCity.length) return notEnough("no order in this period has a city: city comes only with orders shipped through Courierify");
+  const cities = [...new Set(withCity.map((o) => o.city!))];
+  const out: CityReturnsFinding[] = [];
+  let compared = 0;
+  for (const city of cities) {
+    const mine = withCity.filter((o) => o.city === city);
+    const dec = mine.filter((o) => DECIDED.includes(o.outcome));
+    if (dec.length < MIN_DECIDED_FOR_CITY) continue;
+    compared += 1;
+    const ret = dec.filter((o) => o.outcome === "returned").length;
+    const restDec = decidedAll.filter((o) => !(fromCourierify(o) && o.city === city));
+    const restRet = restDec.filter((o) => o.outcome === "returned").length;
+    if (!restDec.length) continue;
+    const rate = pct(ret, dec.length);
+    const restRate = pct(restRet, restDec.length);
+    const z = Math.round(zScore(ret, dec.length, restRet, restDec.length) * 100) / 100;
+    if (rate - restRate < MIN_CITY_GAP_POINTS || z < MIN_ROUTE_Z) continue;
+    out.push({
+      kind: "city_returns",
+      city,
+      decided: dec.length,
+      returned: ret,
+      returnRate: rate,
+      rest: { decided: restDec.length, returned: restRet, returnRate: restRate },
+      z,
+      lastDay: mine.map((o) => o.localDay ?? "").sort().at(-1) ?? "",
+      orders: mine.length,
+    });
+  }
+  if (!out.length) {
+    return compared
+      ? nothing(`none of ${compared} city(ies) with ${MIN_DECIDED_FOR_CITY}+ decided orders returns ${MIN_CITY_GAP_POINTS}+ points above the rest of the store`)
+      : notEnough(`no city has ${MIN_DECIDED_FOR_CITY} delivered or returned orders in this period`);
+  }
+  return out.sort((a, b) => b.returnRate - a.returnRate);
+}
+
 const UNANSWERED = ["timed_out", "expired"];
 const isUnanswered = (o: RollupOrder) => !!o.confirmation && UNANSWERED.includes(o.confirmation);
 /** Not yet with the courier, so a call can still stop or fix it. */
@@ -698,7 +865,12 @@ export function findings(input: FindingsInput): Finding[] {
     unconfirmedFinding(input),
   ];
   const many = (l: Finding[] | Skip): Finding[] => (Array.isArray(l) ? l : []);
-  const lists = [...many(cashHeldFindings(input)), ...many(courierCityFindings(input))];
+  const lists = [
+    ...many(cashHeldFindings(input)),
+    ...many(courierCityFindings(input)),
+    ...many(productLossFindings(input)),
+    ...many(cityReturnsFindings(input)),
+  ];
   return [...single.filter((f): f is Finding => !isSkip(f)), ...lists];
 }
 
@@ -718,6 +890,7 @@ export function parseOrderFilter(params: URLSearchParams): OrderFilter | null {
   if (city && courier && via && /^[\p{L}\p{N} .'()-]{1,60}$/u.test(city) && /^[a-z0-9_-]{1,40}$/.test(courier) && /^[a-z0-9_-]{1,40}$/.test(via)) {
     return { kind: "city_route", city, courier, via };
   }
+  if (city && !courier && /^[\p{L}\p{N} .'()-]{1,60}$/u.test(city)) return { kind: "city", city };
   const by = params.get("decidedBy");
   if (by === "financify" || by === "courierify") return { kind: "decided_by", app: by };
   return null;
@@ -739,6 +912,8 @@ export function orderFilterQuery(filter: OrderFilter): string {
       return "unanswered=waiting";
     case "city_route":
       return `city=${encodeURIComponent(filter.city)}&courier=${filter.courier}&via=${filter.via}`;
+    case "city":
+      return `city=${encodeURIComponent(filter.city)}`;
   }
 }
 
@@ -765,6 +940,8 @@ export function matchesFilter(
       return o.currency === currency && unansweredWaiting(o, ctx?.asOf ?? new Date());
     case "city_route":
       return o.currency === currency && inCityRoute(o, filter.city, filter);
+    case "city":
+      return o.currency === currency && fromCourierify(o) && o.city === filter.city;
     case "awaiting_payout": {
       const h = ctx?.payers?.find((p) => p.payer === filter.payer);
       return !!h && o.outcome === "delivered" && fromCourierify(o) && payerOf(o) === filter.payer && isDue(o, h, ctx!.asOf ?? new Date());

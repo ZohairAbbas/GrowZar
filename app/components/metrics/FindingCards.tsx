@@ -4,6 +4,8 @@ import { ArrowRight } from "lucide-react";
 
 import type {
   CashHeldFinding,
+  CityReturnsFinding,
+  ProductLossFinding,
   CourierCityFinding,
   UnconfirmedFinding,
   CourierifyStoppedFinding,
@@ -428,6 +430,61 @@ function CourierCityCard({ f, days, id, canManage }: { f: CourierCityFinding } &
   );
 }
 
+const unsigned = (m: Money) => ({ ...m, amount: m.amount.replace(/^-/, "") });
+
+function ProductLossCard({ f, days, id, canManage }: { f: ProductLossFinding } & CardProps) {
+  return (
+    <Card
+      id={id}
+      canManage={canManage}
+      title={`${f.title ?? `Variant ${f.variantId}`} loses money once returns are counted`}
+      link={{ to: `/orders?days=${days}&variant=${f.variantId}`, label: `See its ${n(f.orders)} orders` }}
+    >
+      <p>
+        Had every order been delivered, it would have made {money(f.ifAllDelivered)} after its cost and its ad spend. As
+        delivered, it lost <strong>at least {money(unsigned(f.ceiling))}</strong> ({money(unsigned(f.per30Days))} per 30
+        days): {f.returnRate.toFixed(1)}% of its orders came back ({n(f.returned)} of {n(f.decided)}).
+      </p>
+      <p className="text-xs text-gray-600">
+        Delivered value {money(f.deliveredValue)} − cost {money(f.deliveredCost)} − ad spend {money(f.adSpend)}.
+      </p>
+      <p className="text-xs font-medium text-gray-600">“At least”, because these are not subtracted yet:</p>
+      <Leaves
+        items={[
+          "Courier fees and the cost of returns: not recorded for most orders.",
+          "Ad platform fees: the ad spend is Financify's allocation to this product, before fees.",
+          ...(f.linesWithoutCost ? [`Cost on ${n(f.linesWithoutCost)} delivered line(s) that have none recorded.`] : []),
+          ...(f.stillOpen ? [`${n(f.stillOpen)} order(s) are still open; if delivered they would add to it.`] : []),
+          "Counted by order: no app records which item of a returned order came back, so a returned order counts against every product in it.",
+        ]}
+      />
+    </Card>
+  );
+}
+
+function CityReturnsCard({ f, days, id, canManage }: { f: CityReturnsFinding } & CardProps) {
+  return (
+    <Card
+      id={id}
+      canManage={canManage}
+      title={`Orders to ${f.city} come back far more often than the rest`}
+      link={{ to: `/orders?days=${days}&city=${encodeURIComponent(f.city)}`, label: `See the ${n(f.orders)} orders` }}
+    >
+      <p>
+        {f.city}: <strong>{f.returnRate.toFixed(1)}%</strong> returned ({n(f.returned)} of {n(f.decided)}). The rest of
+        the store: {f.rest.returnRate.toFixed(1)}% ({n(f.rest.returned)} of {n(f.rest.decided)}). Unlikely to be chance
+        alone (95%).
+      </p>
+      <Leaves
+        items={[
+          "Profit for the city is not shown: ad spend is not split by city, and courier fees and return costs are recorded for too few orders.",
+          `City is known only for orders shipped through Courierify; the latest compared is from ${f.lastDay}.`,
+        ]}
+      />
+    </Card>
+  );
+}
+
 export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string; to: string }) {
   const reopen = useFetcher();
   return (
@@ -467,6 +524,10 @@ export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string
               return <UnconfirmedCard key={id} f={f} {...props} />;
             case "courier_for_city":
               return <CourierCityCard key={id} f={f} {...props} />;
+            case "product_loss":
+              return <ProductLossCard key={id} f={f} {...props} />;
+            case "city_returns":
+              return <CityReturnsCard key={id} f={f} {...props} />;
           }
         })
       )}

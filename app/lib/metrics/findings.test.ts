@@ -10,6 +10,8 @@ import {
   cashHeldFindings,
   unconfirmedFinding,
   courierCityFindings,
+  productLossFindings,
+  cityReturnsFindings,
   parseOrderFilter,
   variantReturnsFinding,
   type Finding,
@@ -408,6 +410,81 @@ describe("I1: a route that delivers better in a city", () => {
   });
 });
 
+describe("I2: a product that looks profitable but loses money as delivered", () => {
+  // Each order: one line worth 4,000 that cost 1,000, so 3,000 a delivered order.
+  const lamp = (cost: string | null = "1000.00") => [{ variantId: "9", productId: "p9", title: "Desk lamp", quantity: 1, value: pkr("4000.00"), cost: cost ? pkr(cost) : null }];
+  const rows = (d = 12, r = 18, o: Partial<RollupOrder> = {}) => [
+    ...times(d, () => order({ lines: lamp(), ...o })),
+    ...times(r, () => returned({ lines: lamp(), ...o })),
+  ];
+  const withAds = (rs: RollupOrder[], ads: string, days = 30) => input(rs, { adByVariant: { "9": [pkr(ads)] }, periodDays: days });
+
+  it("says it loses at least the as-delivered figure, when placed it looked profitable", () => {
+    const [f] = found2(productLossFindings(withAds(rows(), "60000.00")));
+    expect(f).toMatchObject({
+      variantId: "9", title: "Desk lamp", decided: 30, returned: 18, returnRate: 60,
+      ifAllDelivered: pkr("30000.00"), ceiling: pkr("-24000.00"), per30Days: pkr("-24000.00"),
+    });
+  });
+
+  it("says nothing when it would lose money even if every order were delivered (not 'looks profitable')", () => {
+    expect(productLossFindings(withAds(rows(), "100000.00"))).toMatchObject({ kind: "skip", status: "nothing_found" });
+  });
+
+  it("needs a loss of 15,000 per 30 days", () => {
+    expect(productLossFindings(withAds(rows(), "37000.00"))).toMatchObject({ kind: "skip", status: "nothing_found" }); // -1,000
+    // Over 60 days the loss is halved per 30 days: 36,000 - 66,000 = -30,000, so exactly -15,000.
+    expect(found2(productLossFindings(withAds(rows(), "66000.00", 60)))[0]!.per30Days).toEqual(pkr("-15000.00"));
+    expect(productLossFindings(withAds(rows(), "55000.00", 60))).toMatchObject({ kind: "skip" }); // -9,500 per 30 days
+  });
+
+  it("does not judge a young period, where ads count in full and revenue has not arrived", () => {
+    const young = [...rows(), ...times(10, () => order({ lines: lamp(), outcome: "in_transit", delivered: null }))];
+    expect(productLossFindings(withAds(young, "60000.00"))).toMatchObject({ kind: "skip", status: "not_enough_data" });
+  });
+
+  it("needs the period's ad spend per product, and 30 decided orders", () => {
+    expect(productLossFindings(input(rows()))).toMatchObject({ kind: "skip", status: "not_enough_data" });
+    expect(productLossFindings(withAds(rows(11, 18), "60000.00"))).toMatchObject({ kind: "skip", status: "not_enough_data" });
+  });
+
+  it("stays one-sided: a delivered line with no cost is not subtracted, and is counted", () => {
+    const rs = [...rows(), order({ lines: lamp(null) })];
+    const [f] = found2(productLossFindings(withAds(rs, "60000.00")));
+    expect(f!.linesWithoutCost).toBe(1);
+    expect(f!.ceiling).toEqual(pkr("-20000.00")); // the 4,000 counted, no cost taken off
+  });
+
+  it("lists exactly its orders when its link is followed", () => {
+    expect(rows().filter((o) => matchesFilter(o, { kind: "variant", variantId: "9" }, "PKR"))).toHaveLength(30);
+  });
+});
+
+describe("I12: a city whose orders come back far more often than the rest", () => {
+  const city = (name: string | null, d: number, r: number) => [
+    ...times(d, () => order({ parcelCount: name ? 1 : 0, city: name })),
+    ...times(r, () => returned({ parcelCount: name ? 1 : 0, city: name })),
+  ];
+
+  it("compares a city with the rest of the store, and says profit is not computed", () => {
+    const [f] = found2(cityReturnsFindings(input([...city("Quetta", 50, 50), ...city("Lahore", 160, 40), ...city(null, 80, 20)])));
+    expect(f).toMatchObject({ city: "Quetta", decided: 100, returned: 50, returnRate: 50, rest: { decided: 300, returned: 60, returnRate: 20 } });
+  });
+
+  it("needs 100 decided orders, 10 points, and a gap unlikely to be chance", () => {
+    expect(cityReturnsFindings(input([...city("Quetta", 45, 50), ...city("Lahore", 160, 40)]))).toMatchObject({ kind: "skip", status: "nothing_found" });
+    expect(cityReturnsFindings(input([...city("Quetta", 72, 28), ...city("Lahore", 160, 40)]))).toMatchObject({ kind: "skip", status: "nothing_found" });
+    expect(cityReturnsFindings(input([...city("Quetta", 40, 40), ...city("Lahore", 40, 10)]))).toMatchObject({ kind: "skip", status: "not_enough_data" });
+    // 30% against 20% is 10 points, but against only 40 other orders it could be chance (z about 1.2).
+    expect(cityReturnsFindings(input([...city("Quetta", 70, 30), ...city(null, 32, 8)]))).toMatchObject({ kind: "skip", status: "nothing_found" });
+  });
+
+  it("lists exactly the city's orders when its link is followed", () => {
+    const rs = [...city("Quetta", 50, 50), ...city("Lahore", 160, 40)];
+    expect(rs.filter((o) => matchesFilter(o, { kind: "city", city: "Quetta" }, "PKR"))).toHaveLength(100);
+  });
+});
+
 describe("findings(), and the Orders filters behind each link", () => {
   it("returns nothing for an empty period rather than a card of zeros", () => {
     expect(findings(input([]))).toEqual([]);
@@ -425,5 +502,6 @@ describe("findings(), and the Orders filters behind each link", () => {
     expect(parseOrderFilter(new URLSearchParams("unanswered=waiting"))).toEqual({ kind: "unanswered_waiting" });
     expect(parseOrderFilter(new URLSearchParams("city=D.I.+Khan&courier=tcs&via=direct"))).toEqual({ kind: "city_route", city: "D.I. Khan", courier: "tcs", via: "direct" });
     expect(parseOrderFilter(new URLSearchParams("city=%3Cscript%3E&courier=tcs&via=direct"))).toBeNull();
+    expect(parseOrderFilter(new URLSearchParams("city=Quetta"))).toEqual({ kind: "city", city: "Quetta" });
   });
 });

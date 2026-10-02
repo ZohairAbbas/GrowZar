@@ -8,6 +8,7 @@ import { periodFrom } from "../metrics/screens.server";
 import { storeSummary, type StoreSummary } from "../metrics/summaries.server";
 import { toRollupOrder } from "../metrics/rollups.server";
 import { loadPayerHistories } from "../metrics/settlements.server";
+import { loadAdSpend } from "../metrics/rollups.server";
 import {
   detectorLabel,
   evidenceOf,
@@ -40,7 +41,7 @@ export async function detectorInput(
   s: StoreSummary,
   now = new Date(),
 ): Promise<{ input: FindingsInput; connected: Set<App> }> {
-  const [connections, lastParcel, payers, awaiting] = await Promise.all([
+  const [connections, lastParcel, payers, awaiting, perProduct] = await Promise.all([
     prisma.appConnection.findMany({
       where: { storeId: s.store.id, status: "CONNECTED", app: { in: ["COURIERIFY", "FINANCIFY"] } },
       select: { app: true },
@@ -56,6 +57,7 @@ export async function detectorInput(
     prisma.orderGrain.findMany({
       where: { storeId: s.store.id, outcome: "delivered", parcelCount: { gt: 0 }, uncollectedAmount: { not: null } },
     }),
+    loadAdSpend(s.store.id, s.period.from, s.period.to),
   ]);
   const connected = new Set(connections.map((c) => c.app as App));
   const ads = s.adSpend;
@@ -73,6 +75,9 @@ export async function detectorInput(
       courierify: { connected: connected.has("COURIERIFY"), lastParcelDay: lastParcel?.localDay ?? null },
       cash: { asOf: now, payers, awaiting: awaiting.map(toRollupOrder) },
       asOf: now,
+      // I2: per-product allocation, only when the period is fully fetched.
+      adByVariant: complete ? Object.fromEntries(perProduct.byVariant) : undefined,
+      periodDays: s.adSpend?.daysInPeriod,
     },
   };
 }

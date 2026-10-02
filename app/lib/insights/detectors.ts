@@ -22,6 +22,8 @@ import {
   missingFeesFinding,
   unconfirmedFinding,
   courierCityFindings,
+  productLossFindings,
+  cityReturnsFindings,
   variantReturnsFinding,
   type Finding,
   type FindingsInput,
@@ -39,7 +41,9 @@ export type DetectorId =
   | "missing_courier_fees"
   | "cash_held"
   | "unconfirmed_returns"
-  | "courier_for_city";
+  | "courier_for_city"
+  | "product_loss"
+  | "city_returns";
 
 export type Insight = {
   detector: DetectorId;
@@ -198,6 +202,30 @@ export const DETECTORS: readonly Detector[] = [
       });
     },
   },
+  {
+    id: "product_loss",
+    needs: ["COURIERIFY", "FINANCIFY"],
+    label: "A product that looks profitable but loses money after returns (I2)",
+    preview: "Which products look profitable until returns are counted",
+    run(input) {
+      const list = productLossFindings(input);
+      if (!Array.isArray(list)) return list;
+      return list.map((f) => insight("product_loss", f.variantId, f, { group: "specific", ordersAffected: f.returned }, true));
+    },
+  },
+  {
+    id: "city_returns",
+    needs: ["COURIERIFY", "FINANCIFY"],
+    label: "A city whose orders come back far more often (I12)",
+    preview: "Cities where orders come back far more often than the rest",
+    run(input) {
+      const list = cityReturnsFindings(input);
+      if (!Array.isArray(list)) return list;
+      return list.map((f) =>
+        insight("city_returns", f.city.toLowerCase(), f, { group: "specific", ordersAffected: Math.max(0, f.returned - Math.round((f.decided * f.rest.returnRate) / 100)) }, false),
+      );
+    },
+  },
 ];
 
 export function runDetectors(input: FindingsInput, connected: ReadonlySet<App>): DetectorOutcome[] {
@@ -255,6 +283,10 @@ export function evidenceOf(i: Insight): Record<string, number | string> {
       return { orders: f.orders, daysLate: f.daysLate, lastPaidDay: f.lastPaidDay };
     case "unconfirmed_returns":
       return { unanswered: f.unanswered.returnRate, confirmed: f.confirmed.returnRate, waiting: f.waiting };
+    case "product_loss":
+      return { ceiling: f.ceiling.amount, per30Days: f.per30Days.amount, returnRate: f.returnRate };
+    case "city_returns":
+      return { returnRate: f.returnRate, rest: f.rest.returnRate, decided: f.decided };
     case "courier_for_city":
       return { best: `${f.best.courier}/${f.best.via}`, bestRate: f.best.rate, worst: `${f.worse[0]!.courier}/${f.worse[0]!.via}`, gap: f.worse[0]!.gapPoints };
   }
