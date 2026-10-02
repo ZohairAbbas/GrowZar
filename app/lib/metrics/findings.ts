@@ -31,6 +31,8 @@ export const MIN_DISAGREEMENTS = 5;
  * "2,039% of delivered revenue" with 122 of 142 orders still open.
  */
 export const MAX_OPEN_SHARE_FOR_MARGIN = 0.15;
+/** I13: Courierify-booked shipped orders without a fee needed to say so. */
+export const MIN_MISSING_FEES = 25;
 /** Shipped orders needed before "Courierify stopped" is said at all. */
 export const MIN_SHIPPED_FOR_COVERAGE = 20;
 
@@ -40,7 +42,8 @@ export type DecidedBy = { courierify: number; financify: number };
 export type OrderFilter =
   | { kind: "variant"; variantId: string }
   | { kind: "disagree" }
-  | { kind: "decided_by"; app: "financify" | "courierify" };
+  | { kind: "decided_by"; app: "financify" | "courierify" }
+  | { kind: "fee_missing" };
 
 export type MarginFinding = {
   kind: "margin";
@@ -110,7 +113,22 @@ export type CourierifyStoppedFinding = {
   filter: OrderFilter;
 };
 
-export type Finding = MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding;
+export type MissingFeesFinding = {
+  kind: "missing_fees";
+  /** Shipped through Courierify, and Courierify records no cost for them. */
+  missing: number;
+  /** Shipped through Courierify in all, with or without a fee. */
+  viaCourierify: number;
+  /** Of `missing`, by courier, largest first. */
+  byCourier: Array<{ courier: string; missing: number; shipped: number }>;
+  /** Of `missing`, how many went through a 3PL (Courierify's `fulfilledVia`). */
+  via3pl: number;
+  /** Shipped outside Courierify: no fee source exists for them at all. */
+  outsideCourierify: number;
+  filter: OrderFilter;
+};
+
+export type Finding = MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding;
 
 /**
  * Why a finding is absent (G-GZR3-3). "Not enough data" and "checked, nothing
@@ -325,6 +343,54 @@ export function courierifyStoppedFinding(input: FindingsInput): CourierifyStoppe
   };
 }
 
+const feeMissing = (o: RollupOrder) => fromCourierify(o) && SHIPPED.includes(o.outcome) && !o.courierFee;
+
+/**
+ * I13 (PLAN.md §4): shipped orders whose courier fee Courierify does not
+ * record, so every profit after courier fees overstates. Courierify-booked
+ * parcels only: those are the gap someone can close (the fee arrives through
+ * Courierify's courier_costs metafield, rule #13). Orders shipped outside
+ * Courierify have no fee source at all; they are counted, not the finding
+ * (the "Courierify stopped" card covers them). Counts only: the median-fee
+ * estimate waits for its backtest (the money rule).
+ */
+export function missingFeesFinding(input: FindingsInput): MissingFeesFinding | Skip {
+  const shipped = input.rows.filter((o) => SHIPPED.includes(o.outcome));
+  const via = shipped.filter(fromCourierify);
+  const outsideCourierify = shipped.length - via.length;
+  if (!via.length) {
+    return notEnough(
+      shipped.length
+        ? `none of ${shipped.length} shipped order(s) went through Courierify, so there is no fee to be missing; they have no fee source at all`
+        : "no shipped orders in this period",
+    );
+  }
+  const missing = via.filter(feeMissing);
+  if (missing.length < MIN_MISSING_FEES) {
+    return nothing(`${missing.length} of ${via.length} orders shipped through Courierify lack a fee; it takes ${MIN_MISSING_FEES}`);
+  }
+  const couriers = new Map<string, { missing: number; shipped: number }>();
+  for (const o of via) {
+    const key = o.courier ?? "unknown";
+    const c = couriers.get(key) ?? { missing: 0, shipped: 0 };
+    c.shipped += 1;
+    if (!o.courierFee) c.missing += 1;
+    couriers.set(key, c);
+  }
+  return {
+    kind: "missing_fees",
+    missing: missing.length,
+    viaCourierify: via.length,
+    byCourier: [...couriers.entries()]
+      .filter(([, c]) => c.missing)
+      .map(([courier, c]) => ({ courier, ...c }))
+      .sort((a, b) => b.missing - a.missing || a.courier.localeCompare(b.courier)),
+    via3pl: missing.filter((o) => o.fulfilledVia).length,
+    outsideCourierify,
+    filter: { kind: "fee_missing" },
+  };
+}
+
 /** Every finding that passes its gate. Ranking lives in app/lib/insights. */
 export function findings(input: FindingsInput): Finding[] {
   return [
@@ -332,6 +398,7 @@ export function findings(input: FindingsInput): Finding[] {
     variantReturnsFinding(input),
     marginFinding(input),
     courierifyStoppedFinding(input),
+    missingFeesFinding(input),
   ].filter((f): f is Finding => !isSkip(f));
 }
 
@@ -341,6 +408,7 @@ export function parseOrderFilter(params: URLSearchParams): OrderFilter | null {
   const variant = params.get("variant");
   if (variant && /^\d+$/.test(variant)) return { kind: "variant", variantId: variant };
   if (params.get("disagree") === "1") return { kind: "disagree" };
+  if (params.get("feeMissing") === "1") return { kind: "fee_missing" };
   const by = params.get("decidedBy");
   if (by === "financify" || by === "courierify") return { kind: "decided_by", app: by };
   return null;
@@ -354,6 +422,8 @@ export function orderFilterQuery(filter: OrderFilter): string {
       return "disagree=1";
     case "decided_by":
       return `decidedBy=${filter.app}`;
+    case "fee_missing":
+      return "feeMissing=1";
   }
 }
 
@@ -369,5 +439,7 @@ export function matchesFilter(o: RollupOrder, filter: OrderFilter, currency: str
       return disagrees(o);
     case "decided_by":
       return filter.app === "courierify" ? fromCourierify(o) : !fromCourierify(o);
+    case "fee_missing":
+      return feeMissing(o);
   }
 }

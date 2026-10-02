@@ -18,6 +18,7 @@ import {
   disagreementFinding,
   isSkip,
   marginFinding,
+  missingFeesFinding,
   variantReturnsFinding,
   type Finding,
   type FindingsInput,
@@ -27,7 +28,12 @@ import {
 
 export type App = "COURIERIFY" | "FINANCIFY";
 
-export type DetectorId = "outcome_disagreement" | "variant_returns" | "margin_ceiling" | "courierify_stopped";
+export type DetectorId =
+  | "outcome_disagreement"
+  | "variant_returns"
+  | "margin_ceiling"
+  | "courierify_stopped"
+  | "missing_courier_fees";
 
 export type Insight = {
   detector: DetectorId;
@@ -132,6 +138,19 @@ export const DETECTORS: readonly Detector[] = [
       return [insight("courierify_stopped", "store", f, { group: "context", ordersAffected: f.shipped - f.withParcel }, false)];
     },
   },
+  {
+    id: "missing_courier_fees",
+    needs: ["COURIERIFY", "FINANCIFY"],
+    label: "Shipped orders whose courier fee is not recorded (I13)",
+    preview: "Orders whose courier fee is missing, so profit reads higher than it is",
+    run(input) {
+      const f = missingFeesFinding(input);
+      if (isSkip(f)) return f;
+      // Context, not specific: a data gap of thousands of orders would
+      // otherwise outrank every finding about the business itself.
+      return [insight("missing_courier_fees", "store", f, { group: "context", ordersAffected: f.missing }, false)];
+    },
+  },
 ];
 
 export function runDetectors(input: FindingsInput, connected: ReadonlySet<App>): DetectorOutcome[] {
@@ -183,5 +202,7 @@ export function evidenceOf(i: Insight): Record<string, number | string> {
       return { ceiling: f.ceiling.amount, currency: f.ceiling.currency, adsShare: f.adsShareOfDelivered };
     case "courierify_stopped":
       return { lastParcelDay: f.lastParcelDay, shipped: f.shipped, withParcel: f.withParcel };
+    case "missing_fees":
+      return { missing: f.missing, viaCourierify: f.viaCourierify };
   }
 }

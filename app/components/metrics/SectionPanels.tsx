@@ -160,9 +160,11 @@ const FILTER_LABEL = (f: NonNullable<OrdersView["filter"]>) =>
     ? `orders containing variant ${f.variantId} (international orders left out)`
     : f.kind === "disagree"
       ? "orders where Courierify and Financify disagree on the outcome"
-      : f.app === "financify"
-        ? "orders with no Courierify parcel, decided by Financify"
-        : "orders decided by Courierify";
+      : f.kind === "fee_missing"
+        ? "orders shipped through Courierify with no courier fee recorded"
+        : f.app === "financify"
+          ? "orders with no Courierify parcel, decided by Financify"
+          : "orders decided by Courierify";
 
 export function OrdersPanel({ view, days }: { view: OrdersView; days: number }) {
   const disagree = view.filter?.kind === "disagree";

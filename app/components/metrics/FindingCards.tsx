@@ -8,6 +8,7 @@ import type {
   DisagreementFinding,
   Finding,
   MarginFinding,
+  MissingFeesFinding,
   VariantReturnsFinding,
   VariantRate,
 } from "~/lib/metrics/findings";
@@ -266,6 +267,38 @@ function CourierifyStoppedCard({ f, days, id, canManage }: { f: CourierifyStoppe
   );
 }
 
+function MissingFeesCard({ f, days, id, canManage }: { f: MissingFeesFinding } & CardProps) {
+  const top = f.byCourier.slice(0, 4);
+  return (
+    <Card
+      id={id}
+      canManage={canManage}
+      title={`No courier fee recorded on ${n(f.missing)} of ${n(f.viaCourierify)} orders shipped through Courierify`}
+      link={{ to: `/orders?days=${days}&feeMissing=1`, label: `See the ${n(f.missing)} orders` }}
+    >
+      <p>
+        Courierify holds no courier cost for these parcels, so neither Financify nor Growzar can subtract it, and every
+        profit figure that includes them reads higher than it is.
+      </p>
+      <ul className="space-y-0.5 text-xs text-gray-600">
+        {top.map((c) => (
+          <li key={c.courier}>
+            {c.courier}: {n(c.missing)} of {n(c.shipped)} without a fee
+          </li>
+        ))}
+        {f.byCourier.length > top.length ? <li>and {n(f.byCourier.length - top.length)} more courier(s)</li> : null}
+      </ul>
+      <Leaves
+        items={[
+          ...(f.via3pl ? [`${n(f.via3pl)} of them went through a 3PL, whose charges may sit with the 3PL rather than in Courierify.`] : []),
+          ...(f.outsideCourierify ? [`${n(f.outsideCourierify)} more shipped order(s) did not go through Courierify at all, so no app records their fee.`] : []),
+          "How much this understates costs is not estimated yet: that waits until the estimate has been checked against past data.",
+        ]}
+      />
+    </Card>
+  );
+}
+
 export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string; to: string }) {
   const reopen = useFetcher();
   return (
@@ -297,6 +330,8 @@ export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string
               return <MarginCard key={id} f={f} {...props} />;
             case "courierify_stopped":
               return <CourierifyStoppedCard key={id} f={f} {...props} />;
+            case "missing_fees":
+              return <MissingFeesCard key={id} f={f} {...props} />;
           }
         })
       )}

@@ -6,6 +6,7 @@ import {
   findings,
   marginFinding,
   matchesFilter,
+  missingFeesFinding,
   parseOrderFilter,
   variantReturnsFinding,
   type Finding,
@@ -205,6 +206,46 @@ describe("card (d): the store stopped booking through Courierify", () => {
   });
 });
 
+describe("I13: orders shipped through Courierify with no courier fee recorded", () => {
+  const fee = pkr("250.00");
+  const via = (o: Partial<RollupOrder>) => order({ parcelCount: 1, courier: "trax", ...o });
+  const rows = [
+    ...times(20, () => via({})),
+    ...times(8, () => via({ fulfilledVia: "orio" })),
+    ...times(3, () => via({ courier: "tcs", outcome: "returned", delivered: pkr("0.00") })),
+    ...times(10, () => via({ courierFee: fee })),
+    // Not shipped: no fee is owed yet.
+    ...times(5, () => via({ outcome: "booked", delivered: null })),
+    // Outside Courierify: counted, not the finding.
+    ...times(7, () => order({ parcelCount: 0 })),
+  ];
+
+  it("counts Courierify-booked shipped orders without a fee, by courier, returns included", () => {
+    const f = found(missingFeesFinding(input(rows)));
+    expect(f).toMatchObject({ missing: 31, viaCourierify: 41, via3pl: 8, outsideCourierify: 7 });
+    expect(f.byCourier).toEqual([
+      { courier: "trax", missing: 28, shipped: 38 },
+      { courier: "tcs", missing: 3, shipped: 3 },
+    ]);
+  });
+
+  it("stays silent below 25", () => {
+    expect(missingFeesFinding(input(rows.slice(7)))).toMatchObject({ kind: "skip", status: "nothing_found" });
+  });
+
+  it("does not blame Courierify for orders it never shipped", () => {
+    expect(missingFeesFinding(input(times(40, () => order({ parcelCount: 0 }))))).toMatchObject({
+      kind: "skip",
+      status: "not_enough_data",
+      reason: expect.stringMatching(/none of 40 shipped/),
+    });
+  });
+
+  it("lists exactly the orders it counted when its link is followed", () => {
+    expect(rows.filter((o) => matchesFilter(o, { kind: "fee_missing" }, "PKR"))).toHaveLength(31);
+  });
+});
+
 describe("findings(), and the Orders filters behind each link", () => {
   it("returns nothing for an empty period rather than a card of zeros", () => {
     expect(findings(input([]))).toEqual([]);
@@ -216,5 +257,6 @@ describe("findings(), and the Orders filters behind each link", () => {
     expect(parseOrderFilter(new URLSearchParams("disagree=1"))).toEqual({ kind: "disagree" });
     expect(parseOrderFilter(new URLSearchParams("decidedBy=financify"))).toEqual({ kind: "decided_by", app: "financify" });
     expect(parseOrderFilter(new URLSearchParams("decidedBy=preventify"))).toBeNull();
+    expect(parseOrderFilter(new URLSearchParams("feeMissing=1"))).toEqual({ kind: "fee_missing" });
   });
 });

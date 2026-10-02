@@ -45,7 +45,8 @@ const found = (outcomes: ReturnType<typeof runDetectors>) => outcomes.flatMap((o
 describe("detectors: every answer is found, nothing found, not enough data, or locked", () => {
   it("gives one insight per flagged product, with a fingerprint that names it", () => {
     const fps = found(runDetectors(input(), both)).map((i) => i.fingerprint).sort();
-    expect(fps).toEqual(["margin_ceiling:store", "outcome_disagreement:store", "variant_returns:2", "variant_returns:3"]);
+    // The made-up store records no courier fee, so I13 fires too.
+    expect(fps).toEqual(["margin_ceiling:store", "missing_courier_fees:store", "outcome_disagreement:store", "variant_returns:2", "variant_returns:3"]);
     for (const i of found(runDetectors(input(), both)).filter((x) => x.detector === "variant_returns")) {
       expect(i.finding.kind === "variant_returns" && i.finding.flagged.map((v) => v.variantId)).toEqual([i.subject]);
     }
@@ -69,7 +70,8 @@ describe("ranking: specific findings by orders affected, then store-wide context
     const ranked = rankInsights(found(runDetectors(input(), both))).map((i) => i.fingerprint);
     // Store rate is 59 of 166 = 35.5%, so 30 decided orders "should" bring 11
     // returns. Product 2: 18, so 7 more; disagreements: 6; product 3: 15, 4 more.
-    expect(ranked).toEqual(["variant_returns:2", "outcome_disagreement:store", "variant_returns:3", "margin_ceiling:store"]);
+    // Context after, by orders: I13's 172 unpriced orders before margin's 107 delivered.
+    expect(ranked).toEqual(["variant_returns:2", "outcome_disagreement:store", "variant_returns:3", "missing_courier_fees:store", "margin_ceiling:store"]);
   });
 
   it("is stable for equal sizes", () => {
