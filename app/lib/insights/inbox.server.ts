@@ -6,6 +6,8 @@ import { sumByCurrency } from "../metrics/money";
 import { localDayOf } from "../metrics/order-grain";
 import { periodFrom } from "../metrics/screens.server";
 import { storeSummary, type StoreSummary } from "../metrics/summaries.server";
+import { toRollupOrder } from "../metrics/rollups.server";
+import { loadPayerHistories } from "../metrics/settlements.server";
 import {
   detectorLabel,
   evidenceOf,
@@ -34,8 +36,11 @@ export const EVALUATION_DAYS = 90;
 /** Alert fatigue (DECISION-LAYER B4): at most this many cards at once. */
 export const MAX_SHOWN = 6;
 
-export async function detectorInput(s: StoreSummary): Promise<{ input: FindingsInput; connected: Set<App> }> {
-  const [connections, lastParcel] = await Promise.all([
+export async function detectorInput(
+  s: StoreSummary,
+  now = new Date(),
+): Promise<{ input: FindingsInput; connected: Set<App> }> {
+  const [connections, lastParcel, payers, awaiting] = await Promise.all([
     prisma.appConnection.findMany({
       where: { storeId: s.store.id, status: "CONNECTED", app: { in: ["COURIERIFY", "FINANCIFY"] } },
       select: { app: true },
@@ -44,6 +49,12 @@ export async function detectorInput(s: StoreSummary): Promise<{ input: FindingsI
       where: { storeId: s.store.id, parcelCount: { gt: 0 }, localDay: { not: null } },
       orderBy: { localDay: "desc" },
       select: { localDay: true },
+    }),
+    // I4 reads today's state, whatever the period: every payer's payouts,
+    // and every delivered order whose COD no settlement covers yet.
+    loadPayerHistories(s.store.id),
+    prisma.orderGrain.findMany({
+      where: { storeId: s.store.id, outcome: "delivered", parcelCount: { gt: 0 }, uncollectedAmount: { not: null } },
     }),
   ]);
   const connected = new Set(connections.map((c) => c.app as App));
@@ -60,6 +71,7 @@ export async function detectorInput(s: StoreSummary): Promise<{ input: FindingsI
       // when every day of the period is fetched.
       adSpend: complete ? sumByCurrency([...ads.spend, ...ads.fees]) : null,
       courierify: { connected: connected.has("COURIERIFY"), lastParcelDay: lastParcel?.localDay ?? null },
+      cash: { asOf: now, payers, awaiting: awaiting.map(toRollupOrder) },
     },
   };
 }
@@ -80,7 +92,7 @@ export async function evaluateStore(storeId: string, now = new Date()): Promise<
   const started = Date.now();
   const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { timezone: true } });
   const period = periodFrom(new URL(`http://evaluation/?days=${EVALUATION_DAYS}`), store.timezone, now);
-  const { input, connected } = await detectorInput(await storeSummary(storeId, period.from, period.to));
+  const { input, connected } = await detectorInput(await storeSummary(storeId, period.from, period.to), now);
   const outcomes = runDetectors(input, connected);
   const found = foundIn(outcomes);
   const conclusive = new Set(outcomes.filter((o) => o.status === "found" || o.status === "nothing_found").map((o) => o.detector));
@@ -150,7 +162,7 @@ export async function inboxView(
   viewer: { userId: string; canSeeMoney: boolean; canManage: boolean },
   now = new Date(),
 ): Promise<InboxView> {
-  const { input, connected } = await detectorInput(s);
+  const { input, connected } = await detectorInput(s, now);
   const outcomes = runDetectors(input, connected);
   let insights = rankInsights(foundIn(outcomes));
   // Money leaves the server only for a viewer who may see Finance.

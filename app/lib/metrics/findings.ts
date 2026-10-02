@@ -14,9 +14,10 @@
  *  - shows measured money only. No "worth PKR X" estimate appears before a
  *    detector's backtest passes (PLAN.md §3, the money rule).
  */
-import { parseAmount, sumByCurrency, type Money } from "./money";
+import { isPositive, parseAmount, sumByCurrency, type Money } from "./money";
 import type { Outcome } from "./order-grain";
 import { productLines, type Bucket, type Profit, type RollupOrder } from "./rollups";
+import type { PayerHistory } from "./settlements";
 
 /** A variant needs this many delivered-or-returned orders to be compared. */
 export const MIN_DECIDED_PER_VARIANT = 30;
@@ -33,6 +34,11 @@ export const MIN_DISAGREEMENTS = 5;
 export const MAX_OPEN_SHARE_FOR_MARGIN = 0.15;
 /** I13: Courierify-booked shipped orders without a fee needed to say so. */
 export const MIN_MISSING_FEES = 25;
+/** I4 (PLAN.md §4): outstanding COD above this, or a payout this many days late. */
+export const CASH_HELD_MIN_PKR = 50_000n * 1_000_000n;
+export const CASH_HELD_LATE_DAYS = 7;
+/** Days past a payer's own gap before a delivery counts as "should be paid by now". */
+export const CASH_HELD_GRACE_DAYS = 3;
 /** Shipped orders needed before "Courierify stopped" is said at all. */
 export const MIN_SHIPPED_FOR_COVERAGE = 20;
 
@@ -43,7 +49,8 @@ export type OrderFilter =
   | { kind: "variant"; variantId: string }
   | { kind: "disagree" }
   | { kind: "decided_by"; app: "financify" | "courierify" }
-  | { kind: "fee_missing" };
+  | { kind: "fee_missing" }
+  | { kind: "awaiting_payout"; payer: string };
 
 export type MarginFinding = {
   kind: "margin";
@@ -128,7 +135,29 @@ export type MissingFeesFinding = {
   filter: OrderFilter;
 };
 
-export type Finding = MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding;
+export type CashHeldFinding = {
+  kind: "cash_held";
+  /** Who pays: the 3PL when there is one, else the courier. */
+  payer: string;
+  /** Delivered orders past the payer's own gap with no payout recorded. */
+  orders: number;
+  /** Their COD, per currency (rule #4). */
+  cod: Money[];
+  oldestDay: string | null;
+  lastPaidDay: string;
+  medianGapDays: number;
+  /** An order counts once delivered this many days ago: the gap plus grace. */
+  dueAfterDays: number;
+  /** Days since the last payout, beyond the payer's own gap. */
+  daysLate: number;
+  disputed: number;
+  asOf: string;
+  /** Payers with delivered, unpaid orders but too few payouts to judge. */
+  notJudged: Array<{ payer: string; orders: number }>;
+  filter: OrderFilter;
+};
+
+export type Finding = CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding;
 
 /**
  * Why a finding is absent (G-GZR3-3). "Not enough data" and "checked, nothing
@@ -140,6 +169,17 @@ const notEnough = (reason: string): Skip => ({ kind: "skip", status: "not_enough
 const nothing = (reason: string): Skip => ({ kind: "skip", status: "nothing_found", reason });
 export const isSkip = (x: Finding | Skip): x is Skip => x.kind === "skip";
 
+/**
+ * I4's input: store-wide, as of now, not the chosen period. Cash a courier
+ * holds is today's state, whenever the order was placed.
+ */
+export type CashInput = {
+  asOf: Date;
+  payers: PayerHistory[];
+  /** Delivered orders through Courierify whose COD no settlement covers (any date). */
+  awaiting: RollupOrder[];
+};
+
 export type FindingsInput = {
   /** The store's own currency (rule #4); a finding about money needs it. */
   currency: string | null;
@@ -149,6 +189,8 @@ export type FindingsInput = {
   /** Ad spend with platform fees, only when every day of the period is fetched. */
   adSpend: Money[] | null;
   courierify: { connected: boolean; lastParcelDay: string | null };
+  /** I4 only; absent where it was not loaded. */
+  cash?: CashInput;
 };
 
 const DECIDED: Outcome[] = ["delivered", "returned"];
@@ -391,15 +433,92 @@ export function missingFeesFinding(input: FindingsInput): MissingFeesFinding | S
   };
 }
 
+/** The 3PL that booked it if there was one (it pays), else the courier. */
+export const payerOf = (o: RollupOrder) => o.fulfilledVia ?? o.courier ?? "unknown";
+
+const dayOf = (d: Date) => d.toISOString().slice(0, 10);
+
+/**
+ * Should this order's COD have been paid by now? Delivered (by the time the
+ * status was seen) longer ago than the payer's own gap plus a grace period.
+ */
+export function isDue(o: RollupOrder, h: PayerHistory, asOf: Date): boolean {
+  // Nothing to collect (a prepaid parcel's COD is 0.00) is never "owed".
+  if (h.medianGapDays === null || !isPositive(o.uncollected)) return false;
+  const at = o.outcomeTiming?.at ?? o.createdAt;
+  if (!at) return false;
+  return asOf.getTime() - at.getTime() > (h.medianGapDays + CASH_HELD_GRACE_DAYS) * 86_400_000;
+}
+
+/**
+ * I4: COD a courier or 3PL has not paid, judged against its own payout
+ * rhythm on this store. Courierify data alone (D-47's exception).
+ * "Not recorded as paid" is what the data shows; whether the money arrived
+ * elsewhere (a 3PL paying outside Courierify) is for the card to say.
+ */
+export function cashHeldFindings(input: FindingsInput): CashHeldFinding[] | Skip {
+  const cash = input.cash;
+  if (!cash) return notEnough("settlement history is not loaded");
+  const owed = cash.awaiting.filter((o) => isPositive(o.uncollected));
+  if (!owed.length) return nothing("every delivered order through Courierify with COD to collect has a payout recorded");
+  const asOf = dayOf(cash.asOf);
+  const history = new Map(cash.payers.map((h) => [h.payer, h]));
+  const byPayer = new Map<string, RollupOrder[]>();
+  for (const o of owed) byPayer.set(payerOf(o), [...(byPayer.get(payerOf(o)) ?? []), o]);
+
+  const notJudged = [...byPayer.entries()]
+    .filter(([payer]) => history.get(payer)?.medianGapDays == null)
+    .map(([payer, list]) => ({ payer, orders: list.length }))
+    .sort((a, b) => b.orders - a.orders || a.payer.localeCompare(b.payer));
+
+  const out: CashHeldFinding[] = [];
+  for (const [payer, list] of byPayer) {
+    const h = history.get(payer);
+    if (!h || h.medianGapDays === null || !h.lastPaidDay) continue;
+    const due = list.filter((o) => isDue(o, h, cash.asOf));
+    if (!due.length) continue;
+    const cod = sumByCurrency(due.map((o) => o.uncollected));
+    // Calendar days, last payout day to today: not hours rounded to days.
+    const sinceLast = Math.round((Date.parse(`${asOf}T00:00:00Z`) - Date.parse(`${h.lastPaidDay}T00:00:00Z`)) / 86_400_000);
+    const daysLate = Math.max(0, sinceLast - h.medianGapDays);
+    const pkr = parseAmount(cod.find((m) => m.currency === "PKR")?.amount ?? "0")!;
+    if (pkr <= CASH_HELD_MIN_PKR && daysLate <= CASH_HELD_LATE_DAYS) continue;
+    const days = due.map((o) => (o.outcomeTiming?.at ?? o.createdAt)!).sort((a, b) => a.getTime() - b.getTime());
+    out.push({
+      kind: "cash_held",
+      payer,
+      orders: due.length,
+      cod,
+      oldestDay: days[0] ? dayOf(days[0]) : null,
+      lastPaidDay: h.lastPaidDay,
+      medianGapDays: h.medianGapDays,
+      dueAfterDays: h.medianGapDays + CASH_HELD_GRACE_DAYS,
+      daysLate,
+      disputed: h.disputed,
+      asOf,
+      notJudged,
+      filter: { kind: "awaiting_payout", payer },
+    });
+  }
+  if (!out.length) {
+    return notJudged.length && notJudged.length === byPayer.size
+      ? notEnough(`${notJudged.map((p) => p.payer).join(", ")}: too few payouts recorded to know when they pay`)
+      : nothing("no payer is late or holding more than 50,000 PKR beyond its usual gap");
+  }
+  return out.sort((a, b) => b.orders - a.orders || a.payer.localeCompare(b.payer));
+}
+
 /** Every finding that passes its gate. Ranking lives in app/lib/insights. */
 export function findings(input: FindingsInput): Finding[] {
-  return [
+  const single: Array<Finding | Skip> = [
     disagreementFinding(input),
     variantReturnsFinding(input),
     marginFinding(input),
     courierifyStoppedFinding(input),
     missingFeesFinding(input),
-  ].filter((f): f is Finding => !isSkip(f));
+  ];
+  const cash = cashHeldFindings(input);
+  return [...single.filter((f): f is Finding => !isSkip(f)), ...(Array.isArray(cash) ? cash : [])];
 }
 
 // ── Drill-down: the same predicates, for the Orders list ─────────────────────
@@ -409,6 +528,8 @@ export function parseOrderFilter(params: URLSearchParams): OrderFilter | null {
   if (variant && /^\d+$/.test(variant)) return { kind: "variant", variantId: variant };
   if (params.get("disagree") === "1") return { kind: "disagree" };
   if (params.get("feeMissing") === "1") return { kind: "fee_missing" };
+  const awaiting = params.get("awaitingPayout");
+  if (awaiting && /^[a-z0-9_-]{1,40}$/.test(awaiting)) return { kind: "awaiting_payout", payer: awaiting };
   const by = params.get("decidedBy");
   if (by === "financify" || by === "courierify") return { kind: "decided_by", app: by };
   return null;
@@ -424,6 +545,8 @@ export function orderFilterQuery(filter: OrderFilter): string {
       return `decidedBy=${filter.app}`;
     case "fee_missing":
       return "feeMissing=1";
+    case "awaiting_payout":
+      return `awaitingPayout=${filter.payer}`;
   }
 }
 
@@ -431,7 +554,12 @@ export function orderFilterQuery(filter: OrderFilter): string {
  * Whether an order belongs to a filter. `currency` is the store's: the
  * variant filter leaves out international orders exactly as the card does.
  */
-export function matchesFilter(o: RollupOrder, filter: OrderFilter, currency: string | null): boolean {
+export function matchesFilter(
+  o: RollupOrder,
+  filter: OrderFilter,
+  currency: string | null,
+  cash?: { payers: PayerHistory[]; asOf: Date },
+): boolean {
   switch (filter.kind) {
     case "variant":
       return o.currency === currency && o.lines.some((l) => l.variantId === filter.variantId);
@@ -441,5 +569,9 @@ export function matchesFilter(o: RollupOrder, filter: OrderFilter, currency: str
       return filter.app === "courierify" ? fromCourierify(o) : !fromCourierify(o);
     case "fee_missing":
       return feeMissing(o);
+    case "awaiting_payout": {
+      const h = cash?.payers.find((p) => p.payer === filter.payer);
+      return !!h && o.outcome === "delivered" && fromCourierify(o) && payerOf(o) === filter.payer && isDue(o, h, cash!.asOf);
+    }
   }
 }

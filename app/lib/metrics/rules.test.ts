@@ -98,7 +98,7 @@ function row(o: Partial<RollupOrder> = {}): RollupOrder {
     placed: pkr("1000.00"),
     delivered: pkr("1000.00"),
     refunded: pkr("0.00"),
-    collected: null,
+    collected: null, uncollected: null,
     cogs: pkr("300.00"),
     cogsComplete: true,
     courierFee: pkr("200.00"),

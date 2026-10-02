@@ -22,6 +22,7 @@ export type RollupOrder = Pick<
   | "delivered"
   | "refunded"
   | "collected"
+  | "uncollected"
   | "cogs"
   | "cogsComplete"
   | "courierFee"

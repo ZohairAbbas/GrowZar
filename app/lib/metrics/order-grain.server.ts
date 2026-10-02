@@ -102,6 +102,8 @@ function toRow(storeId: string, g: OrderGrain): Prisma.OrderGrainCreateManyInput
     taxAmount: decimal(g.tax),
     collectedAmount: decimal(g.collected),
     collectedCurrency: g.collected?.currency ?? null,
+    uncollectedAmount: decimal(g.uncollected),
+    uncollectedCurrency: g.uncollected?.currency ?? null,
     cogsAmount: decimal(g.cogs),
     cogsCurrency: g.cogs?.currency ?? null,
     cogsComplete: g.cogsComplete,

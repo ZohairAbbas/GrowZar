@@ -80,6 +80,11 @@ export type OrderGrain = {
   placed: Money | null;
   delivered: Money | null;
   collected: Money | null;
+  /**
+   * COD of delivered parcels no courier settlement has covered yet: what a
+   * courier (or 3PL) still owes, as Courierify last saw it (G-GZR3-5, I4).
+   */
+  uncollected: Money | null;
   /** Rule #10: money given back, not a delivery outcome. */
   refunded: Money | null;
   discounts: Money | null;
@@ -415,6 +420,31 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     collectedUnits !== null && collectedCurrency
       ? { amount: formatAmount(collectedUnits), currency: collectedCurrency }
       : null;
+  // What is still owed: the same parcels, not yet covered by a settlement.
+  let uncollectedUnits: bigint | null = null;
+  let uncollectedCurrency: string | null = null;
+  const uncollectedInputs: string[] = [];
+  for (const p of parcels) {
+    const settled = obj(p.row.payload.settlement).settled === true;
+    if (settled || p.row.payload.status !== "delivered") continue;
+    const cod = readMoney(p.row.payload.cod);
+    if (!cod) continue;
+    if (uncollectedCurrency && uncollectedCurrency !== cod.currency) continue; // rule #4
+    uncollectedCurrency = cod.currency;
+    uncollectedUnits = (uncollectedUnits ?? 0n) + parseAmount(cod.amount)!;
+    uncollectedInputs.push(ref(p.row, "cod"));
+  }
+  const uncollected: Money | null =
+    uncollectedUnits !== null && uncollectedCurrency
+      ? { amount: formatAmount(uncollectedUnits), currency: uncollectedCurrency }
+      : null;
+  explain.uncollected = {
+    rule: ["#17"],
+    source: "courierify.shipments.cod where delivered and not settlement.settled",
+    inputs: uncollectedInputs,
+    note: uncollected ? "no courier settlement recorded in Courierify for this COD yet" : "nothing delivered is awaiting a settlement",
+  };
+
   explain.collected = {
     rule: ["#2", "#17"],
     source: "courierify.shipments.cod where settlement.settled and delivered",
@@ -542,6 +572,7 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     placed,
     delivered,
     collected,
+    uncollected,
     refunded: readMoney(money.refunded),
     discounts: readMoney(money.discounts),
     shipping: readMoney(money.shipping),

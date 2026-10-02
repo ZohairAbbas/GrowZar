@@ -7,6 +7,7 @@ import {
   marginFinding,
   matchesFilter,
   missingFeesFinding,
+  cashHeldFindings,
   parseOrderFilter,
   variantReturnsFinding,
   type Finding,
@@ -29,7 +30,7 @@ function order(o: Partial<RollupOrder> = {}): RollupOrder {
     placed: pkr("1000.00"),
     delivered: pkr("1000.00"),
     refunded: pkr("0.00"),
-    collected: null,
+    collected: null, uncollected: null,
     cogs: pkr("300.00"),
     cogsComplete: true,
     courierFee: null,
@@ -246,6 +247,65 @@ describe("I13: orders shipped through Courierify with no courier fee recorded", 
   });
 });
 
+describe("I4: COD a courier or 3PL has not paid, against its own rhythm", () => {
+  const asOf = new Date("2026-10-02T12:00:00Z");
+  const delivered = (daysAgo: number, o: Partial<RollupOrder> = {}) =>
+    order({
+      parcelCount: 1,
+      courier: "trax",
+      fulfilledVia: "orio",
+      uncollected: pkr("5000.00"),
+      outcomeTiming: { basis: "status_as_of", at: new Date(asOf.getTime() - daysAgo * 86_400_000) },
+      ...o,
+    });
+  // Orio paid daily until 2026-08-25; TCS weekly until 2026-09-29.
+  const orio = { payer: "orio", payouts: 5, lastPaidDay: "2026-08-25", medianGapDays: 1, disputed: 0 };
+  const tcs = { payer: "tcs", payouts: 6, lastPaidDay: "2026-09-29", medianGapDays: 7, disputed: 3 };
+  const cashInput = (awaiting: RollupOrder[], payers = [orio, tcs]) => input([], { cash: { asOf, payers, awaiting } });
+
+  it("names the payer (the 3PL, not the courier), the COD, and how late it is", () => {
+    const [f] = cashHeldFindings(cashInput(times(4, () => delivered(30)))) as Exclude<ReturnType<typeof cashHeldFindings>, { kind: "skip" }>;
+    expect(f).toMatchObject({ payer: "orio", orders: 4, cod: [pkr("20000.00")], lastPaidDay: "2026-08-25", medianGapDays: 1, daysLate: 37 });
+  });
+
+  it("does not count an order still inside the payer's usual gap plus grace", () => {
+    // TCS pays weekly and paid 3 days ago; deliveries 5 days ago are not due.
+    const fresh = times(20, () => delivered(5, { courier: "tcs", fulfilledVia: null }));
+    expect(cashHeldFindings(cashInput(fresh))).toMatchObject({ kind: "skip", status: "nothing_found" });
+    // 9 days: past TCS's 7-day gap but inside the 3-day grace, so not yet due.
+    const graced = times(20, () => delivered(9, { courier: "tcs", fulfilledVia: null }));
+    expect(cashHeldFindings(cashInput(graced))).toMatchObject({ kind: "skip", status: "nothing_found" });
+    expect(cashHeldFindings(cashInput(times(20, () => delivered(11, { courier: "tcs", fulfilledVia: null }))))).toHaveLength(1);
+  });
+
+  it("fires on a large amount even when the payer is on time", () => {
+    const owed = times(11, () => delivered(15, { courier: "tcs", fulfilledVia: null })); // 55,000 > 50,000
+    expect(cashHeldFindings(cashInput(owed))).toEqual([expect.objectContaining({ payer: "tcs", orders: 11, daysLate: 0 })]);
+    expect(cashHeldFindings(cashInput(owed.slice(1)))).toMatchObject({ kind: "skip" }); // 50,000 exactly, on time
+  });
+
+  it("never calls a parcel with nothing to collect (COD 0.00) unpaid, however late the payer", () => {
+    const prepaid = times(8, () => delivered(150, { courier: "tcs", fulfilledVia: null, uncollected: pkr("0.00") }));
+    const lateTcs = { ...tcs, lastPaidDay: "2026-07-02" };
+    expect(cashHeldFindings(cashInput(prepaid, [orio, lateTcs]))).toMatchObject({ kind: "skip", status: "nothing_found" });
+    expect(prepaid.filter((o) => matchesFilter(o, { kind: "awaiting_payout", payer: "tcs" }, "PKR", { payers: [lateTcs], asOf }))).toHaveLength(0);
+  });
+
+  it("never judges a payer with too few payouts, and says so", () => {
+    const blueex = times(30, () => delivered(60, { courier: "blueex", fulfilledVia: null }));
+    expect(cashHeldFindings(cashInput(blueex))).toMatchObject({ kind: "skip", status: "not_enough_data", reason: expect.stringMatching(/blueex/) });
+    const both = [...blueex, ...times(2, () => delivered(30))];
+    const [f] = cashHeldFindings(cashInput(both)) as Exclude<ReturnType<typeof cashHeldFindings>, { kind: "skip" }>;
+    expect(f!.notJudged).toEqual([{ payer: "blueex", orders: 30 }]);
+  });
+
+  it("lists exactly the orders it counted when its link is followed", () => {
+    const rows = [...times(4, () => delivered(30)), ...times(3, () => delivered(1)), delivered(30, { courier: "tcs", fulfilledVia: null })];
+    const cash = { payers: [orio, tcs], asOf };
+    expect(rows.filter((o) => matchesFilter(o, { kind: "awaiting_payout", payer: "orio" }, "PKR", cash))).toHaveLength(4);
+  });
+});
+
 describe("findings(), and the Orders filters behind each link", () => {
   it("returns nothing for an empty period rather than a card of zeros", () => {
     expect(findings(input([]))).toEqual([]);
@@ -258,5 +318,7 @@ describe("findings(), and the Orders filters behind each link", () => {
     expect(parseOrderFilter(new URLSearchParams("decidedBy=financify"))).toEqual({ kind: "decided_by", app: "financify" });
     expect(parseOrderFilter(new URLSearchParams("decidedBy=preventify"))).toBeNull();
     expect(parseOrderFilter(new URLSearchParams("feeMissing=1"))).toEqual({ kind: "fee_missing" });
+    expect(parseOrderFilter(new URLSearchParams("awaitingPayout=orio"))).toEqual({ kind: "awaiting_payout", payer: "orio" });
+    expect(parseOrderFilter(new URLSearchParams("awaitingPayout=a'b"))).toBeNull();
   });
 });

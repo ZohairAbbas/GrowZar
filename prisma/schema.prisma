@@ -729,6 +729,9 @@ model OrderGrain {
   /// Cash paid by the courier (rule #17), in the COD's currency.
   collectedAmount   Decimal? @db.Decimal(18, 6)
   collectedCurrency String?  @db.Char(3)
+  /// COD of delivered parcels no settlement has covered yet (G-GZR3-5, I4).
+  uncollectedAmount   Decimal? @db.Decimal(18, 6)
+  uncollectedCurrency String?  @db.Char(3)
   /// Costs are in the shop's currency, which can differ from the order's.
   cogsAmount         Decimal? @db.Decimal(18, 6)
   cogsCurrency       String?  @db.Char(3)

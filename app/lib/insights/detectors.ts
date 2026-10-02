@@ -17,6 +17,7 @@ import {
   courierifyStoppedFinding,
   disagreementFinding,
   isSkip,
+  cashHeldFindings,
   marginFinding,
   missingFeesFinding,
   variantReturnsFinding,
@@ -33,7 +34,8 @@ export type DetectorId =
   | "variant_returns"
   | "margin_ceiling"
   | "courierify_stopped"
-  | "missing_courier_fees";
+  | "missing_courier_fees"
+  | "cash_held";
 
 export type Insight = {
   detector: DetectorId;
@@ -151,6 +153,18 @@ export const DETECTORS: readonly Detector[] = [
       return [insight("missing_courier_fees", "store", f, { group: "context", ordersAffected: f.missing }, false)];
     },
   },
+  {
+    id: "cash_held",
+    // Courierify alone (D-47's named exception): Courierify does not show this.
+    needs: ["COURIERIFY"],
+    label: "COD a courier or 3PL has not paid (I4)",
+    preview: "COD your couriers have not paid, judged against how often each one pays you",
+    run(input) {
+      const list = cashHeldFindings(input);
+      if (!Array.isArray(list)) return list;
+      return list.map((f) => insight("cash_held", f.payer, f, { group: "specific", ordersAffected: f.orders }, true));
+    },
+  },
 ];
 
 export function runDetectors(input: FindingsInput, connected: ReadonlySet<App>): DetectorOutcome[] {
@@ -204,5 +218,7 @@ export function evidenceOf(i: Insight): Record<string, number | string> {
       return { lastParcelDay: f.lastParcelDay, shipped: f.shipped, withParcel: f.withParcel };
     case "missing_fees":
       return { missing: f.missing, viaCourierify: f.viaCourierify };
+    case "cash_held":
+      return { orders: f.orders, daysLate: f.daysLate, lastPaidDay: f.lastPaidDay };
   }
 }

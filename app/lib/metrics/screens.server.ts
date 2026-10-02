@@ -7,6 +7,7 @@ import { storeSummary, type StoreSummary } from "./summaries.server";
 import { formatAmount, parseAmount, type Money } from "./money";
 import { matchesFilter, type OrderFilter } from "./findings";
 import { toRollupOrder } from "./rollups.server";
+import { loadPayerHistories } from "./settlements.server";
 
 /**
  * View models for the read-only screens (G-GZR2-5).
@@ -185,11 +186,14 @@ export async function ordersView(
     // The same predicate the Home card counted with, applied to the same
     // grain rows, so the list is exactly the card's evidence.
     const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { currency: true } });
+    // Cash held is today's state (I4): any order date, so no period here.
+    const cashFilter = filter.kind === "awaiting_payout";
     const all = await prisma.orderGrain.findMany({
-      where,
+      where: cashFilter ? { storeId, outcome: "delivered", uncollectedAmount: { not: null } } : where,
       orderBy: [{ createdAt: "desc" }, { orderId: "desc" }],
     });
-    const hit = all.filter((r) => matchesFilter(toRollupOrder(r), filter, store.currency));
+    const cash = cashFilter ? { payers: await loadPayerHistories(storeId), asOf: new Date() } : undefined;
+    const hit = all.filter((r) => matchesFilter(toRollupOrder(r), filter, store.currency, cash));
     const shown = hit.slice(0, FILTERED_LIST_LIMIT);
     return {
       total: hit.length,

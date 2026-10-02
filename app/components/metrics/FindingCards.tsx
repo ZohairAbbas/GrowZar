@@ -3,6 +3,7 @@ import { Link, useFetcher } from "react-router";
 import { ArrowRight } from "lucide-react";
 
 import type {
+  CashHeldFinding,
   CourierifyStoppedFinding,
   DecidedBy,
   DisagreementFinding,
@@ -299,6 +300,45 @@ function MissingFeesCard({ f, days, id, canManage }: { f: MissingFeesFinding } &
   );
 }
 
+const payerName = (p: string) => (p === "orio" ? "Orio" : p === "tcs" ? "TCS" : p.charAt(0).toUpperCase() + p.slice(1));
+
+function CashHeldCard({ f, days, id, canManage }: { f: CashHeldFinding } & CardProps) {
+  const who = payerName(f.payer);
+  return (
+    <Card
+      id={id}
+      canManage={canManage}
+      title={`No payout recorded from ${who} for ${n(f.orders)} delivered order${f.orders === 1 ? "" : "s"}`}
+      link={{ to: `/orders?days=${days}&awaitingPayout=${f.payer}`, label: `See the ${n(f.orders)} orders` }}
+    >
+      <p>
+        COD of <MoneyList values={f.cod} />, delivered
+        {f.oldestDay ? ` from ${f.oldestDay}` : ""}, with no {who} payout recorded in Courierify.
+      </p>
+      <p>
+        {who} usually paid this store every {f.medianGapDays} day{f.medianGapDays === 1 ? "" : "s"}. Its last payout in
+        Courierify was on {f.lastPaidDay}
+        {f.daysLate > 0 ? `, ${n(f.daysLate)} days later than that rhythm would have it.` : "."}
+      </p>
+      <p className="text-xs text-gray-600">
+        This is what Courierify has recorded. A payout made outside it, straight to your bank or on {who}'s own
+        statement, would not show here: check that statement before chasing.
+      </p>
+      <Leaves
+        items={[
+          `As of ${f.asOf}, whatever the order date: only orders delivered more than ${f.dueAfterDays} days ago count.`,
+          ...(f.disputed
+            ? [`Courierify also marks ${n(f.disputed)} ${who} statement(s) as disputed. They are not added in: a statement can cover parcels already paid in other payouts.`]
+            : []),
+          ...(f.notJudged.length
+            ? [`Not judged: ${f.notJudged.map((p) => `${payerName(p.payer)} (${n(p.orders)} orders)`).join(", ")}. Courierify has too few of their payouts to know when they pay.`]
+            : []),
+        ]}
+      />
+    </Card>
+  );
+}
+
 export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string; to: string }) {
   const reopen = useFetcher();
   return (
@@ -332,6 +372,8 @@ export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string
               return <CourierifyStoppedCard key={id} f={f} {...props} />;
             case "missing_fees":
               return <MissingFeesCard key={id} f={f} {...props} />;
+            case "cash_held":
+              return <CashHeldCard key={id} f={f} {...props} />;
           }
         })
       )}
