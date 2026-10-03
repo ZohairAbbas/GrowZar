@@ -41,7 +41,7 @@ export default function Stores({ loaderData }: Route.ComponentProps) {
     <main className="mx-auto max-w-4xl px-6 py-10">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Stores</h1>
+          <h1 className="font-display text-3xl font-bold tracking-tight text-gray-900">Stores</h1>
           <p className="mt-1 text-sm text-gray-600">
             {scoped
               ? "The stores you have been given access to."
@@ -62,7 +62,7 @@ export default function Stores({ loaderData }: Route.ComponentProps) {
             <li key={store.id}>
               <Link
                 to={`/stores/${store.id}`}
-                className="flex items-center gap-4 rounded-2xl border border-gray-200 bg-white p-5 transition hover:border-gray-300 hover:shadow-sm"
+                className="flex items-center gap-4 rounded-2xl bg-white p-5 transition hover:shadow-md"
               >
                 <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gray-100">
                   <StoreIcon className="h-5 w-5 text-gray-600" />

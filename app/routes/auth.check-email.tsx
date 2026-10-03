@@ -20,7 +20,7 @@ export default function CheckEmail() {
         <span className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-accent-50">
           <Mail className="h-8 w-8 text-accent-500" />
         </span>
-        <h1 className="text-xl font-semibold text-gray-900">Check your email</h1>
+        <h1 className="font-display text-2xl font-bold text-gray-900">Check your email</h1>
         <p className="mt-2 text-sm leading-relaxed text-gray-600">
           If {email ? <strong>{email}</strong> : "that address"} has a Growzar
           account, a sign-in link is on its way. It expires in 10 minutes.

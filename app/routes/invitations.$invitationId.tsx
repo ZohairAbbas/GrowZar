@@ -132,8 +132,8 @@ function Card({ children }: { children: React.ReactNode }) {
           <span className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white/10">
             <Mail className="h-8 w-8" />
           </span>
-          <h1 className="text-xl font-semibold">You're invited</h1>
-          <p className="mt-1 text-sm text-gray-300">
+          <h1 className="font-display text-2xl font-bold">You're invited</h1>
+          <p className="mt-1 text-sm text-navy-muted">
             Join an organization on Growzar
           </p>
         </div>
@@ -179,7 +179,7 @@ export default function Invitation({ loaderData, actionData }: Route.ComponentPr
         <div className="mt-6 space-y-3">
           <Link
             to={`/auth/sign-up?next=${next}`}
-            className="flex h-12 w-full items-center justify-center rounded-xl bg-primary-500 font-semibold text-white transition hover:bg-primary-600"
+            className="flex h-12 w-full items-center justify-center rounded-full bg-primary-500 font-semibold text-white transition hover:bg-primary-600"
           >
             Create an account
           </Link>
@@ -272,7 +272,7 @@ export default function Invitation({ loaderData, actionData }: Route.ComponentPr
           name="intent"
           value="accept"
           disabled={busy || wrongAccount}
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary-500 font-semibold text-white transition hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary-500 font-semibold text-white transition hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy && submittingIntent === "accept" ? (
             <LoadingSpinner size="sm" />

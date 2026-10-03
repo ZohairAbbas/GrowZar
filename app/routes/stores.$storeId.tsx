@@ -241,7 +241,7 @@ export default function StoreDetail({
         All stores
       </Link>
 
-      <h1 className="mt-4 text-2xl font-semibold text-gray-900">
+      <h1 className="mt-4 font-display text-2xl font-bold text-gray-900">
         {store.displayName ?? store.shopDomain}
       </h1>
       <p className="mt-1 text-sm text-gray-600">{store.shopDomain}</p>
@@ -282,7 +282,7 @@ export default function StoreDetail({
 
       {canDecide && accessRequests.length > 0 ? (
         <section className="mt-8 rounded-2xl border border-amber-200 bg-amber-50/50 p-5">
-          <h2 className="flex items-center gap-2 text-base font-semibold text-gray-900">
+          <h2 className="flex items-center gap-2 font-display text-base font-bold text-gray-900">
             <UserPlus className="h-5 w-5 text-amber-600" />
             Access requests
           </h2>
@@ -329,7 +329,7 @@ export default function StoreDetail({
                     <button
                       type="submit"
                       disabled={navigation.state === "submitting"}
-                      className="flex items-center gap-1 rounded-lg bg-primary-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
+                      className="flex items-center gap-1 rounded-full bg-primary-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
                     >
                       <Check className="h-3.5 w-3.5" />
                       Give access to this store
@@ -342,13 +342,13 @@ export default function StoreDetail({
         </section>
       ) : null}
 
-      <h2 className="mt-8 text-lg font-semibold text-gray-900">Connected apps</h2>
+      <h2 className="mt-8 font-display text-lg font-bold text-gray-900">Connected apps</h2>
       {connections.length === 0 ? (
         <p className="mt-3 text-sm text-gray-600">
           No apps connected to this store yet.
         </p>
       ) : (
-        <ul className="mt-3 divide-y divide-gray-100 rounded-2xl border border-gray-200 bg-white">
+        <ul className="mt-3 divide-y divide-gray-100 rounded-2xl bg-white">
           {connections.map((connection) => (
             <li key={connection.app} className="px-5 py-3">
               <div className="flex items-center justify-between gap-4">
@@ -389,7 +389,7 @@ export default function StoreDetail({
         </ul>
       )}
 
-      <h2 className="mt-8 text-lg font-semibold text-gray-900">Event log</h2>
+      <h2 className="mt-8 font-display text-lg font-bold text-gray-900">Event log</h2>
       <p className="mt-1 text-sm text-gray-600">
         What your apps have told Growzar, and what Growzar did about it.
       </p>
@@ -399,7 +399,7 @@ export default function StoreDetail({
           Nothing yet. Events appear here as your apps send them.
         </p>
       ) : (
-        <ul className="mt-3 divide-y divide-gray-100 rounded-2xl border border-gray-200 bg-white">
+        <ul className="mt-3 divide-y divide-gray-100 rounded-2xl bg-white">
           {events.map((event) => (
             <li
               key={event.id}

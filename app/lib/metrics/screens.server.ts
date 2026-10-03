@@ -53,10 +53,50 @@ export type HomeView = {
   funnel: Array<{ label: string; count: number | null; note?: string }>;
   deliveryRate: DeliveryRate;
   coverage: Coverage;
+  /** Delivered orders per local day the order was placed on, oldest first. */
+  daily: Array<{ day: string; delivered: number }>;
+  /** Null for a role that may not see Finance: Home then shows counts only. */
+  money: {
+    deliveredRevenue: Money[];
+    profit: StoreSummary["profit"];
+  } | null;
 };
 
-export function homeView(s: StoreSummary): HomeView {
+/**
+ * COD a courier still owes as of today, whatever the order date: delivered
+ * Courierify parcels no settlement covers yet. The same rows I4 reads, before
+ * it judges which payers are late, so Home and the insight never disagree on
+ * what is outstanding.
+ */
+export async function owedToday(storeId: string): Promise<{ amounts: Money[]; orders: number }> {
+  const groups = await prisma.orderGrain.groupBy({
+    by: ["uncollectedCurrency"],
+    where: { storeId, outcome: "delivered", parcelCount: { gt: 0 }, uncollectedAmount: { gt: 0 } },
+    _sum: { uncollectedAmount: true },
+    _count: { _all: true },
+  });
+  return {
+    amounts: groups
+      .filter((g) => g.uncollectedCurrency && g._sum.uncollectedAmount)
+      .map((g) => ({ amount: g._sum.uncollectedAmount!.toString(), currency: g.uncollectedCurrency! })),
+    orders: groups.reduce((n, g) => n + g._count._all, 0),
+  };
+}
+
+function eachDay(from: string, to: string): string[] {
+  const days: string[] = [];
+  for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${to}T00:00:00Z`); t += 86_400_000) {
+    days.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return days;
+}
+
+export function homeView(s: StoreSummary, canSeeMoney: boolean): HomeView {
   const rows = s.rows;
+  const deliveredByDay = new Map<string, number>();
+  for (const r of rows) {
+    if (r.outcome === "delivered" && r.localDay) deliveredByDay.set(r.localDay, (deliveredByDay.get(r.localDay) ?? 0) + 1);
+  }
   const anyConfirmation = rows.some((r) => r.confirmation);
   return {
     funnel: [
@@ -73,6 +113,13 @@ export function homeView(s: StoreSummary): HomeView {
     ],
     deliveryRate: s.orders.deliveryRate,
     coverage: coverage(s),
+    daily: eachDay(s.period.from, s.period.to).map((day) => ({ day, delivered: deliveredByDay.get(day) ?? 0 })),
+    money: canSeeMoney
+      ? {
+          deliveredRevenue: s.orders.deliveredRevenue,
+          profit: s.profit,
+        }
+      : null,
   };
 }
 

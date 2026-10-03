@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { Link, useFetcher } from "react-router";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Database, Truck, Undo2, Wallet } from "lucide-react";
 
 import type {
   CashHeldFinding,
@@ -21,6 +21,39 @@ import type { InboxView } from "~/lib/insights/inbox.server";
 import { DISMISS_REASONS } from "~/lib/insights/actions";
 import { formatAmount, MoneyList, outcomeLabel } from "./Metrics";
 
+/**
+ * Which part of the business a card is about, shown as a small tag above its
+ * title. Set per card by InboxCards, so the cards themselves stay unchanged.
+ */
+const Area = createContext<Finding["kind"] | null>(null);
+
+const AREAS: Record<Finding["kind"], { label: string; Icon: typeof Wallet; tint: string }> = {
+  cash_held: { label: "Money owed", Icon: Wallet, tint: "bg-coral-100 text-coral-700" },
+  margin: { label: "Profit", Icon: Wallet, tint: "bg-coral-100 text-coral-700" },
+  product_loss: { label: "Profit", Icon: Wallet, tint: "bg-coral-100 text-coral-700" },
+  unconfirmed_returns: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
+  variant_returns: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
+  city_returns: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
+  courier_for_city: { label: "Shipping", Icon: Truck, tint: "bg-data-100 text-data-700" },
+  disagreements: { label: "Data check", Icon: Database, tint: "bg-field text-gray-600" },
+  missing_fees: { label: "Data check", Icon: Database, tint: "bg-field text-gray-600" },
+  courierify_stopped: { label: "Data check", Icon: Database, tint: "bg-field text-gray-600" },
+};
+
+function AreaTag() {
+  const kind = useContext(Area);
+  const area = kind ? AREAS[kind] : null;
+  if (!area) return null;
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${area.tint}`}>
+        <area.Icon className="h-[18px] w-[18px]" />
+      </span>
+      <span className="text-sm font-semibold text-gray-500">{area.label}</span>
+    </div>
+  );
+}
+
 /** Through the click-through route, which records the click (G-GZR3-3). */
 const via = (id: string, to: string) => `/insights/${id}/open?to=${encodeURIComponent(to)}`;
 
@@ -30,16 +63,16 @@ function InsightActions({ id }: { id: string }) {
   const fetcher = useFetcher();
   const [dismissing, setDismissing] = useState(false);
   const busy = fetcher.state !== "idle";
-  const button = "rounded-md border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:border-gray-300 hover:text-gray-900 disabled:opacity-50";
+  const button = "rounded-full bg-field px-3.5 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-50";
   return (
-    <div className="mt-4 border-t border-gray-100 pt-3">
+    <div className="mt-5 border-t border-gray-100 pt-4">
       {dismissing ? (
         <fetcher.Form method="post" action={`/insights/${id}`} className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="intent" value="dismiss" />
-          <label className="text-xs text-gray-600" htmlFor={`reason-${id}`}>
+          <label className="text-sm font-semibold text-gray-600" htmlFor={`reason-${id}`}>
             Why?
           </label>
-          <select id={`reason-${id}`} name="reason" required defaultValue="" className="rounded-md border border-gray-200 px-2 py-1 text-xs">
+          <select id={`reason-${id}`} name="reason" required defaultValue="" className="rounded-full border border-gray-200 px-3 py-1.5 text-sm">
             <option value="" disabled>
               Choose a reason
             </option>
@@ -49,11 +82,11 @@ function InsightActions({ id }: { id: string }) {
               </option>
             ))}
           </select>
-          <input name="note" maxLength={500} placeholder="Note (optional)" className="min-w-0 flex-1 rounded-md border border-gray-200 px-2 py-1 text-xs" />
+          <input name="note" maxLength={500} placeholder="Note (optional)" className="min-w-0 flex-1 rounded-full border border-gray-200 px-3 py-1.5 text-sm" />
           <button type="submit" disabled={busy} className={button}>
             Dismiss
           </button>
-          <button type="button" onClick={() => setDismissing(false)} className="text-xs text-gray-500 hover:underline">
+          <button type="button" onClick={() => setDismissing(false)} className="text-sm font-semibold text-gray-500 hover:underline">
             Cancel
           </button>
         </fetcher.Form>
@@ -102,12 +135,16 @@ function Card({
   canManage: boolean;
 }) {
   return (
-    <article className="rounded-2xl border border-gray-200 bg-white p-5">
-      <h3 className="text-base font-semibold text-gray-900">{title}</h3>
-      <div className="mt-2 space-y-2 text-sm text-gray-700">{children}</div>
+    <article className="rounded-2xl bg-white p-6">
+      <AreaTag />
+      <h3 className="mt-3 font-display text-xl font-bold leading-tight text-gray-900">{title}</h3>
+      <div className="mt-2.5 space-y-2 text-sm leading-relaxed text-gray-700">{children}</div>
       {link ? (
-        <Link to={via(id, link.to)} className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary-600 hover:underline">
-          {link.label} <ArrowRight className="h-3.5 w-3.5" />
+        <Link
+          to={via(id, link.to)}
+          className="mt-4 inline-flex items-center gap-2 rounded-full bg-navy px-4 py-2.5 text-sm font-semibold text-white hover:bg-navy-surface"
+        >
+          {link.label} <ArrowRight className="h-4 w-4 text-mint" />
         </Link>
       ) : null}
       {canManage ? <InsightActions id={id} /> : null}
@@ -490,23 +527,29 @@ export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string
   return (
     <section className="space-y-3" aria-labelledby="findings-heading">
       <div>
-        <h2 id="findings-heading" className="text-lg font-semibold text-gray-900">
+        <h2 id="findings-heading" className="font-display text-xl font-bold text-gray-900">
           What Growzar found
         </h2>
-        <p className="text-xs text-gray-500">
+        <p className="mt-0.5 text-xs text-gray-500">
           {from} to {to}. Measured from your connected apps, each with the orders behind it. Recommendations and
           estimates of what each is worth come once each finding has been checked against past data. Every finding so far
           comes from one store's history.
         </p>
       </div>
       {inbox.items.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-gray-300 bg-white p-5 text-sm text-gray-600">
+        <p className="rounded-2xl bg-white p-6 text-sm text-gray-600">
           Nothing to show in this period. What was checked, and why it found nothing, is listed below.
         </p>
       ) : (
         inbox.items.map(({ id, insight }) => {
           const props = { id, days: inbox.days, canManage: inbox.canManage };
           const f = insight.finding;
+          return (
+            <Area.Provider key={id} value={f.kind}>
+              {card()}
+            </Area.Provider>
+          );
+          function card() {
           switch (f.kind) {
             case "disagreements":
               return <DisagreementCard key={id} f={f} {...props} />;
@@ -529,14 +572,15 @@ export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string
             case "city_returns":
               return <CityReturnsCard key={id} f={f} {...props} />;
           }
+          }
         })
       )}
       {inbox.overflow ? (
         <p className="text-xs text-gray-500">{n(inbox.overflow)} more found; dismiss or snooze one to see the next.</p>
       ) : null}
       {inbox.hidden.length ? (
-        <details className="rounded-xl border border-gray-200 bg-white p-3.5 text-sm">
-          <summary className="cursor-pointer text-gray-700">Dismissed and snoozed ({n(inbox.hidden.length)})</summary>
+        <details className="rounded-2xl bg-white px-5 py-4 text-sm">
+          <summary className="cursor-pointer font-semibold text-gray-700">Dismissed and snoozed ({n(inbox.hidden.length)})</summary>
           <ul className="mt-2 space-y-1.5">
             {inbox.hidden.map((h) => (
               <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
@@ -560,8 +604,8 @@ export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string
         </details>
       ) : null}
       {inbox.checked.length ? (
-        <details className="rounded-xl border border-gray-200 bg-white p-3.5 text-sm">
-          <summary className="cursor-pointer text-gray-700">Also checked ({n(inbox.checked.length)})</summary>
+        <details className="rounded-2xl bg-white px-5 py-4 text-sm">
+          <summary className="cursor-pointer font-semibold text-gray-700">Also checked ({n(inbox.checked.length)})</summary>
           <ul className="mt-2 space-y-1.5 text-xs text-gray-600">
             {inbox.checked.map((c) => (
               <li key={c.label}>

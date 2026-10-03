@@ -208,7 +208,7 @@ export default function ClaimContinue({
     return (
       <Shell>
         <div className="p-8">
-          <h2 className="text-base font-semibold text-gray-900">
+          <h2 className="font-display text-base font-bold text-gray-900">
             Waiting for approval
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-gray-600">
@@ -234,7 +234,7 @@ export default function ClaimContinue({
           <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50">
             <Clock className="h-7 w-7 text-amber-600" />
           </span>
-          <h1 className="text-lg font-semibold text-gray-900">
+          <h1 className="font-display text-lg font-bold text-gray-900">
             That link has expired
           </h1>
           <p className="mt-2 text-sm text-gray-600">
@@ -250,8 +250,8 @@ export default function ClaimContinue({
       <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-white/10">
         <StoreIcon className="h-6 w-6" />
       </span>
-      <h1 className="text-lg font-semibold">{loaderData.shopDomain}</h1>
-      <p className="mt-1 text-sm text-gray-300">
+      <h1 className="font-display text-xl font-bold">{loaderData.shopDomain}</h1>
+      <p className="mt-1 text-sm text-navy-muted">
         Verified by {loaderData.appLabel}
       </p>
     </div>
@@ -277,7 +277,7 @@ export default function ClaimContinue({
           <div className="mt-6 space-y-3">
             <Link
               to={`/auth/sign-up?next=${next}`}
-              className="flex h-12 w-full items-center justify-center rounded-xl bg-primary-500 font-semibold text-white transition hover:bg-primary-600"
+              className="flex h-12 w-full items-center justify-center rounded-full bg-primary-500 font-semibold text-white transition hover:bg-primary-600"
             >
               Create an account
             </Link>
@@ -333,7 +333,7 @@ export default function ClaimContinue({
             </p>
             <Link
               to="/organizations/new"
-              className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary-500 font-semibold text-white transition hover:bg-primary-600"
+              className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary-500 font-semibold text-white transition hover:bg-primary-600"
             >
               <Building2 className="h-4 w-4" />
               Create one
@@ -371,7 +371,7 @@ export default function ClaimContinue({
             <button
               type="submit"
               disabled={navigation.state === "submitting"}
-              className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary-500 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
+              className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary-500 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
             >
               {navigation.state === "submitting" ? (
                 <LoadingSpinner size="sm" />

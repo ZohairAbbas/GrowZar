@@ -107,7 +107,7 @@ export default function NewOrganization({ actionData }: Route.ComponentProps) {
         <span className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-primary-500">
           <Building2 className="h-6 w-6 text-white" />
         </span>
-        <h1 className="text-xl font-semibold text-gray-900">
+        <h1 className="font-display text-2xl font-bold text-gray-900">
           Create your organization
         </h1>
         <p className="mt-1.5 text-sm text-gray-600">
@@ -191,7 +191,7 @@ export default function NewOrganization({ actionData }: Route.ComponentProps) {
           <button
             type="submit"
             disabled={navigation.state === "submitting"}
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary-500 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
+            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary-500 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
           >
             {navigation.state === "submitting" ? (
               <LoadingSpinner size="sm" />

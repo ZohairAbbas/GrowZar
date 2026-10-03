@@ -35,7 +35,7 @@ export function MoneyList({ values, empty = "—" }: { values: Money[]; empty?: 
     <span className="inline-flex flex-col">
       {values.map((m) => (
         <span key={m.currency} className="tabular-nums">
-          {formatAmount(m.amount)} <span className="text-xs text-gray-500">{m.currency}</span>
+          {formatAmount(m.amount)} <span className="text-xs font-semibold opacity-60">{m.currency}</span>
         </span>
       ))}
     </span>
@@ -100,9 +100,9 @@ export function OutcomeText({
 
 export function Stat({ label, children, note }: { label: string; children: ReactNode; note?: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5">
-      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</p>
-      <div className="mt-2 text-lg text-gray-900">{children}</div>
+    <div className="rounded-2xl bg-white p-5">
+      <p className="text-sm font-semibold text-gray-700">{label}</p>
+      <div className="mt-2 font-display text-2xl font-bold text-gray-900">{children}</div>
       {note ? <p className="mt-2 text-xs text-gray-500">{note}</p> : null}
     </div>
   );
@@ -113,11 +113,11 @@ export function Notice({ tone = "info", children }: { tone?: "info" | "warn"; ch
   const Icon = warn ? AlertTriangle : Info;
   return (
     <div
-      className={`flex items-start gap-2.5 rounded-xl border p-3.5 text-sm ${
-        warn ? "border-amber-200 bg-amber-50 text-amber-900" : "border-gray-200 bg-gray-50 text-gray-700"
+      className={`flex items-start gap-3 rounded-2xl p-4 text-sm ${
+        warn ? "bg-coral-100 text-coral-700" : "bg-white text-gray-700"
       }`}
     >
-      <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${warn ? "text-amber-600" : "text-gray-400"}`} />
+      <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${warn ? "text-coral-700" : "text-gray-500"}`} />
       <div>{children}</div>
     </div>
   );
@@ -125,14 +125,14 @@ export function Notice({ tone = "info", children }: { tone?: "info" | "warn"; ch
 
 export function PeriodPicker({ days, options, keep = "" }: { days: number; options: readonly number[]; keep?: string }) {
   return (
-    <nav aria-label="Period" className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 text-sm">
+    <nav aria-label="Period" className="inline-flex rounded-full bg-white p-1 text-sm font-semibold">
       {options.map((d) => (
         <Link
           key={d}
           to={`?days=${d}${keep ? `&${keep}` : ""}`}
           preventScrollReset
           aria-current={d === days ? "page" : undefined}
-          className={`rounded-md px-3 py-1 ${d === days ? "bg-gray-900 text-white" : "text-gray-600 hover:text-gray-900"}`}
+          className={`rounded-full px-3.5 py-1.5 ${d === days ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
         >
           {d} days
         </Link>

@@ -76,8 +76,11 @@ export default function SignUp({ actionData }: Route.ComponentProps) {
       <div className="w-full max-w-md">
         <div className="overflow-hidden rounded-2xl bg-white shadow-xl">
           <div className="bg-primary-500 px-8 py-7 text-white">
-            <h1 className="text-xl font-semibold">Create your Growzar account</h1>
-            <p className="mt-1 text-sm text-gray-300">
+            <span className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 font-display text-xl font-bold leading-none text-mint">
+              g
+            </span>
+            <h1 className="font-display text-2xl font-bold">Create your Growzar account</h1>
+            <p className="mt-1 text-sm text-navy-muted">
               Then connect the stores you already run.
             </p>
           </div>
@@ -151,7 +154,7 @@ export default function SignUp({ actionData }: Route.ComponentProps) {
               <button
                 type="submit"
                 disabled={navigation.state === "submitting"}
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary-500 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary-500 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
               >
                 {navigation.state === "submitting" ? (
                   <LoadingSpinner size="sm" />

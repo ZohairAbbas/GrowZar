@@ -10,13 +10,13 @@ import { cn } from "~/lib/utils";
  * role under the wrong name.
  */
 const roleStyles: Record<string, string> = {
-  owner: "bg-red-50 text-red-800 border-red-200",
-  admin: "bg-orange-50 text-orange-800 border-orange-200",
-  manager: "bg-blue-50 text-blue-800 border-blue-200",
-  staff: "bg-gray-100 text-gray-800 border-gray-200",
+  owner: "bg-navy text-mint border-navy",
+  admin: "bg-mint-100 text-mint-700 border-mint-100",
+  manager: "bg-data-100 text-data-700 border-data-100",
+  staff: "bg-field text-gray-700 border-field",
 };
 
-const CUSTOM_ROLE_STYLE = "bg-violet-50 text-violet-800 border-violet-200";
+const CUSTOM_ROLE_STYLE = "bg-coral-50 text-coral-700 border-coral-50";
 
 export function RoleBadge({
   role,
@@ -32,7 +32,7 @@ export function RoleBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
+        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold",
         style,
         className,
       )}
