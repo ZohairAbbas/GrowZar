@@ -207,7 +207,7 @@ export default function TeamSettings({
               type="email"
               required
               placeholder="colleague@company.pk"
-              className="h-12 flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 transition focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20"
+              className="h-12 flex-none sm:flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 transition focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20"
             />
 
             <select

@@ -366,7 +366,7 @@ export function OrdersPanel({ view, days }: { view: OrdersView; days: number }) 
             {view.rows.map((r) => (
               <tr key={r.orderId}>
                 <td className="px-5 py-3 font-medium text-gray-900">{r.orderName ?? r.orderId}</td>
-                <td className="px-5 py-3 text-gray-600">{r.localDay ?? "—"}</td>
+                <td className="whitespace-nowrap px-5 py-3 text-gray-600">{r.localDay ?? "—"}</td>
                 <td className="px-5 py-3 text-right">
                   {r.placed ? <MoneyList values={[r.placed]} /> : <span className="text-gray-400">no total</span>}
                 </td>
