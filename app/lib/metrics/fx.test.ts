@@ -20,7 +20,7 @@ describe("rule #4: multi-currency totals convert at the historical daily rate, r
     expect(c.total).toEqual(pkr("1000.00"));
     expect(c.complete).toBe(false);
     expect(c.unconverted).toEqual([{ money: aed("150.00"), days: ["2026-07-12", "2026-07-13"] }]);
-    expect(c.source).toMatch(/awaiting Financify/);
+    expect(c.source).toBe("none");
   });
 
   it("converts each amount at its own day's rate, exactly, and shows every rate used", () => {

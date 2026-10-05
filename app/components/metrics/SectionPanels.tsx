@@ -12,6 +12,8 @@ import {
   DeliveryRateText,
   formatAmount,
   MoneyList,
+  baseFirst,
+  FxNotice,
   Notice,
   OutcomeText,
   outcomeLabel,
@@ -44,6 +46,7 @@ export function HomePanel({
   return (
     <section className="space-y-6">
       <HomeMetrics view={view} owed={owed} />
+      <FxNotice fx={view.fx} />
       <InboxCards inbox={inbox} from={period.from} to={period.to} />
       <div className="space-y-3">
         <div className="rounded-2xl bg-white p-5">
@@ -73,8 +76,9 @@ export function HomePanel({
 }
 
 /** One amount large, any other currencies under it, never added (rule #4). */
-function BigMoney({ values, empty = "—" }: { values: { amount: string; currency: string }[]; empty?: string }) {
-  const [first, ...rest] = values;
+function BigMoney({ values, base, empty = "—" }: { values: { amount: string; currency: string }[]; base: string | null; empty?: string }) {
+  // The store's currency leads; anything left in another is unconverted (rule #4).
+  const [first, ...rest] = baseFirst(values, base);
   if (!first) return <span>{empty}</span>;
   return (
     <span className="flex flex-col">
@@ -84,7 +88,7 @@ function BigMoney({ values, empty = "—" }: { values: { amount: string; currenc
       </span>
       {rest.map((m) => (
         <span key={m.currency} className="mt-1 font-sans text-sm font-semibold tabular-nums opacity-80">
-          + {formatAmount(m.amount)} {m.currency}
+          + {formatAmount(m.amount)} {m.currency}, not converted
         </span>
       ))}
     </span>
@@ -105,7 +109,7 @@ function HomeMetrics({ view, owed }: { view: HomeView; owed: { amounts: { amount
       <div className="flex flex-col gap-2.5 rounded-2xl bg-navy p-6 text-white">
         <span className="text-sm font-semibold text-navy-muted">{money ? "Delivered revenue" : "Delivered orders"}</span>
         <span className="font-display text-4xl font-bold leading-none tracking-tight">
-          {money ? <BigMoney values={money.deliveredRevenue} /> : delivered.toLocaleString()}
+          {money ? <BigMoney values={money.deliveredRevenue} base={view.base} /> : delivered.toLocaleString()}
         </span>
         <div className="mt-3 flex min-h-[3rem] flex-1 items-end gap-[3px]" aria-hidden="true">
           {view.daily.map((d, i) => (
@@ -136,7 +140,7 @@ function HomeMetrics({ view, owed }: { view: HomeView; owed: { amounts: { amount
           <span className="text-sm font-semibold text-gray-700">{money ? "Profit after returns" : "Returned"}</span>
           <span className="font-display text-3xl font-bold">
             {money ? (
-              money.profit ? <BigMoney values={[money.profit]} /> : "—"
+              money.profit ? <BigMoney values={[money.profit]} base={view.base} /> : "—"
             ) : (
               rate.returned.toLocaleString()
             )}
@@ -153,7 +157,7 @@ function HomeMetrics({ view, owed }: { view: HomeView; owed: { amounts: { amount
         <div className="flex flex-col gap-2.5 rounded-2xl bg-coral p-6 text-navy">
           <span className="text-sm font-bold">COD not yet paid, as of today</span>
           <span className="font-display text-4xl font-bold leading-none tracking-tight">
-            <BigMoney values={owed.amounts} empty="Nothing owed" />
+            <BigMoney values={owed.amounts} base={view.base} empty="Nothing owed" />
           </span>
           <span className="font-medium leading-snug">
             {owed.orders
@@ -186,15 +190,16 @@ export function FinancePanel({ view }: { view: FinanceView }) {
     <section className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label="Placed revenue" note="Orders as placed (Financify)">
-          <MoneyList values={view.placed} />
+          <MoneyList values={baseFirst(view.placed, view.base)} />
         </Stat>
         <Stat label="Delivered revenue" note="Orders the courier delivered">
-          <MoneyList values={view.deliveredRevenue} />
+          <MoneyList values={baseFirst(view.deliveredRevenue, view.base)} />
         </Stat>
         <Stat label="Paid by courier" note="COD in courier settlements (Courierify)">
-          <MoneyList values={view.paidByCourier} />
+          <MoneyList values={baseFirst(view.paidByCourier, view.base)} />
         </Stat>
       </div>
+      <FxNotice fx={view.fx} />
       {/* Rule #17's second stage does not exist for any merchant yet (PLAN §10). */}
       <Notice>
         Received in bank: not yet available. Bank reconciliation needs Financify's cash ledger, which has not held a

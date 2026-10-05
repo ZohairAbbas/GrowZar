@@ -60,6 +60,9 @@ export type HomeView = {
     deliveredRevenue: Money[];
     profit: StoreSummary["profit"];
   } | null;
+  /** The store's currency (it leads), and what happened to orders in others. */
+  base: string | null;
+  fx: StoreSummary["fx"];
 };
 
 /**
@@ -120,6 +123,8 @@ export function homeView(s: StoreSummary, canSeeMoney: boolean): HomeView {
           profit: s.profit,
         }
       : null,
+    base: s.store.currency,
+    fx: canSeeMoney ? s.fx : null,
   };
 }
 
@@ -139,6 +144,8 @@ export type FinanceView = {
   profit: StoreSummary["profit"];
   roas: number | null;
   settings: StoreSummary["settings"];
+  base: string | null;
+  fx: StoreSummary["fx"];
 };
 
 export function financeView(s: StoreSummary): FinanceView {
@@ -157,6 +164,8 @@ export function financeView(s: StoreSummary): FinanceView {
     profit: s.profit,
     roas: s.roas,
     settings: s.settings,
+    base: s.store.currency,
+    fx: s.fx,
   };
 }
 

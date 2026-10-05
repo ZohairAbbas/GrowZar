@@ -16,6 +16,7 @@ import { processEvent } from "~/lib/events/process.server";
 import { describeSweep, sweepStrandedEvents } from "~/lib/events/sweep.server";
 import { rebuildOrderGrain } from "~/lib/metrics/order-grain.server";
 import { evaluateStore } from "~/lib/insights/inbox.server";
+import { refreshFxRates } from "~/lib/metrics/fx.server";
 import { refreshAdSpend } from "~/lib/metrics/ad-spend.server";
 import { refreshProfitSettings } from "~/lib/metrics/summaries.server";
 
@@ -38,6 +39,9 @@ const connection = new IORedis(process.env.REDIS_URL ?? "redis://127.0.0.1:6379"
   maxRetriesPerRequest: null,
 });
 
+
+/** When this process last refreshed exchange rates (all stores share them). */
+let fxRefreshedAt = 0;
 
 /** Stores whose grain this process has rebuilt; see the rebuild below. */
 const grainRebuiltSinceStart = new Set<string>();
@@ -134,6 +138,21 @@ export const syncWorker = new Worker<SyncJob>(
       }
     } catch (error) {
       console.error(`[ads] store=${storeId} refresh FAILED:`, error instanceof Error ? error.message : error);
+    }
+
+    // Exchange rates (rule #4, G-FIN2-1): not per store, so at most hourly
+    // across all of them. Past days never change; today's arrives once the
+    // provider publishes it, shortly after 00:00 UTC.
+    if (Date.now() - fxRefreshedAt > 60 * 60 * 1000) {
+      fxRefreshedAt = Date.now();
+      try {
+        const fx = await refreshFxRates();
+        if (fx.stored || fx.problems.length) {
+          console.log(`[fx] stored=${fx.stored} bases=${fx.bases.join(",")}` + (fx.problems.length ? ` problems: ${fx.problems.join("; ")}` : ""));
+        }
+      } catch (error) {
+        console.error("[fx] refresh FAILED:", error instanceof Error ? error.message : error);
+      }
     }
 
     // Profit settings (rule #15), hourly: an organization roll-up compares

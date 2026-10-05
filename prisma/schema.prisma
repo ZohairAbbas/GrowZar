@@ -902,3 +902,20 @@ model InsightEvent {
   @@index([storeId, at])
   @@map("insight_events")
 }
+
+/// Daily exchange rates from Financify (G-FIN2-1, `GET /api/v1/fx`):
+/// 1 `currency` = `rate` `base`, for `day`, the provider's UTC publication
+/// day. Kept as served, a decimal string. A day or currency Financify has no
+/// rate for has no row: never 1, never a nearby day's (rule #4).
+model FxRate {
+  base        String    @db.Char(3)
+  currency    String    @db.Char(3)
+  day         String
+  rate        String
+  source      String
+  publishedAt DateTime?
+  fetchedAt   DateTime  @default(now())
+
+  @@id([base, currency, day])
+  @@map("fx_rates")
+}

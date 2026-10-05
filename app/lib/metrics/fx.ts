@@ -5,13 +5,12 @@
  * convert to the organization's base currency at the **historical daily
  * rate**, and the rate is shown. Mixed currencies are never added.
  *
- * **No rate source is connected yet.** O-2 names Financify's converter, but
- * Financify exposes no rate endpoint and its converter has only ever held
- * live rates (its Phase 1 report). The human's decision (2026-09-30):
- * totals are shown per currency now, and conversion switches on when
- * Financify serves daily rates. Until then `NO_FX_SOURCE` answers "unknown"
- * for every pair, and every foreign amount is reported as unconverted —
- * listed beside the converted total, never dropped and never added at 1.
+ * **The source is Financify's daily rates** (G-FIN2-1, `GET /api/v1/fx`),
+ * stored by the worker in `fx_rates` (fx.server.ts). Financify keeps rates
+ * from 2026-10-05 only (its provider has no history), so an earlier amount
+ * has no rate and is reported as unconverted: listed beside the converted
+ * total, never dropped and never added at 1 (human, 2026-10-05: keep it
+ * separate and labelled rather than approximate it).
  *
  * Amounts are converted per day, because an AED order in July and one in
  * September are worth different amounts of PKR. A rate is used only for its
@@ -38,7 +37,7 @@ export interface FxSource {
 
 /** The only source today: knows nothing, so converts nothing. */
 export const NO_FX_SOURCE: FxSource = {
-  name: "none (awaiting Financify daily rates)",
+  name: "none",
   rateFor: () => null,
 };
 
@@ -58,11 +57,48 @@ export type Conversion = {
   source: string;
 };
 
-const RATE_SCALE = 1_000_000n; // rates carried to six decimals
+/** Rates carry 12 decimals: 1 IDR is 0.0173 PKR, and six would round that away. */
+const RATE_DECIMALS = 12;
+const RATE_SCALE = 10n ** BigInt(RATE_DECIMALS);
 
 function parseRate(rate: string): bigint | null {
-  const units = parseAmount(rate); // millionths, same scale as money
-  return units !== null && units > 0n ? units : null;
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(rate.trim());
+  if (!m || (m[2] ?? "").length > RATE_DECIMALS) return null;
+  const units = BigInt(m[1]!) * RATE_SCALE + BigInt((m[2] ?? "").padEnd(RATE_DECIMALS, "0"));
+  return units > 0n ? units : null;
+}
+
+/** money (millionths) × rate, rounded half away from zero, still in millionths. */
+function applyRate(units: bigint, rate: bigint): bigint {
+  const product = units * rate;
+  const half = RATE_SCALE / 2n;
+  return product >= 0n ? (product + half) / RATE_SCALE : (product - half) / RATE_SCALE;
+}
+
+/**
+ * One amount in `base` at its own day's rate: the same amount when already
+ * in `base`, null when there is no rate for that currency and day.
+ */
+export function convertOne(money: Money, base: string, day: string | null, source: FxSource): { money: Money; rate: FxRate | null } | null {
+  if (money.currency === base) return { money, rate: null };
+  if (!day) return null;
+  const units = parseAmount(money.amount);
+  const rate = source.rateFor(money.currency, base, day);
+  const r = rate ? parseRate(rate.rate) : null;
+  if (units === null || !rate || r === null) return null;
+  return { money: { amount: formatAmount(toCents(applyRate(units, r))), currency: base }, rate };
+}
+
+/**
+ * A converted amount rounded to the cent (paisa), half away from zero: each
+ * order's converted money is an amount in its own right, and screens show
+ * two decimals, so carrying fractions of a paisa would only make totals
+ * disagree with the orders behind them.
+ */
+function toCents(units: bigint): bigint {
+  const cent = 10_000n; // millionths per cent
+  const half = cent / 2n;
+  return units >= 0n ? ((units + half) / cent) * cent : ((units - half) / cent) * cent;
 }
 
 /**
@@ -90,10 +126,7 @@ export function convertDated(values: readonly DatedMoney[], base: string, source
       unconverted.set(money.currency, entry);
       continue;
     }
-    // money (millionths) × rate (millionths) ÷ 10^6, rounded half away from zero.
-    const product = units * r;
-    const half = RATE_SCALE / 2n;
-    total += product >= 0n ? (product + half) / RATE_SCALE : (product - half) / RATE_SCALE;
+    total += applyRate(units, r);
     ratesUsed.set(`${money.currency}|${day}`, rate);
   }
 

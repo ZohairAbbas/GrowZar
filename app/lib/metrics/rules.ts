@@ -17,7 +17,7 @@ export const DISPLAY_RULES: readonly DisplayRule[] = [
   { id: 1, title: "Number of orders", status: "implemented", where: "order grain: one row per Shopify order id; parcels are never orders" },
   { id: 2, title: "Revenue / GMV", status: "implemented", where: "order grain placed / delivered / collected, never summed" },
   { id: 3, title: "Average order value", status: "implemented", where: "rollups.averageOrderValue" },
-  { id: 4, title: "Currency", status: "implemented", where: "money.sumByCurrency; fx.convertDated (no rate source yet, per the 2026-09-30 decision)" },
+  { id: 4, title: "Currency", status: "implemented", where: "money.sumByCurrency; each order converted at its own day's Financify rate (fx-orders.convertOrder, fx_rates); a day with no rate stays in its currency, listed and labelled (2026-10-05 decision)" },
   { id: 5, title: "What counts as a day", status: "implemented", where: "order-grain.localDayOf in the store's timezone" },
   { id: 6, title: "Order ID (the join key)", status: "implemented", where: "entities.extractId; order grain keyed by orderId" },
   { id: 7, title: "Delivery status of an order", status: "implemented", where: "order grain outcome: Courierify when it has the parcel, else Financify" },
