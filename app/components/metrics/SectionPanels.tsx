@@ -341,15 +341,27 @@ export function OrdersPanel({ view, days }: { view: OrdersView; days: number }) 
           </Link>
         </div>
       ) : null}
-      <div className="flex flex-wrap gap-2 text-sm font-semibold">
-        <span className="rounded-full bg-navy px-3.5 py-1.5 text-white">{view.total.toLocaleString()} orders</span>
-        {view.byOutcome.map((o) => (
-          <span key={o.outcome} className="inline-flex items-center gap-2 rounded-full bg-white px-3.5 py-1.5 text-gray-700">
-            <OutcomeDot outcome={o.outcome} />
-            {outcomeLabel(o.outcome)} <span className="tabular-nums text-gray-500">{o.count.toLocaleString()}</span>
-          </span>
-        ))}
-      </div>
+      <nav aria-label="Filter by outcome" className="flex flex-wrap gap-2 text-sm font-semibold">
+        {[{ outcome: null, count: view.allTotal }, ...view.byOutcome].map((o) => {
+          const active = o.outcome === view.outcome;
+          const query = [`days=${days}`, view.filterQuery, o.outcome ? `outcome=${o.outcome}` : ""].filter(Boolean).join("&");
+          return (
+            <Link
+              key={o.outcome ?? "all"}
+              to={`/orders?${query}`}
+              preventScrollReset
+              aria-current={active ? "true" : undefined}
+              className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 transition ${
+                active ? "bg-navy text-white" : "bg-white text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              {o.outcome ? <OutcomeDot outcome={o.outcome} /> : null}
+              {o.outcome ? outcomeLabel(o.outcome) : "All orders"}{" "}
+              <span className={`tabular-nums ${active ? "text-navy-muted" : "text-gray-500"}`}>{o.count.toLocaleString()}</span>
+            </Link>
+          );
+        })}
+      </nav>
       <Notice>
         Buyer risk is not shown yet: it needs Courierify's network band or Preventify, neither of which Growzar reads in
         this release.

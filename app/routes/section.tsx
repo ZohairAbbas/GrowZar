@@ -19,6 +19,7 @@ import {
   financeView,
   homeView,
   ordersView,
+  parseOutcome,
   owedToday,
   periodFrom,
   shippingView,
@@ -158,7 +159,10 @@ async function buildMetrics(
   const summary = await storeSummary(storeId, period.from, period.to);
   // A filter (a finding's evidence) survives a change of period.
   const filter = section === "orders" ? parseOrderFilter(url.searchParams) : null;
-  const base = { period, periods: PERIODS, keep: filter ? orderFilterQuery(filter) : "" };
+  // So does an outcome picked from the Orders chips.
+  const outcome = section === "orders" ? parseOutcome(url.searchParams) : null;
+  const keep = [filter ? orderFilterQuery(filter) : "", outcome ? `outcome=${outcome}` : ""].filter(Boolean).join("&");
+  const base = { period, periods: PERIODS, keep };
   switch (section) {
     case "home": {
       const viewer = await inboxViewer();
@@ -173,7 +177,7 @@ async function buildMetrics(
     case "finance":
       return { ...base, kind: "finance" as const, view: financeView(summary) };
     case "orders":
-      return { ...base, kind: "orders" as const, view: await ordersView(storeId, period.from, period.to, filter) };
+      return { ...base, kind: "orders" as const, view: await ordersView(storeId, period.from, period.to, filter, outcome) };
     case "shipping":
       return { ...base, kind: "shipping" as const, view: shippingView(summary) };
     case "customers":
