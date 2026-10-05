@@ -31,7 +31,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type AdSpendRefresh = { fetched: string[]; problems: string[]; skipped?: string };
 
-async function fetchDay(storeId: string, shopDomain: string, day: string, shopCurrency: string) {
+/** Fetch one ad-platform day and replace it whole. Also used by scripts/refetch-ad-spend.ts. */
+export async function fetchDay(storeId: string, shopDomain: string, day: string, shopCurrency: string) {
   const credentials = getAppCredentials("FINANCIFY");
   if (!credentials) throw new Error("Financify is not configured");
   const response = await appRequest<unknown>("FINANCIFY", {
