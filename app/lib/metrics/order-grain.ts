@@ -16,6 +16,7 @@ import {
   type StatusTiming,
 } from "../shipments/events";
 import { formatAmount, isPositive, parseAmount, readMoney, subtractMoney, timesQuantity, type Money } from "./money";
+import { normalizeCity, type CityAlias } from "./city-aliases";
 
 /** A synced row as the grain sees it. */
 export type SourceRow = {
@@ -40,6 +41,8 @@ export type OrderGrainInput = {
   confirmations: SourceRow[];
   /** Growzar's own customer (rule #19), resolved by the caller. */
   customer: { id: string; via: string } | null;
+  /** Financify city spelling → Courierify city, learned per store (city-aliases.ts). */
+  cityAliases?: ReadonlyMap<string, CityAlias>;
 };
 
 /**
@@ -80,6 +83,11 @@ export type OrderGrain = {
   placed: Money | null;
   delivered: Money | null;
   collected: Money | null;
+  /**
+   * COD of delivered parcels no courier settlement has covered yet: what a
+   * courier (or 3PL) still owes, as Courierify last saw it (G-GZR3-5, I4).
+   */
+  uncollected: Money | null;
   /** Rule #10: money given back, not a delivery outcome. */
   refunded: Money | null;
   discounts: Money | null;
@@ -95,6 +103,14 @@ export type OrderGrain = {
   outcomeAuthority: "courierify" | "financify" | "none";
   /** Rule #9: "happened on" only with a courier time; else "status as of". */
   outcomeTiming: { basis: StatusTiming["basis"]; at: Date } | null;
+  /**
+   * Financify's own outcome and raw status, kept beside the authority's even
+   * when Courierify decides (G-GZR3-1), so "the apps disagree" is a column a
+   * finding can count, not a sentence in `explain`. Null without a Financify
+   * row.
+   */
+  financifyOutcome: Outcome | null;
+  financifyStatus: string | null;
   orderCancelled: boolean;
   shipmentCancelled: boolean;
 
@@ -109,6 +125,14 @@ export type OrderGrain = {
    * than merged by guesswork. Null when neither knows.
    */
   courier: string | null;
+  /**
+   * Who booked the deciding parcel, from Courierify's `fulfilledVia`:
+   * "orio" (a 3PL) or "shopify" (another fulfilment app), or null when the
+   * merchant booked through Courierify directly. Non-null means Courierify
+   * read the status from Shopify's fulfilment, never polled the courier, so
+   * there are no courier times: "not available", never "slow" (G-GZR3-2).
+   */
+  fulfilledVia: string | null;
   /**
    * Courierify's canonical city (its tehsil mapping), or null when the raw
    * spelling did not map — a roll-up groups those as "unmapped", never as a
@@ -126,6 +150,9 @@ export type OrderGrain = {
   lines: Array<{
     variantId: string | null;
     productId: string | null;
+    /** Display only (rule #30): Financify's product and variant titles. */
+    title?: string | null;
+    variantTitle?: string | null;
     quantity: number;
     value: Money | null;
     cost: Money | null;
@@ -396,6 +423,31 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     collectedUnits !== null && collectedCurrency
       ? { amount: formatAmount(collectedUnits), currency: collectedCurrency }
       : null;
+  // What is still owed: the same parcels, not yet covered by a settlement.
+  let uncollectedUnits: bigint | null = null;
+  let uncollectedCurrency: string | null = null;
+  const uncollectedInputs: string[] = [];
+  for (const p of parcels) {
+    const settled = obj(p.row.payload.settlement).settled === true;
+    if (settled || p.row.payload.status !== "delivered") continue;
+    const cod = readMoney(p.row.payload.cod);
+    if (!cod) continue;
+    if (uncollectedCurrency && uncollectedCurrency !== cod.currency) continue; // rule #4
+    uncollectedCurrency = cod.currency;
+    uncollectedUnits = (uncollectedUnits ?? 0n) + parseAmount(cod.amount)!;
+    uncollectedInputs.push(ref(p.row, "cod"));
+  }
+  const uncollected: Money | null =
+    uncollectedUnits !== null && uncollectedCurrency
+      ? { amount: formatAmount(uncollectedUnits), currency: uncollectedCurrency }
+      : null;
+  explain.uncollected = {
+    rule: ["#17"],
+    source: "courierify.shipments.cod where delivered and not settlement.settled",
+    inputs: uncollectedInputs,
+    note: uncollected ? "no courier settlement recorded in Courierify for this COD yet" : "nothing delivered is awaiting a settlement",
+  };
+
   explain.collected = {
     rule: ["#2", "#17"],
     source: "courierify.shipments.cod where settlement.settled and delivered",
@@ -412,8 +464,11 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     inputs: order ? [ref(order, "cogs")] : [],
     note: cogsObj.complete === false ? `${String(cogsObj.linesMissingCost)} line(s) have no cost` : undefined,
   };
+  // Financify nests the money: `courierFee: { amount: { amount, currency },
+  // source }`. Reading `courierFee` itself as money dropped all 908 priced
+  // fees on 0dscam-qn until G-GZR3-1 (the rule #13 fixture had it flat).
   const feeObj = obj(fin?.courierFee);
-  const courierFee = readMoney(feeObj);
+  const courierFee = readMoney(feeObj.amount);
   explain.courierFee = {
     rule: ["#13"],
     source: "financify.orders.courierFee (Courierify's courier_costs metafield, per the 2026-09-25 decision)",
@@ -450,6 +505,19 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
   const couriers = [...new Set(parcels.map((p) => courierOf(p.row)).filter(Boolean))];
   const carrier = typeof obj(fin?.delivery).carrier === "string" ? String(obj(fin?.delivery).carrier).trim() : "";
   const financifyCarrier = carrier ? `financify:${carrier.toLowerCase()}` : null;
+  const via = deciding && typeof deciding.row.payload.fulfilledVia === "string" && deciding.row.payload.fulfilledVia.trim()
+    ? deciding.row.payload.fulfilledVia.trim().toLowerCase()
+    : null;
+  explain.fulfilledVia = {
+    rule: ["#9", "#12"],
+    source: "courierify.shipments.fulfilledVia",
+    inputs: deciding ? [ref(deciding.row, "fulfilledVia")] : [],
+    note: !deciding
+      ? "no Courierify parcel"
+      : via
+        ? `booked through ${via}: status mirrored from Shopify's fulfilment, so no courier times`
+        : "booked through Courierify directly",
+  };
   explain.courier = deciding
     ? {
         rule: ["#7", "#12"],
@@ -465,17 +533,33 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
           ? "no Courierify parcel; Financify's carrier name, not merged with Courierify's spelling"
           : "no parcel and no carrier",
       };
+  // Courierify's city when it carried a parcel (rule #12); otherwise
+  // Financify's delivery city (G-FIN2-2), in Courierify's names where the
+  // store's own data says which name a spelling means.
   const city = deciding ? cityOf(deciding.row) : null;
-  explain.city = {
-    rule: ["#12"],
-    source: "courierify.shipments.city.canonical",
-    inputs: deciding ? [ref(deciding.row, "city")] : [],
-    note: !deciding
-      ? "no Courierify parcel, and Financify does not expose a delivery city"
-      : city?.canonical
-        ? `mapped by ${city.match ?? "Courierify"}`
-        : "Courierify's tehsil mapping has no match for this spelling: unmapped",
-  };
+  const finCityRaw = typeof obj(obj(fin?.delivery).city).raw === "string" ? String(obj(obj(fin?.delivery).city).raw).trim() || null : null;
+  const finAlias = !deciding && finCityRaw ? (input.cityAliases?.get(normalizeCity(finCityRaw)) ?? null) : null;
+  explain.city = deciding
+    ? {
+        rule: ["#12"],
+        source: "courierify.shipments.city.canonical",
+        inputs: [ref(deciding.row, "city")],
+        note: city?.canonical
+          ? `mapped by ${city.match ?? "Courierify"}`
+          : "Courierify's tehsil mapping has no match for this spelling: unmapped",
+      }
+    : {
+        rule: ["#12"],
+        source: "financify.orders.delivery.city.raw",
+        inputs: order && finCityRaw ? [ref(order, "delivery.city")] : [],
+        note: !finCityRaw
+          ? "no Courierify parcel, and no delivery city from Financify"
+          : finAlias
+            ? finAlias.how === "learned"
+              ? `Financify's "${finCityRaw}" is ${finAlias.canonical} on ${finAlias.votes} of ${finAlias.of} orders both apps know`
+              : `Financify's "${finCityRaw}" is the city name ${finAlias.canonical}`
+            : `Financify's "${finCityRaw}" has no learned match: unmapped`,
+      };
 
   const lines = Array.isArray(fin?.lineItems)
     ? (fin!.lineItems as unknown[]).map((l) => {
@@ -489,6 +573,8 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
         return {
           variantId: typeof line.variantId === "string" ? line.variantId : null,
           productId: typeof line.productId === "string" ? line.productId : null,
+          title: typeof line.title === "string" ? line.title : null,
+          variantTitle: typeof line.variantTitle === "string" ? line.variantTitle : null,
           quantity,
           value,
           cost: unitCost ? timesQuantity(unitCost, quantity) : null,
@@ -505,6 +591,7 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     placed,
     delivered,
     collected,
+    uncollected,
     refunded: readMoney(money.refunded),
     discounts: readMoney(money.discounts),
     shipping: readMoney(money.shipping),
@@ -516,14 +603,17 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     outcome,
     outcomeAuthority,
     outcomeTiming,
+    financifyOutcome: fin ? financifyOutcome(obj(fin.delivery).category) : null,
+    financifyStatus: fin && typeof obj(fin.delivery).status === "string" ? (obj(fin.delivery).status as string) : null,
     orderCancelled,
     shipmentCancelled,
     confirmation,
     customerId: input.customer?.id ?? null,
     parcelCount: parcels.length,
     courier: deciding ? courierOf(deciding.row) : financifyCarrier,
-    city: deciding ? cityOf(deciding.row).canonical : null,
-    cityRaw: deciding ? cityOf(deciding.row).raw : null,
+    fulfilledVia: via,
+    city: deciding ? cityOf(deciding.row).canonical : (finAlias?.canonical ?? null),
+    cityRaw: deciding ? cityOf(deciding.row).raw : finCityRaw,
     lines,
     explain,
   };
@@ -541,4 +631,16 @@ function cityOf(row: SourceRow): { canonical: string | null; raw: string | null;
   const c = obj(row.payload.city);
   const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
   return { canonical: text(c.canonical), raw: text(c.raw), match: text(c.match) };
+}
+
+/** The city Courierify gave the order's deciding parcel, for learning aliases. */
+export function courierifyCityOf(parcels: ReadonlyArray<{ row: SourceRow }>): string | null {
+  const deciding = parcels.find((p) => p.row.payload.status !== "cancelled") ?? parcels[0];
+  return deciding ? cityOf(deciding.row).canonical : null;
+}
+
+/** Financify's raw delivery city on an order row, if any. */
+export function financifyCityOf(order: SourceRow | null): string | null {
+  const raw = obj(obj(order?.payload.delivery).city).raw;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
 }

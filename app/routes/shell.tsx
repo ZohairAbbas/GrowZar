@@ -111,21 +111,33 @@ function Switcher({
 }) {
   return (
     <details className="group relative">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-left transition hover:bg-gray-50">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-xl bg-field px-3 py-2 text-left transition hover:bg-gray-100">
         <span className="min-w-0">
-          <span className="block text-[11px] font-medium uppercase tracking-wide text-gray-500">
+          <span className="block text-xs text-gray-500">
             {label}
           </span>
-          <span className="block truncate text-sm font-medium text-gray-900">
+          <span className="block truncate text-sm font-semibold text-gray-900">
             {current}
           </span>
         </span>
         <ChevronDown className="h-4 w-4 flex-shrink-0 text-gray-400 transition group-open:rotate-180" />
       </summary>
-      <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
+      <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-gray-100 bg-white py-1 shadow-lg">
         {children}
       </div>
     </details>
+  );
+}
+
+/** The wordmark: a navy tile with a mint "g", then the name. */
+export function Logo() {
+  return (
+    <>
+      <span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-navy font-display text-lg font-bold leading-none text-mint">
+        g
+      </span>
+      <span className="font-display text-xl font-bold text-navy">growzar</span>
+    </>
   );
 }
 
@@ -138,11 +150,11 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
   const activeStore = stores.find((store) => store.id === activeStoreId);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto flex max-w-7xl gap-6 px-4 py-6 lg:px-6">
-        <aside className="hidden w-64 flex-shrink-0 md:block">
-          <Link to="/home" className="mb-5 block text-lg font-semibold text-primary-500">
-            Growzar
+    <div className="min-h-screen bg-field">
+      <div className="mx-auto flex max-w-[1440px] gap-5 p-3 md:p-4">
+        <aside className="hidden w-60 flex-shrink-0 flex-col rounded-2xl bg-white p-4 md:sticky md:top-4 md:flex md:h-[calc(100vh-2rem)] md:overflow-y-auto">
+          <Link to="/home" className="mb-5 flex items-center gap-2.5 px-1.5">
+            <Logo />
           </Link>
 
           <div className="space-y-2">
@@ -205,7 +217,7 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
             ) : null}
           </div>
 
-          <nav className="mt-5 space-y-0.5">
+          <nav className="mt-5 space-y-1">
             {sections.map((item) => {
               const Icon = SECTION_ICONS[item.section];
               const to = item.section === "settings" ? "/settings" : `/${item.section}`;
@@ -216,14 +228,16 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
                   to={to}
                   className={({ isActive }) =>
                     cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition",
+                      "group flex items-center gap-3 rounded-full px-3.5 py-2.5 text-sm transition",
                       isActive
-                        ? "bg-primary-50 font-medium text-primary-700"
-                        : "text-gray-700 hover:bg-gray-100",
+                        ? "active bg-navy font-semibold text-white"
+                        : item.state.kind === "locked"
+                          ? "font-medium text-gray-500 hover:bg-field"
+                          : "font-medium text-gray-700 hover:bg-field",
                     )
                   }
                 >
-                  <Icon className="h-4 w-4 flex-shrink-0" />
+                  <Icon className="h-[18px] w-[18px] flex-shrink-0 group-[.active]:text-mint" />
                   <span className="flex-1 truncate">{item.label}</span>
                   {/*
                     A locked section stays in the navigation, greyed rather than
@@ -231,12 +245,12 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
                     the rest of the suite would give them (D-04).
                   */}
                   {item.state.kind === "locked" ? (
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
+                    <span className="rounded-full bg-field px-2 py-0.5 text-[11px] font-semibold text-gray-500 group-[.active]:bg-navy-surface group-[.active]:text-navy-muted">
                       Locked
                     </span>
                   ) : null}
                   {item.state.kind === "reconnect" ? (
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-amber-600">
+                    <span className="rounded-full bg-coral-200 px-2 py-0.5 text-[11px] font-bold text-coral-700">
                       Stale
                     </span>
                   ) : null}
@@ -245,22 +259,22 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
             })}
           </nav>
 
-          <Form method="post" action="/auth/sign-out" className="mt-6">
+          <Form method="post" action="/auth/sign-out" className="mt-auto pt-6">
             <button
               type="submit"
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
+              className="flex w-full items-center gap-3 rounded-full px-3.5 py-2.5 text-sm font-medium text-gray-600 transition hover:bg-field hover:text-gray-900"
             >
-              <LogOut className="h-4 w-4" />
+              <LogOut className="h-[18px] w-[18px]" />
               Sign out
             </button>
           </Form>
         </aside>
 
-        <main className="min-w-0 flex-1">
+        <main className="min-w-0 flex-1 px-1 py-2 md:px-2">
           {/* The same switchers, for a phone. */}
           <div className="mb-4 flex items-center gap-2 md:hidden">
-            <Link to="/home" className="text-base font-semibold text-primary-500">
-              Growzar
+            <Link to="/home" className="flex items-center gap-2">
+              <Logo />
             </Link>
             {activeStore ? (
               <span className="ml-auto flex items-center gap-1.5 truncate text-sm text-gray-600">
@@ -271,7 +285,7 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
           </div>
 
           {stores.length === 0 ? (
-            <div className="mb-4 flex items-start gap-3 rounded-2xl border border-accent-200 bg-accent-50 p-4">
+            <div className="mb-4 flex items-start gap-3 rounded-2xl bg-mint-100 p-4">
               <BarChart3 className="mt-0.5 h-5 w-5 flex-shrink-0 text-accent-600" />
               <p className="text-sm text-accent-900">
                 No store connected yet. Open Growzar from inside Courierify,
@@ -291,7 +305,7 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
 export function ErrorBoundary() {
   return (
     <main className="mx-auto max-w-lg px-6 py-24">
-      <h1 className="text-2xl font-semibold">Something went wrong</h1>
+      <h1 className="font-display text-3xl font-bold tracking-tight">Something went wrong</h1>
       <p className="mt-2 text-gray-600">
         The error has been logged.{" "}
         <Link to="/home" className="font-medium text-accent-500">

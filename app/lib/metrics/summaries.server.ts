@@ -8,6 +8,8 @@ import { formatAmount, parseAmount, sumByCurrency, type Money } from "./money";
 import { compareSettings, type SettingsComparison, type StoreSettings } from "./profit-settings";
 import { bucketOf, profitAfterReturns, roas, type Bucket, type Profit, type RollupOrder } from "./rollups";
 import { loadAdSpend, loadOrders } from "./rollups.server";
+import { loadFxSource } from "./fx.server";
+import { convertOrder, fxReport, type FxReport } from "./fx-orders";
 
 /**
  * Store and organization grains (G-GZR2-4), rolled from the order grain and
@@ -74,6 +76,12 @@ export type StoreSummary = {
    * coarser view; this makes it visible.
    */
   courierifyCoverage: { shippedOrders: number; withParcel: number };
+  /**
+   * Orders in another currency, converted into the store's at their own
+   * day's rate before anything above was added up (rule #4, G-FIN2-1); null
+   * when the period had none. `rows` are the converted orders.
+   */
+  fx: FxReport | null;
   rows: RollupOrder[];
 };
 
@@ -93,7 +101,12 @@ export async function storeSummary(storeId: string, from: string, to: string): P
       connections: { where: { app: "FINANCIFY", status: "CONNECTED" }, select: { app: true } },
     },
   });
-  const rows = await loadOrders(storeId, from, to);
+  const loaded = await loadOrders(storeId, from, to);
+  // Convert each order's money at its own day's rate first, so every total
+  // below, and every card and list built from these rows, agrees (rule #4).
+  const fxLoaded = store.currency ? await loadFxSource(store.currency, loaded) : null;
+  const fx = store.currency && fxLoaded ? fxReport(loaded, store.currency, fxLoaded.source, fxLoaded.ratesFrom) : null;
+  const rows = store.currency && fxLoaded ? loaded.map((o) => convertOrder(o, store.currency!, fxLoaded.source)) : loaded;
   const orders = bucketOf(store.shopDomain, rows);
 
   const hasFinancify = store.connections.length > 0;
@@ -149,6 +162,7 @@ export async function storeSummary(storeId: string, from: string, to: string): P
       fetchedAt: store.profitSettings?.fetchedAt ?? null,
     },
     courierifyCoverage: { shippedOrders: shipped.length, withParcel: shipped.filter((r) => r.parcelCount > 0).length },
+    fx,
     rows,
   };
 }

@@ -125,14 +125,14 @@ export default function OrganizationSettings({
 
   return (
     <div className="space-y-6">
-      <section className="rounded-2xl border border-gray-200 bg-white p-6">
+      <section className="rounded-2xl bg-white p-6">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-100">
               <Building2 className="h-5 w-5 text-gray-600" />
             </span>
             <div>
-              <h1 className="text-lg font-semibold text-gray-900">
+              <h1 className="font-display text-lg font-bold text-gray-900">
                 {organization.name}
               </h1>
               <p className="text-sm text-gray-600">
@@ -223,7 +223,7 @@ export default function OrganizationSettings({
             <button
               type="submit"
               disabled={navigation.state === "submitting"}
-              className="flex h-11 items-center justify-center gap-2 rounded-xl bg-primary-500 px-6 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
+              className="flex h-11 items-center justify-center gap-2 rounded-full bg-primary-500 px-6 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
             >
               {submittingIntent === "update" ? <LoadingSpinner size="sm" /> : null}
               <span>Save changes</span>
@@ -243,7 +243,7 @@ export default function OrganizationSettings({
               <Trash2 className="h-5 w-5 text-red-600" />
             </span>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">Danger zone</h2>
+              <h2 className="font-display text-lg font-bold text-gray-900">Danger zone</h2>
               <p className="text-sm text-gray-600">
                 Deleting the organization removes its members and invitations.
               </p>

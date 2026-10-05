@@ -172,8 +172,8 @@ export default function Roles({ loaderData, actionData }: Route.ComponentProps) 
         </div>
       ) : null}
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-6">
-        <h1 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
+      <section className="rounded-2xl bg-white p-6">
+        <h1 className="flex items-center gap-2 font-display text-lg font-bold text-gray-900">
           <Shield className="h-5 w-5 text-gray-400" />
           Roles
         </h1>
@@ -201,8 +201,8 @@ export default function Roles({ loaderData, actionData }: Route.ComponentProps) 
       </section>
 
       {customRoles.length > 0 ? (
-        <section className="rounded-2xl border border-gray-200 bg-white p-6">
-          <h2 className="text-lg font-semibold text-gray-900">Your roles</h2>
+        <section className="rounded-2xl bg-white p-6">
+          <h2 className="font-display text-lg font-bold text-gray-900">Your roles</h2>
 
           <ul className="mt-4 space-y-4">
             {customRoles.map((role) => (
@@ -228,8 +228,8 @@ export default function Roles({ loaderData, actionData }: Route.ComponentProps) 
         </section>
       ) : null}
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-gray-900">Create a role</h2>
+      <section className="rounded-2xl bg-white p-6">
+        <h2 className="font-display text-lg font-bold text-gray-900">Create a role</h2>
         <p className="mt-1 text-sm text-gray-600">
           Tick what the role may do. View shows a section, export takes its rows
           out, manage covers the actions that arrive after Phase 1.
@@ -290,7 +290,7 @@ export default function Roles({ loaderData, actionData }: Route.ComponentProps) 
           <button
             type="submit"
             disabled={navigation.state === "submitting"}
-            className="flex h-11 items-center justify-center gap-2 rounded-xl bg-primary-500 px-6 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
+            className="flex h-11 items-center justify-center gap-2 rounded-full bg-primary-500 px-6 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
           >
             {submittingIntent === "create" ? (
               <LoadingSpinner size="sm" />

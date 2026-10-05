@@ -51,7 +51,7 @@ export default function ProfitSettings({ loaderData }: Route.ComponentProps) {
   return (
     <div className="space-y-4">
       <header>
-        <h2 className="text-lg font-semibold text-gray-900">Profit settings</h2>
+        <h2 className="font-display text-lg font-bold text-gray-900">Profit settings</h2>
         <p className="mt-1 text-sm text-gray-600">
           Financify's net profit depends on five settings per store. Growzar's own “profit after returns” uses one fixed
           definition; these explain why Financify's figure can differ, and whether stores can be compared.
@@ -69,7 +69,7 @@ export default function ProfitSettings({ loaderData }: Route.ComponentProps) {
       ) : null}
 
       {settings.map((s) => (
-        <section key={s.storeId} className="rounded-2xl border border-gray-200 bg-white p-5">
+        <section key={s.storeId} className="rounded-2xl bg-white p-5">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h3 className="font-medium text-gray-900">{s.name}</h3>
             <span className="text-xs text-gray-500">

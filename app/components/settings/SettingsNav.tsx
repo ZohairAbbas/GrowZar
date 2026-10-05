@@ -56,7 +56,7 @@ const navigation: NavItem[] = [
 export function SettingsNav() {
   return (
     <nav className="space-y-1">
-      <h2 className="mb-4 px-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
+      <h2 className="mb-2 px-3 pt-2 font-display text-lg font-bold text-gray-900">
         Settings
       </h2>
 
@@ -66,7 +66,7 @@ export function SettingsNav() {
             <span
               key={item.name}
               aria-disabled="true"
-              className="group flex cursor-not-allowed items-start gap-3 rounded-lg px-3 py-2.5 text-gray-400"
+              className="group flex cursor-not-allowed items-start gap-3 rounded-xl px-3 py-2.5 text-gray-400"
             >
               <item.icon className="mt-0.5 h-5 w-5 flex-shrink-0 text-gray-300" />
               <span className="min-w-0 flex-1">
@@ -89,10 +89,10 @@ export function SettingsNav() {
             end={item.end}
             className={({ isActive }) =>
               cn(
-                "group flex items-start gap-3 rounded-lg px-3 py-2.5 transition",
+                "group flex items-start gap-3 rounded-xl px-3 py-2.5 transition",
                 isActive
-                  ? "bg-primary-50 text-primary-700"
-                  : "text-gray-700 hover:bg-gray-50 hover:text-gray-900",
+                  ? "bg-navy text-white"
+                  : "text-gray-700 hover:bg-field hover:text-gray-900",
               )
             }
           >
@@ -102,13 +102,13 @@ export function SettingsNav() {
                   className={cn(
                     "mt-0.5 h-5 w-5 flex-shrink-0",
                     isActive
-                      ? "text-primary-600"
+                      ? "text-mint"
                       : "text-gray-400 group-hover:text-gray-600",
                   )}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium">{item.name}</span>
-                  <span className="mt-0.5 block text-xs text-gray-500">
+                  <span className="block text-sm font-semibold">{item.name}</span>
+                  <span className={cn("mt-0.5 block text-xs", isActive ? "text-navy-muted" : "text-gray-500")}>
                     {item.description}
                   </span>
                 </span>

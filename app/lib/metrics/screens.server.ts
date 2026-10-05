@@ -1,8 +1,13 @@
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "../db.server";
 import { localDayOf } from "./order-grain";
 import { byCity, byCourier, courierTiming, rollup, type DeliveryRate } from "./rollups";
 import { storeSummary, type StoreSummary } from "./summaries.server";
 import { formatAmount, parseAmount, type Money } from "./money";
+import { matchesFilter, type OrderFilter } from "./findings";
+import { toRollupOrder } from "./rollups.server";
+import { loadPayerHistories } from "./settlements.server";
 
 /**
  * View models for the read-only screens (G-GZR2-5).
@@ -14,14 +19,14 @@ import { formatAmount, parseAmount, type Money } from "./money";
  * Periods are the store's own local days (rule #5), ending today.
  */
 
-export const PERIODS = [7, 30, 90] as const;
+export const PERIODS = [7, 30, 60, 90] as const;
 export type PeriodDays = (typeof PERIODS)[number];
 
-export function periodFrom(url: URL, timezone: string | null) {
+export function periodFrom(url: URL, timezone: string | null, at: Date = new Date()) {
   const asked = Number(url.searchParams.get("days"));
   const days: PeriodDays = (PERIODS as readonly number[]).includes(asked) ? (asked as PeriodDays) : 30;
   const tz = timezone ?? "UTC";
-  const now = Date.now();
+  const now = at.getTime();
   return {
     days,
     from: localDayOf(new Date(now - (days - 1) * 86_400_000), tz),
@@ -48,10 +53,53 @@ export type HomeView = {
   funnel: Array<{ label: string; count: number | null; note?: string }>;
   deliveryRate: DeliveryRate;
   coverage: Coverage;
+  /** Delivered orders per local day the order was placed on, oldest first. */
+  daily: Array<{ day: string; delivered: number }>;
+  /** Null for a role that may not see Finance: Home then shows counts only. */
+  money: {
+    deliveredRevenue: Money[];
+    profit: StoreSummary["profit"];
+  } | null;
+  /** The store's currency (it leads), and what happened to orders in others. */
+  base: string | null;
+  fx: StoreSummary["fx"];
 };
 
-export function homeView(s: StoreSummary): HomeView {
+/**
+ * COD a courier still owes as of today, whatever the order date: delivered
+ * Courierify parcels no settlement covers yet. The same rows I4 reads, before
+ * it judges which payers are late, so Home and the insight never disagree on
+ * what is outstanding.
+ */
+export async function owedToday(storeId: string): Promise<{ amounts: Money[]; orders: number }> {
+  const groups = await prisma.orderGrain.groupBy({
+    by: ["uncollectedCurrency"],
+    where: { storeId, outcome: "delivered", parcelCount: { gt: 0 }, uncollectedAmount: { gt: 0 } },
+    _sum: { uncollectedAmount: true },
+    _count: { _all: true },
+  });
+  return {
+    amounts: groups
+      .filter((g) => g.uncollectedCurrency && g._sum.uncollectedAmount)
+      .map((g) => ({ amount: g._sum.uncollectedAmount!.toString(), currency: g.uncollectedCurrency! })),
+    orders: groups.reduce((n, g) => n + g._count._all, 0),
+  };
+}
+
+function eachDay(from: string, to: string): string[] {
+  const days: string[] = [];
+  for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${to}T00:00:00Z`); t += 86_400_000) {
+    days.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return days;
+}
+
+export function homeView(s: StoreSummary, canSeeMoney: boolean): HomeView {
   const rows = s.rows;
+  const deliveredByDay = new Map<string, number>();
+  for (const r of rows) {
+    if (r.outcome === "delivered" && r.localDay) deliveredByDay.set(r.localDay, (deliveredByDay.get(r.localDay) ?? 0) + 1);
+  }
   const anyConfirmation = rows.some((r) => r.confirmation);
   return {
     funnel: [
@@ -68,6 +116,15 @@ export function homeView(s: StoreSummary): HomeView {
     ],
     deliveryRate: s.orders.deliveryRate,
     coverage: coverage(s),
+    daily: eachDay(s.period.from, s.period.to).map((day) => ({ day, delivered: deliveredByDay.get(day) ?? 0 })),
+    money: canSeeMoney
+      ? {
+          deliveredRevenue: s.orders.deliveredRevenue,
+          profit: s.profit,
+        }
+      : null,
+    base: s.store.currency,
+    fx: canSeeMoney ? s.fx : null,
   };
 }
 
@@ -87,6 +144,8 @@ export type FinanceView = {
   profit: StoreSummary["profit"];
   roas: number | null;
   settings: StoreSummary["settings"];
+  base: string | null;
+  fx: StoreSummary["fx"];
 };
 
 export function financeView(s: StoreSummary): FinanceView {
@@ -105,6 +164,8 @@ export function financeView(s: StoreSummary): FinanceView {
     profit: s.profit,
     roas: s.roas,
     settings: s.settings,
+    base: s.store.currency,
+    fx: s.fx,
   };
 }
 
@@ -131,12 +192,75 @@ export type OrdersView = {
   byOutcome: Array<{ outcome: string; count: number }>;
   rows: OrderRow[];
   shown: number;
+  /** Set when the list is a finding's evidence (G-GZR3-1). */
+  filter: OrderFilter | null;
+  /** Financify's own outcome per shown order, for the disagreement list. */
+  financifySays: Record<string, string | null>;
 };
 
 const LIST_LIMIT = 50;
+/** A filtered list is a finding's evidence, so it shows more of it. */
+const FILTERED_LIST_LIMIT = 200;
 
-export async function ordersView(storeId: string, from: string, to: string): Promise<OrdersView> {
+const ORDER_ROW_SELECT = {
+  orderId: true, orderName: true, localDay: true, currency: true, placedAmount: true,
+  outcome: true, outcomeAuthority: true, outcomeBasis: true, outcomeAt: true, confirmation: true,
+  courier: true, city: true, refundedAmount: true, orderCancelled: true, shipmentCancelled: true,
+} as const;
+
+export async function ordersView(
+  storeId: string,
+  from: string,
+  to: string,
+  filter: OrderFilter | null = null,
+): Promise<OrdersView> {
   const where = { storeId, localDay: { gte: from, lte: to } };
+  const money = (a: { toFixed(n: number): string } | null, c: string | null): Money | null =>
+    a && c ? { amount: formatAmount(parseAmount(a.toFixed(6))!), currency: c } : null;
+  type Row = Prisma.OrderGrainGetPayload<{ select: typeof ORDER_ROW_SELECT }>;
+  const toRow = (r: Row): OrderRow => ({
+    orderId: r.orderId,
+    orderName: r.orderName,
+    localDay: r.localDay,
+    placed: money(r.placedAmount, r.currency),
+    outcome: r.outcome,
+    authority: r.outcomeAuthority,
+    timing: r.outcomeBasis && r.outcomeAt ? { basis: r.outcomeBasis, at: r.outcomeAt.toISOString() } : null,
+    confirmation: r.confirmation,
+    courier: r.courier,
+    city: r.city,
+    refunded: money(r.refundedAmount, r.currency),
+    orderCancelled: r.orderCancelled,
+    shipmentCancelled: r.shipmentCancelled,
+  });
+  const countOutcomes = (outcomes: string[]) =>
+    [...outcomes.reduce((m, o) => m.set(o, (m.get(o) ?? 0) + 1), new Map<string, number>())]
+      .map(([outcome, count]) => ({ outcome, count }))
+      .sort((a, b) => b.count - a.count);
+
+  if (filter) {
+    // The same predicate the Home card counted with, applied to the same
+    // grain rows, so the list is exactly the card's evidence.
+    const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { currency: true } });
+    // Cash held is today's state (I4): any order date, so no period here.
+    const cashFilter = filter.kind === "awaiting_payout";
+    const all = await prisma.orderGrain.findMany({
+      where: cashFilter ? { storeId, outcome: "delivered", uncollectedAmount: { not: null } } : where,
+      orderBy: [{ createdAt: "desc" }, { orderId: "desc" }],
+    });
+    const ctx = { payers: cashFilter ? await loadPayerHistories(storeId) : [], asOf: new Date() };
+    const hit = all.filter((r) => matchesFilter(toRollupOrder(r), filter, store.currency, ctx));
+    const shown = hit.slice(0, FILTERED_LIST_LIMIT);
+    return {
+      total: hit.length,
+      byOutcome: countOutcomes(hit.map((r) => r.outcome)),
+      rows: shown.map(toRow),
+      shown: shown.length,
+      filter,
+      financifySays: Object.fromEntries(shown.map((r) => [r.orderId, r.financifyOutcome])),
+    };
+  }
+
   const [total, groups, latest] = await Promise.all([
     prisma.orderGrain.count({ where }),
     prisma.orderGrain.groupBy({ by: ["outcome"], where, _count: { _all: true } }),
@@ -144,34 +268,16 @@ export async function ordersView(storeId: string, from: string, to: string): Pro
       where,
       orderBy: [{ createdAt: "desc" }, { orderId: "desc" }],
       take: LIST_LIMIT,
-      select: {
-        orderId: true, orderName: true, localDay: true, currency: true, placedAmount: true,
-        outcome: true, outcomeAuthority: true, outcomeBasis: true, outcomeAt: true, confirmation: true,
-        courier: true, city: true, refundedAmount: true, orderCancelled: true, shipmentCancelled: true,
-      },
+      select: ORDER_ROW_SELECT,
     }),
   ]);
-  const money = (a: { toFixed(n: number): string } | null, c: string | null): Money | null =>
-    a && c ? { amount: formatAmount(parseAmount(a.toFixed(6))!), currency: c } : null;
   return {
     total,
     byOutcome: groups.map((g) => ({ outcome: g.outcome, count: g._count._all })).sort((a, b) => b.count - a.count),
-    rows: latest.map((r) => ({
-      orderId: r.orderId,
-      orderName: r.orderName,
-      localDay: r.localDay,
-      placed: money(r.placedAmount, r.currency),
-      outcome: r.outcome,
-      authority: r.outcomeAuthority,
-      timing: r.outcomeBasis && r.outcomeAt ? { basis: r.outcomeBasis, at: r.outcomeAt.toISOString() } : null,
-      confirmation: r.confirmation,
-      courier: r.courier,
-      city: r.city,
-      refunded: money(r.refundedAmount, r.currency),
-      orderCancelled: r.orderCancelled,
-      shipmentCancelled: r.shipmentCancelled,
-    })),
+    rows: latest.map(toRow),
     shown: latest.length,
+    filter: null,
+    financifySays: {},
   };
 }
 
@@ -184,6 +290,22 @@ export type ShippingView = {
   cities: Array<{ city: string; orders: number; deliveryRate: DeliveryRate }>;
   coverage: Coverage;
 };
+
+const THIRD_PARTY: Record<string, string> = { orio: "Orio", shopify: "another fulfilment app" };
+
+/** Never "slow": say why there is no time (G-GZR3-2). */
+function timingReason(t: Extract<ReturnType<typeof courierTiming>[number], { verdict: "not_enough_data" }>): string {
+  switch (t.reason) {
+    case "not_via_courierify":
+      return "not available: not shipped through Courierify";
+    case "shipped_via_3pl":
+      return `not available: shipped through ${THIRD_PARTY[t.via!.name] ?? t.via!.name} (${t.via!.orders} of ${t.via!.delivered} delivered), which sends no courier times`;
+    case "no_courier_history":
+      return "not enough data: no courier-timed deliveries";
+    case "too_few_parcels":
+      return `not enough data: ${t.timedOrders} timed deliveries`;
+  }
+}
 
 export function shippingView(s: StoreSummary): ShippingView {
   const timing = new Map(courierTiming(s.rows).map((t) => [t.courier, t]));
@@ -200,9 +322,7 @@ export function shippingView(s: StoreSummary): ShippingView {
           ? "—"
           : t.verdict === "ok"
             ? `${t.medianDaysToDeliver.toFixed(1)} days (median, ${t.timedOrders} timed)`
-            : t.reason === "no_courier_history"
-              ? "not enough data: no courier-timed deliveries"
-              : `not enough data: ${t.timedOrders} timed deliveries`,
+            : timingReason(t),
       };
     }),
     cities: rollup(s.rows, byCity).slice(0, 12).map((b) => ({ city: b.key, orders: b.orders, deliveryRate: b.deliveryRate })),

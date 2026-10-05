@@ -22,14 +22,18 @@ export type RollupOrder = Pick<
   | "delivered"
   | "refunded"
   | "collected"
+  | "uncollected"
   | "cogs"
   | "cogsComplete"
   | "courierFee"
   | "outcome"
   | "outcomeTiming"
+  | "financifyOutcome"
   | "parcelCount"
   | "courier"
+  | "fulfilledVia"
   | "city"
+  | "cityRaw"
   | "lines"
   | "confirmation"
   | "customerId"
@@ -176,7 +180,8 @@ export function averageOrderValue(orders: readonly RollupOrder[]): Money[] {
 export const byDay = (o: RollupOrder) => [o.localDay ?? "unknown day"];
 
 /** Rule #12, cities: Courierify's canonical name, or "unmapped" — never a raw spelling. */
-export const byCity = (o: RollupOrder) => [o.parcelCount ? (o.city ?? "unmapped") : "no city (no Courierify parcel)"];
+/** Canonical city; a spelling neither app could place is "unmapped", never a city of its own (rule #12). */
+export const byCity = (o: RollupOrder) => [o.city ?? (o.parcelCount || o.cityRaw ? "unmapped" : "no city")];
 
 export const byCourier = (o: RollupOrder) => [o.courier ?? "unknown"];
 
@@ -304,7 +309,24 @@ export function productLines(orders: readonly RollupOrder[]): ProductLine[] {
 
 export type CourierTiming =
   | { courier: string; verdict: "ok"; timedOrders: number; medianDaysToDeliver: number }
-  | { courier: string; verdict: "not_enough_data"; reason: string; timedOrders: number };
+  | {
+      courier: string;
+      verdict: "not_enough_data";
+      /**
+       * Why, most specific first (G-GZR3-2):
+       *  - `not_via_courierify`: a carrier only Financify names; no parcel
+       *    went through Courierify, so there is no event log at all;
+       *  - `shipped_via_3pl`: most delivered orders were booked through a
+       *    3PL (`via`), whose status Courierify mirrors from Shopify with no
+       *    courier times;
+       *  - `no_courier_history` / `too_few_parcels`: the coverage verdict.
+       * None of these is "slow", and no screen may read them as such.
+       */
+      reason: "not_via_courierify" | "shipped_via_3pl" | "no_courier_history" | "too_few_parcels";
+      timedOrders: number;
+      /** For `shipped_via_3pl`: the 3PL, and how many delivered orders it booked. */
+      via?: { name: string; orders: number; delivered: number };
+    };
 
 /**
  * Median days from order to delivery, per courier — only from deliveries the
@@ -312,6 +334,22 @@ export type CourierTiming =
  * courier with none would otherwise look like one that never delivers, so
  * below the floor this returns "not enough data", never a number.
  */
+function untimedBecause(
+  courier: string,
+  orders: readonly RollupOrder[],
+  fallback: "no_courier_history" | "too_few_parcels",
+): Pick<Extract<CourierTiming, { verdict: "not_enough_data" }>, "reason" | "via"> {
+  if (courier.startsWith("financify:")) return { reason: "not_via_courierify" };
+  const delivered = orders.filter((o) => o.courier === courier && o.outcome === "delivered");
+  const via = new Map<string, number>();
+  for (const o of delivered) if (o.fulfilledVia) via.set(o.fulfilledVia, (via.get(o.fulfilledVia) ?? 0) + 1);
+  const [name, n] = [...via.entries()].sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+  // Most of the courier's deliveries, not merely some: a courier with its
+  // own timed parcels plus a few via a 3PL is short of data, not "via Orio".
+  if (n * 2 > delivered.length) return { reason: "shipped_via_3pl", via: { name, orders: n, delivered: delivered.length } };
+  return { reason: fallback };
+}
+
 export function courierTiming(
   orders: readonly RollupOrder[],
   minimum = MIN_TIMED_PARCELS_PER_COURIER,
@@ -327,7 +365,7 @@ export function courierTiming(
     );
     const verdict = coverageVerdict(timed.length, minimum);
     if (verdict.verdict !== "ok") {
-      out.push({ courier: b.key, verdict: "not_enough_data", reason: verdict.reason, timedOrders: timed.length });
+      out.push({ courier: b.key, verdict: "not_enough_data", timedOrders: timed.length, ...untimedBecause(b.key, orders, verdict.reason) });
       continue;
     }
     const days = timed

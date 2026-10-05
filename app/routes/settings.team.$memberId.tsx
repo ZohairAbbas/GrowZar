@@ -174,10 +174,10 @@ export default function MemberSettings({
         Team
       </Link>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-6">
+      <section className="rounded-2xl bg-white p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="truncate text-lg font-semibold text-gray-900">
+            <h1 className="truncate font-display text-lg font-bold text-gray-900">
               {member.name}
             </h1>
             <p className="truncate text-sm text-gray-600">{member.email}</p>
@@ -308,7 +308,7 @@ export default function MemberSettings({
           <button
             type="submit"
             disabled={navigation.state === "submitting"}
-            className="flex h-11 items-center justify-center gap-2 rounded-xl bg-primary-500 px-6 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
+            className="flex h-11 items-center justify-center gap-2 rounded-full bg-primary-500 px-6 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
           >
             {navigation.state === "submitting" ? <LoadingSpinner size="sm" /> : null}
             <span>Save</span>

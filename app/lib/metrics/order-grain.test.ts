@@ -135,6 +135,30 @@ describe("rule #7: Courierify is the delivery authority when connected", () => {
     expect(g.explain.outcome?.note).toMatch(/Financify says delivered/);
   });
 
+  it("carries who booked the deciding parcel, so a 3PL parcel reads as 'not available', not slow", () => {
+    const viaOrio = grain({ parcels: [{ row: parcel("delivered", { fulfilledVia: "orio" }), events: [] }] });
+    expect(viaOrio.fulfilledVia).toBe("orio");
+    expect(viaOrio.explain.fulfilledVia?.note).toMatch(/booked through orio/);
+    expect(grain({ parcels: [{ row: parcel("delivered", { fulfilledVia: "Shopify" }), events: [] }] }).fulfilledVia).toBe("shopify");
+    expect(grain({ parcels: [{ row: parcel("delivered", { fulfilledVia: null }), events: [] }] }).fulfilledVia).toBeNull();
+    expect(grain().fulfilledVia).toBeNull();
+    // A cancelled parcel does not decide: the live one does.
+    const rebooked = grain({
+      parcels: [
+        { row: parcel("cancelled", { fulfilledVia: "orio" }), events: [] },
+        { row: parcel("delivered", { fulfilledVia: null }), events: [] },
+      ],
+    });
+    expect(rebooked.fulfilledVia).toBeNull();
+  });
+
+  it("keeps Financify's own outcome beside the authority's, so a disagreement can be counted", () => {
+    const g = grain({ parcels: [{ row: parcel("returned"), events: [] }] });
+    expect(g.outcome).toBe("returned");
+    expect(g.financifyOutcome).toBe("delivered");
+    expect(grain({ order: null, parcels: [{ row: parcel("returned"), events: [] }] }).financifyOutcome).toBeNull();
+  });
+
   it("falls back to Financify without a parcel, flagging a failed attempt filed as returned", () => {
     const g = grain({
       order: financify({ delivery: { category: "returned", status: "FAILED_DELIVERY" } }),
@@ -223,7 +247,28 @@ describe("rule #12: courier, with Financify's carrier as the fallback", () => {
     const g = grain({ order: financify({ delivery: { category: "delivered", status: "DELIVERED", carrier: "NK Fulfilment" } }) });
     expect(g.courier).toBe("financify:nk fulfilment");
     expect(g.city).toBeNull();
-    expect(g.explain.city?.note).toMatch(/Financify does not expose a delivery city/);
+    expect(g.explain.city?.note).toMatch(/no delivery city from Financify/);
+  });
+
+  it("uses Financify's delivery city without a parcel, in Courierify's name when the store's data says which", () => {
+    const cityAliases = new Map([["karachi city", { canonical: "Karachi", votes: 40, of: 41, how: "learned" as const }]]);
+    const withCity = (raw: string) => financify({ delivery: { category: "delivered", status: "DELIVERED", city: { raw, country: "Pakistan" } } });
+    const g = grain({ order: withCity("Karachi City"), cityAliases });
+    expect([g.city, g.cityRaw]).toEqual(["Karachi", "Karachi City"]);
+    expect(g.explain.city?.note).toMatch(/is Karachi on 40 of 41 orders both apps know/);
+    const u = grain({ order: withCity("Gulshan Block 7"), cityAliases });
+    expect([u.city, u.cityRaw]).toEqual([null, "Gulshan Block 7"]);
+    expect(u.explain.city?.note).toMatch(/no learned match: unmapped/);
+  });
+
+  it("keeps Courierify's city when there is a parcel, whatever Financify says", () => {
+    const cityAliases = new Map([["karachi", { canonical: "Karachi", votes: 0, of: 0, how: "name" as const }]]);
+    const g = grain({
+      order: financify({ delivery: { category: "delivered", status: "DELIVERED", city: { raw: "Karachi" } } }),
+      parcels: [{ row: parcel("delivered", { city: { raw: "lahore cantt", canonical: "Lahore", match: "exact" } }), events: [] }],
+      cityAliases,
+    });
+    expect(g.city).toBe("Lahore");
   });
 });
 

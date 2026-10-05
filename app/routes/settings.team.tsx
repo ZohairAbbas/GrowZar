@@ -186,8 +186,8 @@ export default function TeamSettings({
       ) : null}
 
       {canInvite ? (
-        <section className="rounded-2xl border border-gray-200 bg-white p-6">
-          <h1 className="text-lg font-semibold text-gray-900">Invite someone</h1>
+        <section className="rounded-2xl bg-white p-6">
+          <h1 className="font-display text-lg font-bold text-gray-900">Invite someone</h1>
           <p className="mt-1 text-sm text-gray-600">
             They get an email with a link that expires in 7 days.
           </p>
@@ -207,7 +207,7 @@ export default function TeamSettings({
               type="email"
               required
               placeholder="colleague@company.pk"
-              className="h-12 flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 transition focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20"
+              className="h-12 flex-none sm:flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 transition focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20"
             />
 
             <select
@@ -226,7 +226,7 @@ export default function TeamSettings({
             <button
               type="submit"
               disabled={navigation.state === "submitting"}
-              className="flex h-12 items-center justify-center gap-2 rounded-xl bg-primary-500 px-6 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
+              className="flex h-12 items-center justify-center gap-2 rounded-full bg-primary-500 px-6 font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50"
             >
               {submittingIntent === "invite" ? (
                 <LoadingSpinner size="sm" />
@@ -251,8 +251,8 @@ export default function TeamSettings({
       ) : null}
 
       {pending.length > 0 ? (
-        <section className="rounded-2xl border border-gray-200 bg-white p-6">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
+        <section className="rounded-2xl bg-white p-6">
+          <h2 className="flex items-center gap-2 font-display text-lg font-bold text-gray-900">
             <Clock className="h-5 w-5 text-gray-400" />
             Pending invitations
           </h2>
@@ -299,8 +299,8 @@ export default function TeamSettings({
         </section>
       ) : null}
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-6">
-        <h2 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
+      <section className="rounded-2xl bg-white p-6">
+        <h2 className="flex items-center gap-2 font-display text-lg font-bold text-gray-900">
           <Users className="h-5 w-5 text-gray-400" />
           Members
         </h2>

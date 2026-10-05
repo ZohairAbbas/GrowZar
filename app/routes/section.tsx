@@ -3,7 +3,8 @@ import { Check, Clock, Lock } from "lucide-react";
 
 import type { Route } from "./+types/section";
 import { prisma } from "~/lib/db.server";
-import { listVisibleStores, requireSection } from "~/lib/authorize.server";
+import { hasPermission, listVisibleStores, requireSection } from "~/lib/authorize.server";
+import { inboxView } from "~/lib/insights/inbox.server";
 import { SECTIONS, type Section } from "~/lib/permissions";
 import {
   APP_LABELS,
@@ -18,6 +19,7 @@ import {
   financeView,
   homeView,
   ordersView,
+  owedToday,
   periodFrom,
   shippingView,
 } from "~/lib/metrics/screens.server";
@@ -29,6 +31,7 @@ import {
   ShippingPanel,
 } from "~/components/metrics/SectionPanels";
 import { PeriodPicker } from "~/components/metrics/Metrics";
+import { orderFilterQuery, parseOrderFilter } from "~/lib/metrics/findings";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   return [{ title: loaderData ? `${loaderData.label} · Growzar` : "Growzar" }];
@@ -105,7 +108,12 @@ export async function loader({ request, url }: Route.LoaderArgs) {
   // stay on the server.
   let metrics: Awaited<ReturnType<typeof buildMetrics>> = null;
   if (state.kind === "open" && active && METRIC_SECTIONS.has(section)) {
-    metrics = await buildMetrics(section, active.id, url);
+    metrics = await buildMetrics(section, active.id, url, async () => ({
+      userId: viewer.userId,
+      // Money on Home only for a role that may see Finance (staff may not).
+      canSeeMoney: await hasPermission(request, viewer.organizationId, "finance", "view"),
+      canManage: await hasPermission(request, viewer.organizationId, "home", "manage"),
+    }));
   }
 
   return {
@@ -139,18 +147,33 @@ export async function loader({ request, url }: Route.LoaderArgs) {
 
 const METRIC_SECTIONS = new Set<Section>(["home", "finance", "orders", "shipping", "customers"]);
 
-async function buildMetrics(section: Section, storeId: string, url: URL) {
+async function buildMetrics(
+  section: Section,
+  storeId: string,
+  url: URL,
+  inboxViewer: () => Promise<Parameters<typeof inboxView>[2]>,
+) {
   const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { timezone: true } });
   const period = periodFrom(url, store.timezone);
   const summary = await storeSummary(storeId, period.from, period.to);
-  const base = { period, periods: PERIODS };
+  // A filter (a finding's evidence) survives a change of period.
+  const filter = section === "orders" ? parseOrderFilter(url.searchParams) : null;
+  const base = { period, periods: PERIODS, keep: filter ? orderFilterQuery(filter) : "" };
   switch (section) {
-    case "home":
-      return { ...base, kind: "home" as const, view: homeView(summary) };
+    case "home": {
+      const viewer = await inboxViewer();
+      return {
+        ...base,
+        kind: "home" as const,
+        view: homeView(summary, viewer.canSeeMoney),
+        owed: viewer.canSeeMoney ? await owedToday(storeId) : null,
+        inbox: await inboxView(summary, period.days, viewer),
+      };
+    }
     case "finance":
       return { ...base, kind: "finance" as const, view: financeView(summary) };
     case "orders":
-      return { ...base, kind: "orders" as const, view: await ordersView(storeId, period.from, period.to) };
+      return { ...base, kind: "orders" as const, view: await ordersView(storeId, period.from, period.to, filter) };
     case "shipping":
       return { ...base, kind: "shipping" as const, view: shippingView(summary) };
     case "customers":
@@ -168,10 +191,10 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
     <div>
       <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">{label}</h1>
-          <p className="mt-1 text-sm text-gray-600">{blurb}</p>
+          <h1 className="font-display text-3xl font-bold tracking-tight text-gray-900">{label}</h1>
+          <p className="mt-1 text-gray-600">{blurb}</p>
         </div>
-        {metrics ? <PeriodPicker days={metrics.period.days} options={metrics.periods} /> : null}
+        {metrics ? <PeriodPicker days={metrics.period.days} options={metrics.periods} keep={metrics.keep} /> : null}
       </header>
 
       {metrics ? (
@@ -180,20 +203,20 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             {storeName} · {metrics.period.from} to {metrics.period.to}, the store's own days (
             {metrics.period.timezoneKnown ? metrics.period.timezone : "timezone not reported yet, shown in UTC"})
           </p>
-          {metrics.kind === "home" ? <HomePanel view={metrics.view} /> : null}
+          {metrics.kind === "home" ? <HomePanel view={metrics.view} owed={metrics.owed} inbox={metrics.inbox} period={metrics.period} /> : null}
           {metrics.kind === "finance" ? <FinancePanel view={metrics.view} /> : null}
-          {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} /> : null}
+          {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} days={metrics.period.days} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} /> : null}
           {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} /> : null}
         </div>
       ) : null}
 
       {state.kind === "locked" ? (
-        <section className="rounded-2xl border border-gray-200 bg-white p-8">
+        <section className="rounded-2xl bg-white p-8">
           <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gray-100">
             <Lock className="h-6 w-6 text-gray-500" />
           </span>
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 className="font-display text-lg font-bold text-gray-900">
             Connect {state.apps.join(" or ")} to get insights
           </h2>
           <p className="mt-1.5 text-sm text-gray-600">
@@ -226,7 +249,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100">
             <Clock className="h-5 w-5 text-amber-700" />
           </span>
-          <h2 className="text-base font-semibold text-gray-900">
+          <h2 className="font-display text-base font-bold text-gray-900">
             {state.apps.join(" and ")} {state.apps.length > 1 ? "were" : "was"}{" "}
             uninstalled
           </h2>
@@ -259,7 +282,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
               <Link
                 key={store.id}
                 to={`/stores/${store.id}`}
-                className="block rounded-2xl border border-gray-200 bg-white p-5 transition hover:border-gray-300 hover:shadow-sm"
+                className="block rounded-2xl bg-white p-5 transition hover:shadow-md"
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span className="font-medium text-gray-900">
@@ -298,8 +321,8 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
       ) : null}
 
       {state.kind === "open" && section !== "home" && !metrics ? (
-        <section className="rounded-2xl border border-gray-200 bg-white p-8">
-          <h2 className="text-lg font-semibold text-gray-900">
+        <section className="rounded-2xl bg-white p-8">
+          <h2 className="font-display text-lg font-bold text-gray-900">
             Connected and collecting
           </h2>
           <p className="mt-1.5 text-sm text-gray-600">

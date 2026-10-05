@@ -35,7 +35,7 @@ export function MoneyList({ values, empty = "—" }: { values: Money[]; empty?: 
     <span className="inline-flex flex-col">
       {values.map((m) => (
         <span key={m.currency} className="tabular-nums">
-          {formatAmount(m.amount)} <span className="text-xs text-gray-500">{m.currency}</span>
+          {formatAmount(m.amount)} <span className="text-xs font-semibold opacity-60">{m.currency}</span>
         </span>
       ))}
     </span>
@@ -69,6 +69,8 @@ const OUTCOME_LABEL: Record<string, string> = {
   unknown: "Unknown",
 };
 
+export const outcomeLabel = (outcome: string) => OUTCOME_LABEL[outcome] ?? outcome.replace(/_/g, " ");
+
 const day = (iso: string) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
@@ -98,11 +100,63 @@ export function OutcomeText({
 
 export function Stat({ label, children, note }: { label: string; children: ReactNode; note?: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5">
-      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</p>
-      <div className="mt-2 text-lg text-gray-900">{children}</div>
+    <div className="rounded-2xl bg-white p-5">
+      <p className="text-sm font-semibold text-gray-700">{label}</p>
+      <div className="mt-2 font-display text-2xl font-bold text-gray-900">{children}</div>
       {note ? <p className="mt-2 text-xs text-gray-500">{note}</p> : null}
     </div>
+  );
+}
+
+type FxRateView = { from: string; to: string; day: string; rate: string };
+type FxReportView = {
+  base: string;
+  ratesFrom: string | null;
+  converted: Array<{ currency: string; orders: number; placed: Money; rates: FxRateView[] }>;
+  unconverted: Array<{ currency: string; orders: number; placed: Money; days: string[] }>;
+};
+
+const shortDay = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+const dayRange = (days: string[]) => (days.length === 1 ? shortDay(days[0]!) : `${shortDay(days[0]!)}–${shortDay(days.at(-1)!)}`);
+
+/** Every figure in the store's currency leads; other currencies are listed after it, never first. */
+export function baseFirst(values: Money[], base: string | null): Money[] {
+  return [...values].sort((a, b) => (a.currency === base ? -1 : b.currency === base ? 1 : a.currency.localeCompare(b.currency)));
+}
+
+/**
+ * What happened to orders in another currency (rule #4): which were
+ * converted, at which rate, and which could not be, and why. Shown wherever
+ * a total includes them.
+ */
+export function FxNotice({ fx }: { fx: FxReportView | null }) {
+  if (!fx || (!fx.converted.length && !fx.unconverted.length)) return null;
+  return (
+    <Notice tone={fx.unconverted.length ? "warn" : "info"}>
+      <ul className="space-y-1">
+        {fx.converted.map((c) => (
+          <li key={`c-${c.currency}`}>
+            {c.orders.toLocaleString()} order{c.orders === 1 ? "" : "s"} in {c.currency} ({formatAmount(c.placed.amount)} {c.currency}) converted to{" "}
+            {fx.base} at each order day&apos;s rate from Financify
+            {c.rates.length === 1
+              ? ` (1 ${c.currency} = ${c.rates[0]!.rate} ${fx.base} on ${shortDay(c.rates[0]!.day)})`
+              : ` (${c.rates.length} daily rates, ${dayRange(c.rates.map((r) => r.day))})`}
+            .
+          </li>
+        ))}
+        {fx.unconverted.map((u) => (
+          <li key={`u-${u.currency}`}>
+            <strong>
+              {formatAmount(u.placed.amount)} {u.currency}
+            </strong>{" "}
+            in {u.orders.toLocaleString()} order{u.orders === 1 ? "" : "s"} placed {dayRange(u.days)} is not converted: there is no{" "}
+            {u.currency} rate for {u.days.length === 1 ? "that day" : "those days"}
+            {fx.ratesFrom ? ` (Financify's daily rates start on ${shortDay(fx.ratesFrom)})` : " (no rates stored yet)"}. It is shown
+            separately, never added in.
+          </li>
+        ))}
+      </ul>
+    </Notice>
   );
 }
 
@@ -111,26 +165,26 @@ export function Notice({ tone = "info", children }: { tone?: "info" | "warn"; ch
   const Icon = warn ? AlertTriangle : Info;
   return (
     <div
-      className={`flex items-start gap-2.5 rounded-xl border p-3.5 text-sm ${
-        warn ? "border-amber-200 bg-amber-50 text-amber-900" : "border-gray-200 bg-gray-50 text-gray-700"
+      className={`flex items-start gap-3 rounded-2xl p-4 text-sm ${
+        warn ? "bg-coral-100 text-coral-700" : "bg-white text-gray-700"
       }`}
     >
-      <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${warn ? "text-amber-600" : "text-gray-400"}`} />
+      <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${warn ? "text-coral-700" : "text-gray-500"}`} />
       <div>{children}</div>
     </div>
   );
 }
 
-export function PeriodPicker({ days, options }: { days: number; options: readonly number[] }) {
+export function PeriodPicker({ days, options, keep = "" }: { days: number; options: readonly number[]; keep?: string }) {
   return (
-    <nav aria-label="Period" className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 text-sm">
+    <nav aria-label="Period" className="inline-flex rounded-full bg-white p-1 text-sm font-semibold">
       {options.map((d) => (
         <Link
           key={d}
-          to={`?days=${d}`}
+          to={`?days=${d}${keep ? `&${keep}` : ""}`}
           preventScrollReset
           aria-current={d === days ? "page" : undefined}
-          className={`rounded-md px-3 py-1 ${d === days ? "bg-gray-900 text-white" : "text-gray-600 hover:text-gray-900"}`}
+          className={`rounded-full px-3.5 py-1.5 ${d === days ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
         >
           {d} days
         </Link>
