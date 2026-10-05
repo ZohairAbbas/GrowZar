@@ -1,6 +1,6 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useFetcher } from "react-router";
-import { ArrowRight, Database, Truck, Undo2, Wallet } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, Database, Lightbulb, Target, Truck, Undo2, Wallet, X } from "lucide-react";
 
 import type {
   CashHeldFinding,
@@ -17,7 +17,7 @@ import type {
   VariantReturnsFinding,
   VariantRate,
 } from "~/lib/metrics/findings";
-import type { InboxView } from "~/lib/insights/inbox.server";
+import type { InboxItem, InboxView } from "~/lib/insights/inbox.server";
 import { DISMISS_REASONS } from "~/lib/insights/actions";
 import { formatAmount, MoneyList, outcomeLabel } from "./Metrics";
 
@@ -528,12 +528,12 @@ export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string
     <section className="space-y-3" aria-labelledby="findings-heading">
       <div>
         <h2 id="findings-heading" className="font-display text-xl font-bold text-gray-900">
-          What Growzar found
+          What Growzar found{" "}
+          {inbox.items.length ? <span className="font-sans text-base font-semibold text-gray-500">· {n(inbox.items.length)}</span> : null}
         </h2>
         <p className="mt-0.5 text-xs text-gray-500">
-          {from} to {to}. Measured from your connected apps, each with the orders behind it. Recommendations and
-          estimates of what each is worth come once each finding has been checked against past data. Every finding so far
-          comes from one store's history.
+          {from} to {to}, measured from your connected apps. Open Details on a card for the full figures and what they
+          leave out.
         </p>
       </div>
       {inbox.items.length === 0 ? (
@@ -541,39 +541,7 @@ export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string
           Nothing to show in this period. What was checked, and why it found nothing, is listed below.
         </p>
       ) : (
-        inbox.items.map(({ id, insight }) => {
-          const props = { id, days: inbox.days, canManage: inbox.canManage };
-          const f = insight.finding;
-          return (
-            <Area.Provider key={id} value={f.kind}>
-              {card()}
-            </Area.Provider>
-          );
-          function card() {
-          switch (f.kind) {
-            case "disagreements":
-              return <DisagreementCard key={id} f={f} {...props} />;
-            case "variant_returns":
-              return <VariantCard key={id} f={f} {...props} />;
-            case "margin":
-              return <MarginCard key={id} f={f} {...props} />;
-            case "courierify_stopped":
-              return <CourierifyStoppedCard key={id} f={f} {...props} />;
-            case "missing_fees":
-              return <MissingFeesCard key={id} f={f} {...props} />;
-            case "cash_held":
-              return <CashHeldCard key={id} f={f} {...props} />;
-            case "unconfirmed_returns":
-              return <UnconfirmedCard key={id} f={f} {...props} />;
-            case "courier_for_city":
-              return <CourierCityCard key={id} f={f} {...props} />;
-            case "product_loss":
-              return <ProductLossCard key={id} f={f} {...props} />;
-            case "city_returns":
-              return <CityReturnsCard key={id} f={f} {...props} />;
-          }
-          }
-        })
+        <InsightCarousel items={inbox.items} days={inbox.days} canManage={inbox.canManage} />
       )}
       {inbox.overflow ? (
         <p className="text-xs text-gray-500">{n(inbox.overflow)} more found; dismiss or snooze one to see the next.</p>
@@ -617,5 +585,324 @@ export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string
         </details>
       ) : null}
     </section>
+  );
+}
+
+/** The full card for a finding: everything it measured and left out. Shown in Details. */
+function FullCard({ item, days, canManage }: { item: InboxItem; days: number; canManage: boolean }) {
+  const { id, insight } = item;
+  const props = { id, days, canManage };
+  const f = insight.finding;
+  const card = (() => {
+    switch (f.kind) {
+      case "disagreements":
+        return <DisagreementCard f={f} {...props} />;
+      case "variant_returns":
+        return <VariantCard f={f} {...props} />;
+      case "margin":
+        return <MarginCard f={f} {...props} />;
+      case "courierify_stopped":
+        return <CourierifyStoppedCard f={f} {...props} />;
+      case "missing_fees":
+        return <MissingFeesCard f={f} {...props} />;
+      case "cash_held":
+        return <CashHeldCard f={f} {...props} />;
+      case "unconfirmed_returns":
+        return <UnconfirmedCard f={f} {...props} />;
+      case "courier_for_city":
+        return <CourierCityCard f={f} {...props} />;
+      case "product_loss":
+        return <ProductLossCard f={f} {...props} />;
+      case "city_returns":
+        return <CityReturnsCard f={f} {...props} />;
+    }
+  })();
+  return <Area.Provider value={f.kind}>{card}</Area.Provider>;
+}
+
+/**
+ * The face of a compact card. Every figure and sentence comes from the
+ * finding or from its full card's own text: "next" only where that text
+ * already says what to do, otherwise "why" quotes what the figure means. No
+ * recommendation or money estimate is made up here (those wait for each
+ * detector's backtest).
+ */
+type Summary = {
+  headline: string;
+  figure: string;
+  note: string;
+  next?: string;
+  why?: string;
+  affects: string;
+  link?: { to: string; label: string };
+};
+
+const pct = (x: number) => `${x.toFixed(1)}%`;
+/** A headline amount: currency first, whole units, as in the metric row. */
+const figure = (m: Money) => `${m.currency} ${formatAmount(m.amount).replace(/\.\d+$/, "")}`;
+const first = (m: Money[]) => (m[0] ? figure(m[0]) : "—");
+
+function summaryOf(f: Finding, days: number): Summary {
+  switch (f.kind) {
+    case "cash_held": {
+      const who = payerName(f.payer);
+      return {
+        headline: `${who} hasn't paid for ${n(f.orders)} delivered order${f.orders === 1 ? "" : "s"}`,
+        figure: first(f.cod),
+        note: f.daysLate > 0 ? `${n(f.daysLate)} days past its usual ${f.medianGapDays}-day payout` : `Last payout ${f.lastPaidDay}`,
+        next: `Check ${who}'s own statement, then chase the payout.`,
+        affects: `${n(f.orders)} delivered orders`,
+        link: { to: `/orders?days=${days}&awaitingPayout=${f.payer}`, label: "See orders" },
+      };
+    }
+    case "unconfirmed_returns":
+      return {
+        headline: "Orders nobody confirmed come back more often",
+        figure: pct(f.unanswered.returnRate),
+        note: `returned when unanswered, against ${pct(f.confirmed.returnRate)} when confirmed`,
+        ...(f.waiting
+          ? { next: `Call the ${n(f.waiting)} unanswered order${f.waiting === 1 ? "" : "s"} before booking: they can still be confirmed or cancelled.` }
+          : { why: `${n(f.excessReturns)} more returns than the confirmed rate would give.` }),
+        affects: `${n(f.unanswered.decided)} unanswered orders`,
+        link: f.waiting ? { to: `/orders?days=${days}&unanswered=waiting`, label: "See orders" } : undefined,
+      };
+    case "variant_returns": {
+      const v = f.flagged[0]!;
+      const name = v.title ?? `Variant ${v.variantId}`;
+      return {
+        headline: f.flagged.length === 1 ? `${name} comes back far more often` : `${n(f.flagged.length)} products come back far more often`,
+        figure: pct(v.returnRate),
+        note: `${f.flagged.length === 1 ? "" : `${name}: `}returned, against ${pct(f.store.returnRate)} for the whole store`,
+        why: "Counted by order: a returned order counts against every product in it.",
+        affects: `${n(v.decided)} decided orders`,
+        link: { to: `/orders?days=${days}&variant=${v.variantId}`, label: "See orders" },
+      };
+    }
+    case "margin": {
+      const loss = f.ceiling.amount.startsWith("-");
+      return {
+        headline: `Ads took ${pct(f.adsShareOfDelivered)} of delivered revenue`,
+        figure: loss ? `−${figure(unsigned(f.ceiling))}` : figure(f.ceiling),
+        note: loss ? "lost after cost and ads, at least" : "left after cost and ads, at most",
+        why: "Before the rest of the courier fees and the cost of returns.",
+        affects: `${n(f.delivered)} delivered orders`,
+        link: { to: `/finance?days=${days}`, label: "See the arithmetic" },
+      };
+    }
+    case "product_loss":
+      return {
+        headline: `${f.title ?? `Variant ${f.variantId}`} loses money once returns are counted`,
+        figure: `−${figure(unsigned(f.ceiling))}`,
+        note: `lost at least, with ${pct(f.returnRate)} of its orders returned`,
+        why: `Had every order been delivered it would have made ${money(f.ifAllDelivered)}.`,
+        affects: `${n(f.orders)} orders`,
+        link: { to: `/orders?days=${days}&variant=${f.variantId}`, label: "See orders" },
+      };
+    case "city_returns":
+      return {
+        headline: `Orders to ${f.city} come back far more often`,
+        figure: pct(f.returnRate),
+        note: `returned, against ${pct(f.rest.returnRate)} for the rest of the store`,
+        why: "Unlikely to be chance alone (95%).",
+        affects: `${n(f.orders)} orders`,
+        link: { to: `/orders?days=${days}&city=${encodeURIComponent(f.city)}`, label: "See orders" },
+      };
+    case "courier_for_city": {
+      const w = f.worse[0]!;
+      return {
+        headline: `In ${f.city}, ${routeName(f.best)} delivers more`,
+        figure: `+${w.gapPoints.toFixed(1)} pts`,
+        note: `${pct(f.best.rate)} delivered, against ${pct(w.rate)} for ${routeName(w)}`,
+        why: "Unlikely to be chance alone (95%), though what went each way can differ.",
+        affects: `${n(f.best.decided + w.decided)} decided orders`,
+        link: {
+          to: `/orders?days=${days}&city=${encodeURIComponent(f.city)}&courier=${f.best.courier}&via=${f.best.via}`,
+          label: "See orders",
+        },
+      };
+    }
+    case "missing_fees":
+      return {
+        headline: "Courier fees missing on Courierify orders",
+        figure: n(f.missing),
+        note: `of ${n(f.viaCourierify)} orders shipped through Courierify have no fee`,
+        why: "Every profit figure that includes them reads higher than it is.",
+        affects: `${n(f.missing)} shipped orders`,
+        link: { to: `/orders?days=${days}&feeMissing=1`, label: "See orders" },
+      };
+    case "disagreements":
+      return {
+        headline: "Courierify and Financify disagree on outcomes",
+        figure: n(f.total),
+        note: `orders, out of ${n(f.bothApps)} both apps know about`,
+        why: "Growzar takes the courier's answer, through Courierify.",
+        affects: `${n(f.total)} orders`,
+        link: { to: `/orders?days=${days}&disagree=1`, label: "See orders" },
+      };
+    case "courierify_stopped":
+      return {
+        headline: `Orders stopped going through Courierify after ${f.lastParcelDay}`,
+        figure: `${n(f.withParcel)} of ${n(f.shipped)}`,
+        note: "shipped orders this period were booked through Courierify",
+        why: "For the rest there is no courier time, city or fee, so those comparisons stop at that date.",
+        affects: `${n(f.shipped - f.withParcel)} shipped orders`,
+        link: { to: `/orders?days=${days}&decidedBy=financify`, label: "See orders" },
+      };
+  }
+}
+
+/** Specific findings ask for something; store-wide ones are context (rankInsights). */
+const URGENCY = {
+  specific: { label: "Needs action", tone: "bg-coral-100 text-coral-700" },
+  context: { label: "Good to know", tone: "bg-field text-gray-600" },
+} as const;
+
+function CompactCard({ item, days, onDetails }: { item: InboxItem; days: number; onDetails: () => void }) {
+  const { id, insight } = item;
+  const f = insight.finding;
+  const s = summaryOf(f, days);
+  const area = AREAS[f.kind];
+  const urgency = URGENCY[insight.rank.group];
+  return (
+    <article className="flex h-full flex-col rounded-2xl bg-white p-5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2">
+          <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${area.tint}`}>
+            <area.Icon className="h-4 w-4" />
+          </span>
+          <span className="text-sm font-semibold text-gray-500">{area.label}</span>
+        </span>
+        <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${urgency.tone}`}>{urgency.label}</span>
+      </div>
+      <h3 className="mt-3 line-clamp-2 min-h-[2.75rem] font-display text-lg font-bold leading-snug text-gray-900">{s.headline}</h3>
+      <p className="mt-2 font-display text-3xl font-bold tabular-nums tracking-tight text-gray-900">{s.figure}</p>
+      <p className="mt-0.5 line-clamp-2 text-sm text-gray-500">{s.note}</p>
+      <div className={`mt-3 rounded-xl p-3 text-sm ${s.next ? "bg-mint-50" : "bg-field"}`}>
+        <p className={`flex items-center gap-1.5 text-xs font-bold ${s.next ? "text-mint-700" : "text-gray-500"}`}>
+          <Lightbulb className="h-3.5 w-3.5" /> {s.next ? "Next step" : "Why it matters"}
+        </p>
+        <p className="mt-1 line-clamp-3 text-gray-800">{s.next ?? s.why}</p>
+      </div>
+      <p className="mt-3 flex items-center gap-1.5 text-sm text-gray-600">
+        <Target className="h-4 w-4 text-gray-400" /> Affects {s.affects}
+      </p>
+      <div className="mt-auto flex items-center gap-2 pt-4">
+        {s.link ? (
+          <Link
+            to={via(id, s.link.to)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-surface"
+          >
+            {s.link.label} <ArrowRight className="h-4 w-4 text-mint" />
+          </Link>
+        ) : null}
+        <button
+          type="button"
+          onClick={onDetails}
+          className="rounded-full bg-field px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+        >
+          Details
+        </button>
+      </div>
+    </article>
+  );
+}
+
+/**
+ * Findings as a row of compact cards the merchant pages through, rather than
+ * a page of long cards to scroll: three across on a wide screen, one on a
+ * phone (swipe, or the arrows). Details opens the full card in a dialog,
+ * with snooze and dismiss.
+ */
+function InsightCarousel({ items, days, canManage }: { items: InboxItem[]; days: number; canManage: boolean }) {
+  const track = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState(0);
+  const [perView, setPerView] = useState(1);
+  const [open, setOpen] = useState<InboxItem | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  const measure = () => {
+    const el = track.current;
+    const card = el?.firstElementChild as HTMLElement | null;
+    if (!el || !card) return;
+    const step = card.offsetWidth + 16;
+    setPerView(Math.max(1, Math.round((el.clientWidth + 16) / step)));
+    setAt(Math.round(el.scrollLeft / step));
+  };
+  useEffect(() => {
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [items.length]);
+  useEffect(() => {
+    if (open) dialog.current?.showModal();
+    else dialog.current?.close();
+  }, [open]);
+  // A snooze or dismiss from Details takes the card out of the list: close it.
+  useEffect(() => {
+    if (open && !items.some((i) => i.id === open.id)) setOpen(null);
+  }, [items, open]);
+
+  const pages = Math.max(1, items.length - perView + 1);
+  const go = (to: number) => {
+    const el = track.current;
+    const card = el?.firstElementChild as HTMLElement | null;
+    if (!el || !card) return;
+    el.scrollTo({ left: Math.max(0, Math.min(to, pages - 1)) * (card.offsetWidth + 16), behavior: "smooth" });
+  };
+  const arrow = "flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40";
+
+  return (
+    <div>
+      <div
+        ref={track}
+        onScroll={measure}
+        className="-mx-1 flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {items.map((item) => (
+          <div key={item.id} className="w-[85%] flex-none snap-start sm:w-[calc((100%-1rem)/2)] xl:w-[calc((100%-2rem)/3)]">
+            <CompactCard item={item} days={days} onDetails={() => setOpen(item)} />
+          </div>
+        ))}
+      </div>
+      {pages > 1 ? (
+        <div className="mt-3 flex items-center justify-center gap-3">
+          <button type="button" aria-label="Previous findings" className={arrow} disabled={at <= 0} onClick={() => go(at - 1)}>
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="flex items-center gap-1.5" aria-hidden="true">
+            {Array.from({ length: pages }, (_, i) => (
+              <span key={i} className={`h-2 rounded-full transition-all ${i === at ? "w-5 bg-navy" : "w-2 bg-gray-300"}`} />
+            ))}
+          </span>
+          <span className="sr-only" aria-live="polite">
+            Showing {at + 1} to {Math.min(at + perView, items.length)} of {items.length}
+          </span>
+          <button type="button" aria-label="Next findings" className={arrow} disabled={at >= pages - 1} onClick={() => go(at + 1)}>
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
+
+      <dialog
+        ref={dialog}
+        onClose={() => setOpen(null)}
+        onClick={(e) => e.target === dialog.current && setOpen(null)}
+        className="w-[min(42rem,calc(100%-2rem))] rounded-2xl bg-transparent p-0 backdrop:bg-navy/60"
+      >
+        {open ? (
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={() => setOpen(null)}
+              className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-field text-gray-700 hover:bg-gray-100"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <FullCard item={open} days={days} canManage={canManage} />
+          </div>
+        ) : null}
+      </dialog>
+    </div>
   );
 }

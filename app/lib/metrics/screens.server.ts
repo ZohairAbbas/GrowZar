@@ -1,11 +1,11 @@
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "../db.server";
-import { localDayOf } from "./order-grain";
+import { localDayOf, type Outcome } from "./order-grain";
 import { byCity, byCourier, courierTiming, rollup, type DeliveryRate } from "./rollups";
 import { storeSummary, type StoreSummary } from "./summaries.server";
 import { formatAmount, parseAmount, type Money } from "./money";
-import { matchesFilter, type OrderFilter } from "./findings";
+import { matchesFilter, orderFilterQuery, type OrderFilter } from "./findings";
 import { toRollupOrder } from "./rollups.server";
 import { loadPayerHistories } from "./settlements.server";
 
@@ -194,6 +194,12 @@ export type OrdersView = {
   shown: number;
   /** Set when the list is a finding's evidence (G-GZR3-1). */
   filter: OrderFilter | null;
+  /** The filter as a query string, so outcome links keep it. Empty when none. */
+  filterQuery: string;
+  /** One outcome picked from the chips, or null for every outcome. */
+  outcome: Outcome | null;
+  /** Orders before the outcome pick: what the "All" chip counts. */
+  allTotal: number;
   /** Financify's own outcome per shown order, for the disagreement list. */
   financifySays: Record<string, string | null>;
 };
@@ -208,13 +214,26 @@ const ORDER_ROW_SELECT = {
   courier: true, city: true, refundedAmount: true, orderCancelled: true, shipmentCancelled: true,
 } as const;
 
+/** Every outcome a chip can pick (the grain's vocabulary). */
+const OUTCOMES: readonly Outcome[] = [
+  "delivered", "returned", "partially_delivered", "in_transit", "booked",
+  "shipment_cancelled", "order_cancelled", "not_shipped", "unknown",
+];
+
+export function parseOutcome(params: URLSearchParams): Outcome | null {
+  const asked = params.get("outcome");
+  return (OUTCOMES as readonly string[]).includes(asked ?? "") ? (asked as Outcome) : null;
+}
+
 export async function ordersView(
   storeId: string,
   from: string,
   to: string,
   filter: OrderFilter | null = null,
+  outcome: Outcome | null = null,
 ): Promise<OrdersView> {
   const where = { storeId, localDay: { gte: from, lte: to } };
+  const filterQuery = filter ? orderFilterQuery(filter) : "";
   const money = (a: { toFixed(n: number): string } | null, c: string | null): Money | null =>
     a && c ? { amount: formatAmount(parseAmount(a.toFixed(6))!), currency: c } : null;
   type Row = Prisma.OrderGrainGetPayload<{ select: typeof ORDER_ROW_SELECT }>;
@@ -250,22 +269,27 @@ export async function ordersView(
     });
     const ctx = { payers: cashFilter ? await loadPayerHistories(storeId) : [], asOf: new Date() };
     const hit = all.filter((r) => matchesFilter(toRollupOrder(r), filter, store.currency, ctx));
-    const shown = hit.slice(0, FILTERED_LIST_LIMIT);
+    const picked = outcome ? hit.filter((r) => r.outcome === outcome) : hit;
+    const shown = picked.slice(0, FILTERED_LIST_LIMIT);
     return {
-      total: hit.length,
+      total: picked.length,
+      allTotal: hit.length,
       byOutcome: countOutcomes(hit.map((r) => r.outcome)),
       rows: shown.map(toRow),
       shown: shown.length,
       filter,
+      filterQuery,
+      outcome,
       financifySays: Object.fromEntries(shown.map((r) => [r.orderId, r.financifyOutcome])),
     };
   }
 
+  const picked = outcome ? { ...where, outcome } : where;
   const [total, groups, latest] = await Promise.all([
-    prisma.orderGrain.count({ where }),
+    prisma.orderGrain.count({ where: picked }),
     prisma.orderGrain.groupBy({ by: ["outcome"], where, _count: { _all: true } }),
     prisma.orderGrain.findMany({
-      where,
+      where: picked,
       orderBy: [{ createdAt: "desc" }, { orderId: "desc" }],
       take: LIST_LIMIT,
       select: ORDER_ROW_SELECT,
@@ -273,10 +297,13 @@ export async function ordersView(
   ]);
   return {
     total,
+    allTotal: groups.reduce((sum, g) => sum + g._count._all, 0),
     byOutcome: groups.map((g) => ({ outcome: g.outcome, count: g._count._all })).sort((a, b) => b.count - a.count),
     rows: latest.map(toRow),
     shown: latest.length,
     filter: null,
+    filterQuery,
+    outcome,
     financifySays: {},
   };
 }
