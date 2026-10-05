@@ -14,7 +14,7 @@ function order(o: Partial<RollupOrder> = {}): RollupOrder {
     orderId: `o${seq}`, localDay: "2026-09-20", createdAt: new Date("2026-09-20T06:00:00Z"), currency: "PKR",
     placed: pkr("1000.00"), delivered: pkr("1000.00"), refunded: pkr("0.00"), collected: null, uncollected: null, cogs: pkr("300.00"),
     cogsComplete: true, courierFee: null, outcome: "delivered", outcomeTiming: null, financifyOutcome: "delivered",
-    parcelCount: 1, courier: "tcs", fulfilledVia: null, city: null, confirmation: null, customerId: null,
+    parcelCount: 1, courier: "tcs", fulfilledVia: null, cityRaw: null, city: null, confirmation: null, customerId: null,
     lines: [{ variantId: "1", productId: "p1", title: "Plain mug", quantity: 1, value: pkr("1000.00"), cost: pkr("300.00") }],
     ...o,
   };

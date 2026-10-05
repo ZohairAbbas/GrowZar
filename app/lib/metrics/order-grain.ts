@@ -16,6 +16,7 @@ import {
   type StatusTiming,
 } from "../shipments/events";
 import { formatAmount, isPositive, parseAmount, readMoney, subtractMoney, timesQuantity, type Money } from "./money";
+import { normalizeCity, type CityAlias } from "./city-aliases";
 
 /** A synced row as the grain sees it. */
 export type SourceRow = {
@@ -40,6 +41,8 @@ export type OrderGrainInput = {
   confirmations: SourceRow[];
   /** Growzar's own customer (rule #19), resolved by the caller. */
   customer: { id: string; via: string } | null;
+  /** Financify city spelling → Courierify city, learned per store (city-aliases.ts). */
+  cityAliases?: ReadonlyMap<string, CityAlias>;
 };
 
 /**
@@ -530,17 +533,33 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
           ? "no Courierify parcel; Financify's carrier name, not merged with Courierify's spelling"
           : "no parcel and no carrier",
       };
+  // Courierify's city when it carried a parcel (rule #12); otherwise
+  // Financify's delivery city (G-FIN2-2), in Courierify's names where the
+  // store's own data says which name a spelling means.
   const city = deciding ? cityOf(deciding.row) : null;
-  explain.city = {
-    rule: ["#12"],
-    source: "courierify.shipments.city.canonical",
-    inputs: deciding ? [ref(deciding.row, "city")] : [],
-    note: !deciding
-      ? "no Courierify parcel, and Financify does not expose a delivery city"
-      : city?.canonical
-        ? `mapped by ${city.match ?? "Courierify"}`
-        : "Courierify's tehsil mapping has no match for this spelling: unmapped",
-  };
+  const finCityRaw = typeof obj(obj(fin?.delivery).city).raw === "string" ? String(obj(obj(fin?.delivery).city).raw).trim() || null : null;
+  const finAlias = !deciding && finCityRaw ? (input.cityAliases?.get(normalizeCity(finCityRaw)) ?? null) : null;
+  explain.city = deciding
+    ? {
+        rule: ["#12"],
+        source: "courierify.shipments.city.canonical",
+        inputs: [ref(deciding.row, "city")],
+        note: city?.canonical
+          ? `mapped by ${city.match ?? "Courierify"}`
+          : "Courierify's tehsil mapping has no match for this spelling: unmapped",
+      }
+    : {
+        rule: ["#12"],
+        source: "financify.orders.delivery.city.raw",
+        inputs: order && finCityRaw ? [ref(order, "delivery.city")] : [],
+        note: !finCityRaw
+          ? "no Courierify parcel, and no delivery city from Financify"
+          : finAlias
+            ? finAlias.how === "learned"
+              ? `Financify's "${finCityRaw}" is ${finAlias.canonical} on ${finAlias.votes} of ${finAlias.of} orders both apps know`
+              : `Financify's "${finCityRaw}" is the city name ${finAlias.canonical}`
+            : `Financify's "${finCityRaw}" has no learned match: unmapped`,
+      };
 
   const lines = Array.isArray(fin?.lineItems)
     ? (fin!.lineItems as unknown[]).map((l) => {
@@ -593,8 +612,8 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     parcelCount: parcels.length,
     courier: deciding ? courierOf(deciding.row) : financifyCarrier,
     fulfilledVia: via,
-    city: deciding ? cityOf(deciding.row).canonical : null,
-    cityRaw: deciding ? cityOf(deciding.row).raw : null,
+    city: deciding ? cityOf(deciding.row).canonical : (finAlias?.canonical ?? null),
+    cityRaw: deciding ? cityOf(deciding.row).raw : finCityRaw,
     lines,
     explain,
   };
@@ -612,4 +631,16 @@ function cityOf(row: SourceRow): { canonical: string | null; raw: string | null;
   const c = obj(row.payload.city);
   const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
   return { canonical: text(c.canonical), raw: text(c.raw), match: text(c.match) };
+}
+
+/** The city Courierify gave the order's deciding parcel, for learning aliases. */
+export function courierifyCityOf(parcels: ReadonlyArray<{ row: SourceRow }>): string | null {
+  const deciding = parcels.find((p) => p.row.payload.status !== "cancelled") ?? parcels[0];
+  return deciding ? cityOf(deciding.row).canonical : null;
+}
+
+/** Financify's raw delivery city on an order row, if any. */
+export function financifyCityOf(order: SourceRow | null): string | null {
+  const raw = obj(obj(order?.payload.delivery).city).raw;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
 }

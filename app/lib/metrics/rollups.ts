@@ -33,6 +33,7 @@ export type RollupOrder = Pick<
   | "courier"
   | "fulfilledVia"
   | "city"
+  | "cityRaw"
   | "lines"
   | "confirmation"
   | "customerId"
@@ -179,7 +180,8 @@ export function averageOrderValue(orders: readonly RollupOrder[]): Money[] {
 export const byDay = (o: RollupOrder) => [o.localDay ?? "unknown day"];
 
 /** Rule #12, cities: Courierify's canonical name, or "unmapped" — never a raw spelling. */
-export const byCity = (o: RollupOrder) => [o.parcelCount ? (o.city ?? "unmapped") : "no city (no Courierify parcel)"];
+/** Canonical city; a spelling neither app could place is "unmapped", never a city of its own (rule #12). */
+export const byCity = (o: RollupOrder) => [o.city ?? (o.parcelCount || o.cityRaw ? "unmapped" : "no city")];
 
 export const byCourier = (o: RollupOrder) => [o.courier ?? "unknown"];
 

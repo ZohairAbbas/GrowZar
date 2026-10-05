@@ -276,7 +276,7 @@ const FILTER_LABEL = (f: NonNullable<OrdersView["filter"]>) =>
       : f.kind === "fee_missing"
         ? "orders shipped through Courierify with no courier fee recorded"
         : f.kind === "city"
-          ? `orders shipped through Courierify to ${f.city}`
+          ? `orders delivered to ${f.city}`
           : f.kind === "city_route"
           ? `orders shipped to ${f.city} with ${f.courier}${f.via === "direct" ? ", booked directly" : ` through ${f.via}`}`
           : f.kind === "unanswered_waiting"

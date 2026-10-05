@@ -41,6 +41,7 @@ export function toRollupOrder(row: OrderGrainRow): RollupOrder {
     courier: row.courier,
     fulfilledVia: row.fulfilledVia,
     city: row.city,
+    cityRaw: row.cityRaw,
     confirmation: row.confirmation,
     customerId: row.customerId,
     lines: lines.map((l) => ({

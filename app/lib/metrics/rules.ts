@@ -25,7 +25,7 @@ export const DISPLAY_RULES: readonly DisplayRule[] = [
   { id: 9, title: "Delivery date and return date", status: "implemented", where: "events.currentStatusTiming: 'status as of' without a courier time" },
   { id: 10, title: "Returned", status: "implemented", where: "order grain: returned, cancelled and refunded apart" },
   { id: 11, title: "Cancelled", status: "implemented", where: "order grain orderCancelled vs shipmentCancelled" },
-  { id: 12, title: "Delivery performance by courier and city", status: "implemented", where: "rollups byCourier / byCity with the #8 formula; canonical city or 'unmapped'" },
+  { id: 12, title: "Delivery performance by courier and city", status: "implemented", where: "rollups byCourier / byCity with the #8 formula; Courierify's canonical city, else Financify's delivery city mapped to it by learned aliases (city-aliases.ts), else 'unmapped'" },
   { id: 13, title: "Courier cost per order", status: "implemented", where: "order grain courierFee from Financify's courier_costs metafield (2026-09-25 decision)" },
   { id: 14, title: "Product cost (COGS)", status: "implemented", where: "order grain cogs from Financify, order-time cost, completeness kept" },
   { id: 15, title: "Net profit", status: "implemented", where: "Financify's settings stored and compared; Growzar's own figure is 'profit after returns', never 'net profit'" },

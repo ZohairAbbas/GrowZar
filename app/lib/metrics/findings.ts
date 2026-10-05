@@ -570,7 +570,9 @@ function zScore(d1: number, n1: number, d2: number, n2: number): number {
 export function courierCityFindings(input: FindingsInput): CourierCityFinding[] | Skip {
   if (!input.currency) return notEnough("the store's currency has not been reported");
   const rows = input.rows.filter((o) => fromCourierify(o) && o.city && o.currency === input.currency);
-  if (!rows.length) return notEnough("no order in this period has a city: city comes only with orders shipped through Courierify");
+  if (!rows.length) {
+    return notEnough("no order in this period shipped through Courierify with a city: routes need to know how a parcel was booked, which only Courierify says");
+  }
   const cities = new Map<string, Map<string, RollupOrder[]>>();
   for (const o of rows) {
     const r = routeOf(o);
@@ -687,8 +689,9 @@ export function cityReturnsFindings(input: FindingsInput): CityReturnsFinding[] 
   if (!currency) return notEnough("the store's currency has not been reported");
   const rows = input.rows.filter(domestic(currency));
   const decidedAll = rows.filter((o) => DECIDED.includes(o.outcome));
-  const withCity = rows.filter((o) => fromCourierify(o) && o.city);
-  if (!withCity.length) return notEnough("no order in this period has a city: city comes only with orders shipped through Courierify");
+  // Courierify's city, or Financify's in Courierify's names (G-FIN2-2).
+  const withCity = rows.filter((o) => o.city);
+  if (!withCity.length) return notEnough("no order in this period has a city");
   const cities = [...new Set(withCity.map((o) => o.city!))];
   const out: CityReturnsFinding[] = [];
   let compared = 0;
@@ -698,7 +701,7 @@ export function cityReturnsFindings(input: FindingsInput): CityReturnsFinding[] 
     if (dec.length < MIN_DECIDED_FOR_CITY) continue;
     compared += 1;
     const ret = dec.filter((o) => o.outcome === "returned").length;
-    const restDec = decidedAll.filter((o) => !(fromCourierify(o) && o.city === city));
+    const restDec = decidedAll.filter((o) => o.city !== city);
     const restRet = restDec.filter((o) => o.outcome === "returned").length;
     if (!restDec.length) continue;
     const rate = pct(ret, dec.length);
@@ -941,7 +944,7 @@ export function matchesFilter(
     case "city_route":
       return o.currency === currency && inCityRoute(o, filter.city, filter);
     case "city":
-      return o.currency === currency && fromCourierify(o) && o.city === filter.city;
+      return o.currency === currency && o.city === filter.city;
     case "awaiting_payout": {
       const h = ctx?.payers?.find((p) => p.payer === filter.payer);
       return !!h && o.outcome === "delivered" && fromCourierify(o) && payerOf(o) === filter.payer && isDue(o, h, ctx!.asOf ?? new Date());

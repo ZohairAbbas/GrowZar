@@ -44,6 +44,7 @@ function order(o: Partial<RollupOrder> = {}): RollupOrder {
     parcelCount: 0,
     courier: null,
     fulfilledVia: null,
+    cityRaw: null,
     city: null,
     lines: [{ variantId: "1", productId: "p1", title: "Plain mug", quantity: 1, value: pkr("1000.00"), cost: pkr("300.00") }],
     confirmation: null,

@@ -37,6 +37,7 @@ function order(o: Partial<RollupOrder> = {}): RollupOrder {
     parcelCount: 1,
     courier: "tcs",
     fulfilledVia: null,
+    cityRaw: null,
     city: "Lahore",
     lines: [{ variantId: "v1", productId: "p1", quantity: 1, value: pkr("1000.00"), cost: pkr("300.00") }],
     confirmation: "confirmed",
@@ -69,7 +70,9 @@ describe("rule #8: delivery rate by order, with still-open beside it", () => {
 describe("rule #12: cities are canonical or unmapped, never raw spellings", () => {
   it("groups an unmapped spelling as 'unmapped'", () => {
     const keys = rollup([order({ city: "Lahore" }), order({ city: null }), order({ city: null, parcelCount: 0 })], byCity).map((b) => b.key);
-    expect(keys.sort()).toEqual(["Lahore", "no city (no Courierify parcel)", "unmapped"]);
+    expect(keys.sort()).toEqual(["Lahore", "no city", "unmapped"]);
+    // A Financify-only order whose spelling did not map is unmapped too, not "no city".
+    expect(byCity(order({ city: null, parcelCount: 0, cityRaw: "Gulshan Block 7" }))).toEqual(["unmapped"]);
   });
 });
 

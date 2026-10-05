@@ -3,7 +3,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db.server";
 import { buyerFromOrderPayload } from "../customers/resolve.server";
 import { normalizePhone } from "../customers/phone";
-import { buildOrderGrain, type OrderGrain, type SourceRow } from "./order-grain";
+import { buildOrderGrain, courierifyCityOf, financifyCityOf, type OrderGrain, type SourceRow } from "./order-grain";
+import { learnCityAliases } from "./city-aliases";
 import type { Money } from "./money";
 
 /**
@@ -173,6 +174,16 @@ export async function computeOrderGrain(
   // order id on a parcel is evidence the order exists.
   const orderIds = new Set([...orders.keys(), ...parcelsByOrder.keys()]);
 
+  // Financify's city spellings in Courierify's names, learned from the orders
+  // both apps know (city-aliases.ts).
+  const pairs: Array<{ raw: string; canonical: string }> = [];
+  for (const [orderId, order] of orders) {
+    const raw = financifyCityOf(order);
+    const canonical = courierifyCityOf((parcelsByOrder.get(orderId) ?? []).map((row) => ({ row })));
+    if (raw && canonical) pairs.push({ raw, canonical });
+  }
+  const cityAliases = learnCityAliases(pairs);
+
   const grain: OrderGrain[] = [];
   for (const orderId of orderIds) {
     const order = orders.get(orderId) ?? null;
@@ -188,6 +199,7 @@ export async function computeOrderGrain(
         parcels,
         confirmations: confirmationsByOrder.get(orderId) ?? [],
         customer: customerFor([...(order ? [order] : []), ...parcels.map((p) => p.row)]),
+        cityAliases,
       }),
     );
   }

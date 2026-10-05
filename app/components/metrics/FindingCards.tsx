@@ -458,7 +458,7 @@ function CourierCityCard({ f, days, id, canManage }: { f: CourierCityFinding } &
       </ul>
       <Leaves
         items={[
-          `Orders placed ${[f.best, ...f.worse].map((r) => r.firstDay).sort()[0]} to ${f.lastDay}. City is known only for orders shipped through Courierify, so nothing later is compared.`,
+          `Orders placed ${[f.best, ...f.worse].map((r) => r.firstDay).sort()[0]} to ${f.lastDay}. Routes compare orders shipped through Courierify only: Financify names the carrier but not how the parcel was booked.`,
           "The gap is unlikely to be chance alone (95%), but what was sent each way, and when, can also differ.",
           "Fees are not compared: they are recorded on only part of these orders. What the gap is worth is not estimated yet.",
         ]}
@@ -515,7 +515,7 @@ function CityReturnsCard({ f, days, id, canManage }: { f: CityReturnsFinding } &
       <Leaves
         items={[
           "Profit for the city is not shown: ad spend is not split by city, and courier fees and return costs are recorded for too few orders.",
-          `City is known only for orders shipped through Courierify; the latest compared is from ${f.lastDay}.`,
+          `City from Courierify, or Financify's delivery address in Courierify's city names where this store's orders show which name a spelling means. The latest compared is from ${f.lastDay}.`,
         ]}
       />
     </Card>
