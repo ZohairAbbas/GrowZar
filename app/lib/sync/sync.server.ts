@@ -12,6 +12,7 @@ import {
 } from "./entities";
 import { recordOrderSnapshot } from "./snapshots.server";
 import { buyerFromOrderPayload, resolveCustomer } from "../customers/resolve.server";
+import { acceptReportedCountry } from "./shop-country";
 import { countryFromTimezone } from "../customers/phone";
 import { parseEvent, type ShipmentEventRecord } from "../shipments/events";
 
@@ -141,7 +142,7 @@ async function claimLease(stateId: string, now: Date): Promise<boolean> {
  * apps have never answered keeps nulls, and every screen says "not reported
  * yet" rather than showing a guessed PKR.
  */
-async function learnShopFacts(storeId: string, page: ContractPage) {
+async function learnShopFacts(storeId: string, app: SuiteApp, page: ContractPage) {
   const data: Prisma.StoreUpdateInput = {};
 
   if (page.shopCurrency && /^[A-Z]{3}$/.test(page.shopCurrency)) {
@@ -153,11 +154,17 @@ async function learnShopFacts(storeId: string, page: ContractPage) {
 
   // The shop's country, for normalising locally-written phone numbers
   // (rule #19). A reported country always beats an inferred one, and an
-  // inference is recorded as such so nobody later reads it as fact.
-  if (page.shopCountry && /^[A-Za-z]{2}$/.test(page.shopCountry)) {
-    data.country = page.shopCountry.toUpperCase();
+  // inference is recorded as such so nobody later reads it as fact. When
+  // apps report different countries, Courierify's wins (shop-country.ts).
+  const reported = page.shopCountry && /^[A-Za-z]{2}$/.test(page.shopCountry) ? page.shopCountry.toUpperCase() : null;
+  const courierifyConnected =
+    reported && app !== "COURIERIFY"
+      ? (await prisma.appConnection.count({ where: { storeId, app: "COURIERIFY", status: "CONNECTED" } })) > 0
+      : false;
+  if (reported && acceptReportedCountry(app, courierifyConnected)) {
+    data.country = reported;
     data.countryInferred = false;
-  } else if (page.shopTimezone) {
+  } else if (!reported && page.shopTimezone) {
     const inferred = countryFromTimezone(page.shopTimezone);
     if (inferred) {
       const current = await prisma.store.findUnique({
@@ -480,7 +487,7 @@ export async function syncFeed(options: {
       }
 
       base.pages += 1;
-      await learnShopFacts(storeId, response.data);
+      await learnShopFacts(storeId, app, response.data);
 
       // Re-read each page: `learnShopFacts` may have just taught us the
       // country, and the first page of the first feed is exactly when that
