@@ -31,7 +31,10 @@ import {
   OrdersPanel,
   ShippingPanel,
 } from "~/components/metrics/SectionPanels";
-import { CoverageLine, PeriodPicker } from "~/components/metrics/Metrics";
+import { CoverageLine } from "~/components/metrics/Metrics";
+import { FilterBar } from "~/components/metrics/FilterBar";
+import { previousPeriod, withoutComparison } from "~/lib/metrics/compare";
+import { NO_SCOPE, parseScope, scopeQuery } from "~/lib/metrics/scope";
 import { storeCoverage } from "~/lib/metrics/coverage.server";
 import { coverageLine } from "~/lib/metrics/coverage";
 import { orderFilterQuery, parseOrderFilter } from "~/lib/metrics/findings";
@@ -145,6 +148,11 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     })),
     customerCount,
     metrics,
+    filterStores: {
+      activeId: active?.id ?? null,
+      list: stores.map((s) => ({ id: s.id, name: s.displayName ?? s.shopDomain })),
+      returnTo: url.pathname,
+    },
   };
 }
 
@@ -158,41 +166,64 @@ async function buildMetrics(
 ) {
   const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { timezone: true } });
   const period = periodFrom(url, store.timezone);
-  const summary = await storeSummary(storeId, period.from, period.to);
+  // Home's insights are store-wide, so Home takes no courier or city.
+  const scope = section === "home" ? NO_SCOPE : parseScope(url.searchParams);
+  const before = previousPeriod(period.from, period.to);
+  const [summary, prev, first] = await Promise.all([
+    storeSummary(storeId, period.from, period.to, scope),
+    // Orders compare by count in their own query; the rest against this.
+    section === "orders" ? null : storeSummary(storeId, before.from, before.to, scope),
+    prisma.orderGrain.aggregate({ where: { storeId }, _min: { localDay: true } }),
+  ]);
+  // No comparison against a period the store's history only partly covers.
+  const historyFrom = first._min.localDay;
+  const comparable = historyFrom !== null && historyFrom <= before.from;
+  const compared = <T,>(view: T): T => (comparable ? view : withoutComparison(view));
   // A filter (a finding's evidence) survives a change of period.
   const filter = section === "orders" ? parseOrderFilter(url.searchParams) : null;
   // So does an outcome picked from the Orders chips.
   const outcome = section === "orders" ? parseOutcome(url.searchParams) : null;
-  const keep = [filter ? orderFilterQuery(filter) : "", outcome ? `outcome=${outcome}` : ""].filter(Boolean).join("&");
+  const keep = [filter ? orderFilterQuery(filter) : "", outcome ? `outcome=${outcome}` : "", scopeQuery(scope)].filter(Boolean).join("&");
   // One line naming the gaps behind this section's numbers (D1).
   const coverage = coverageLine(await storeCoverage(summary), section);
-  const base = { period, periods: PERIODS, keep, coverage };
+  const base = {
+    period,
+    periods: PERIODS,
+    keep,
+    coverage,
+    previous: before,
+    historyFrom: comparable ? null : historyFrom,
+    scope,
+    scopeOptions: section === "home" ? null : summary.scopeOptions,
+    /** Query parameters a change of courier or city keeps (the finding filter and outcome). */
+    keepForScope: [filter ? orderFilterQuery(filter) : "", outcome ? `outcome=${outcome}` : ""].filter(Boolean).join("&"),
+  };
   switch (section) {
     case "home": {
       const viewer = await inboxViewer();
       return {
         ...base,
         kind: "home" as const,
-        view: homeView(summary, viewer.canSeeMoney),
+        view: compared(homeView(summary, prev!, viewer.canSeeMoney)),
         owed: viewer.canSeeMoney ? await owedToday(storeId) : null,
         inbox: await inboxView(summary, period.days, viewer),
       };
     }
     case "finance":
-      return { ...base, kind: "finance" as const, view: financeView(summary) };
+      return { ...base, kind: "finance" as const, view: compared(financeView(summary, prev!)) };
     case "orders":
-      return { ...base, kind: "orders" as const, view: await ordersView(storeId, period.from, period.to, filter, outcome) };
+      return { ...base, kind: "orders" as const, view: compared(await ordersView(storeId, period.from, period.to, filter, outcome, scope, before)) };
     case "shipping":
-      return { ...base, kind: "shipping" as const, view: shippingView(summary) };
+      return { ...base, kind: "shipping" as const, view: compared(shippingView(summary, prev!)) };
     case "customers":
-      return { ...base, kind: "customers" as const, view: await customersView(storeId, summary) };
+      return { ...base, kind: "customers" as const, view: compared(await customersView(storeId, summary, prev!)) };
     default:
       return null;
   }
 }
 
 export default function SectionPage({ loaderData }: Route.ComponentProps) {
-  const { label, blurb, preview, state, section, homeStores, customerCount, metrics, storeName } =
+  const { label, blurb, preview, state, section, homeStores, customerCount, metrics, storeName, filterStores } =
     loaderData;
 
   return (
@@ -202,7 +233,6 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           <h1 className="font-display text-3xl font-bold tracking-tight text-gray-900">{label}</h1>
           <p className="mt-1 text-gray-600">{blurb}</p>
         </div>
-        {metrics ? <PeriodPicker days={metrics.period.days} options={metrics.periods} keep={metrics.keep} /> : null}
       </header>
 
       {metrics ? (
@@ -211,11 +241,22 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             {storeName} · {metrics.period.from} to {metrics.period.to}, the store's own days (
             {metrics.period.timezoneKnown ? metrics.period.timezone : "timezone not reported yet, shown in UTC"})
           </p>
+          <FilterBar
+            section={section}
+            stores={filterStores}
+            days={metrics.period.days}
+            periods={metrics.periods}
+            previous={metrics.previous}
+            historyFrom={metrics.historyFrom}
+            scope={metrics.scope}
+            options={metrics.scopeOptions}
+            keep={metrics.keepForScope}
+          />
           <CoverageLine gaps={metrics.coverage.gaps} days={metrics.period.days} />
           {metrics.kind === "home" ? <HomePanel view={metrics.view} owed={metrics.owed} inbox={metrics.inbox} period={metrics.period} /> : null}
           {metrics.kind === "finance" ? <FinancePanel view={metrics.view} /> : null}
-          {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} days={metrics.period.days} /> : null}
-          {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} /> : null}
+          {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} days={metrics.period.days} scope={scopeQuery(metrics.scope)} /> : null}
+          {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} days={metrics.period.days} scope={metrics.scope} /> : null}
           {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} /> : null}
         </div>
       ) : null}

@@ -98,12 +98,27 @@ export function OutcomeText({
   );
 }
 
-export function Stat({ label, children, note }: { label: string; children: ReactNode; note?: ReactNode }) {
+export function Stat({
+  label,
+  children,
+  note,
+  change,
+  trend,
+}: {
+  label: string;
+  children: ReactNode;
+  note?: ReactNode;
+  /** The comparison with the previous period (D2). */
+  change?: ReactNode;
+  trend?: ReactNode;
+}) {
   return (
-    <div className="rounded-2xl bg-white p-5">
+    <div className="flex flex-col rounded-2xl bg-white p-5">
       <p className="text-sm font-semibold text-gray-700">{label}</p>
       <div className="mt-2 font-display text-2xl font-bold text-gray-900">{children}</div>
-      {note ? <p className="mt-2 text-xs text-gray-500">{note}</p> : null}
+      {change ? <div className="mt-1">{change}</div> : null}
+      {trend ? <div className="mt-2">{trend}</div> : null}
+      {note ? <p className="mt-auto pt-2 text-xs text-gray-500">{note}</p> : null}
     </div>
   );
 }
@@ -216,5 +231,109 @@ export function CoverageLine({ gaps, days }: { gaps: Array<{ key: string; text: 
       <span className="font-semibold text-gray-700">Based on </span>
       {gaps.map((g) => g.text).join(" · ")}. {link}
     </p>
+  );
+}
+
+// ── Comparisons and trends (D2) ─────────────────────────────────────────────
+
+type Delta = {
+  current: number | null;
+  previous: number | null;
+  change: number | null;
+  direction: "up" | "down" | "flat" | null;
+  unit: "percent" | "points";
+  notComparable?: string;
+};
+type Trend = { unit: "day" | "week"; points: Array<{ label: string; value: number | null }> };
+export type HeadlineView = { delta: Delta; trend: Trend | null; good: "up" | "down" };
+
+const compact = (n: number) =>
+  Math.abs(n) >= 1_000_000
+    ? `${(n / 1_000_000).toFixed(2)}M`
+    : Math.abs(n) >= 10_000
+      ? `${Math.round(n / 1000).toLocaleString("en-US")}k`
+      : Math.round(n).toLocaleString("en-US");
+
+/**
+ * The change against the previous period: arrow, size, and what it was.
+ * Coloured by whether the move is good for the merchant, not by its sign.
+ * `kind` says how to print the previous value.
+ */
+export function Change({
+  h,
+  kind = "count",
+  dark = false,
+}: {
+  h: HeadlineView;
+  kind?: "count" | "money" | "rate";
+  dark?: boolean;
+}) {
+  const d = h.delta;
+  if (d.previous === null) return null;
+  const was = kind === "rate" ? `${d.previous.toFixed(1)}%` : compact(d.previous);
+  if (d.change === null || d.direction === null) {
+    return (
+      <span className={`text-xs ${dark ? "text-navy-muted" : "text-gray-500"}`} title={d.notComparable}>
+        previous period {was}
+        {d.notComparable ? " · not like-for-like" : ""}
+      </span>
+    );
+  }
+  const better = d.direction === "flat" ? null : d.direction === h.good;
+  const tone =
+    better === null
+      ? dark ? "text-navy-muted" : "text-gray-500"
+      : better
+        ? dark ? "text-mint" : "text-mint-700"
+        : dark ? "text-coral" : "text-coral-700";
+  const arrow = d.direction === "up" ? "▲" : d.direction === "down" ? "▼" : "▬";
+  const size = d.unit === "points" ? `${Math.abs(d.change).toFixed(1)} pts` : `${Math.abs(d.change).toFixed(1)}%`;
+  return (
+    <span className="text-xs">
+      <span className={`font-bold ${tone}`}>
+        {arrow} {size}
+      </span>
+      <span className={dark ? "text-navy-muted" : "text-gray-500"}> vs {was}</span>
+    </span>
+  );
+}
+
+/** A small line of the period, oldest first; a missing point is a gap, never a zero. */
+export function Sparkline({ trend, className = "text-data-700" }: { trend: Trend | null; className?: string }) {
+  if (!trend) return null;
+  const values = trend.points.map((p) => p.value).filter((v): v is number => v !== null);
+  if (values.length < 2) return null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const w = 120;
+  const h = 28;
+  const step = w / Math.max(1, trend.points.length - 1);
+  const segments: string[][] = [[]];
+  trend.points.forEach((p, i) => {
+    if (p.value === null) {
+      if (segments.at(-1)!.length) segments.push([]);
+      return;
+    }
+    segments.at(-1)!.push(`${(i * step).toFixed(1)},${(h - 2 - ((p.value - min) / span) * (h - 4)).toFixed(1)}`);
+  });
+  const first = trend.points[0]?.label.slice(0, 10);
+  const last = trend.points.at(-1)?.label.slice(-10);
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      preserveAspectRatio="none"
+      className={`h-7 w-full ${className}`}
+      role="img"
+      aria-label={`${trend.unit === "week" ? "Weekly" : "Daily"} trend from ${first} to ${last}, low ${compact(min)}, high ${compact(max)}`}
+    >
+      {segments.filter((s) => s.length).map((s, i) =>
+        s.length === 1 ? (
+          <circle key={i} cx={s[0]!.split(",")[0]} cy={s[0]!.split(",")[1]} r="1.5" fill="currentColor" />
+        ) : (
+          <polyline key={i} points={s.join(" ")} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+        ),
+      )}
+    </svg>
   );
 }
