@@ -48,7 +48,14 @@ export default function Stores({ loaderData }: Route.ComponentProps) {
               : "Every store in your organization."}
           </p>
         </div>
-        <RoleBadge role={role} />
+        <div className="flex items-center gap-3">
+          {stores.length >= 2 ? (
+            <Link to="/compare" className="text-sm font-semibold text-accent-600 hover:underline">
+              Compare stores
+            </Link>
+          ) : null}
+          <RoleBadge role={role} />
+        </div>
       </div>
 
       {stores.length === 0 ? (

@@ -30,6 +30,10 @@ import {
   type ProductPoint,
 } from "./matrices";
 import { loadAdSpend } from "./rollups.server";
+import { campaignSpend, storeColumn, type CampaignSpend, type CampaignSpendRow, type StoreColumn } from "./campaigns";
+import { previousPeriod } from "./compare";
+import { convertDated } from "./fx";
+import { loadFxSource } from "./fx.server";
 import { storeSummary, type StoreSummary } from "./summaries.server";
 import { formatAmount, parseAmount, type Money } from "./money";
 import { matchesFilter, orderFilterQuery, type OrderFilter } from "./findings";
@@ -632,18 +636,107 @@ export type MarketingView = {
   /** Ad spend is subtracted only when every day of the period is fetched. */
   withAds: boolean;
   adDays: { fetched: number; inPeriod: number } | null;
+  /** Spend per campaign (D5); null without Financify ad spend. */
+  campaigns: CampaignSpend | null;
+  /** Whether the previous period's ad spend is fetched in full, so campaign changes mean something. */
+  campaignsCompared: boolean;
 };
 
 export async function marketingView(storeId: string, s: StoreSummary): Promise<MarketingView> {
   const cur = s.store.currency;
-  if (!cur) return { currency: null, products: [], storeReturnRate: null, withAds: false, adDays: null };
+  if (!cur) return { currency: null, products: [], storeReturnRate: null, withAds: false, adDays: null, campaigns: null, campaignsCompared: false };
   const ads = s.adSpend && s.adSpend.daysFetched === s.adSpend.daysInPeriod ? await loadAdSpend(storeId, s.period.from, s.period.to) : null;
   const e = productEconomics(s.rows, cur, ads ? Object.fromEntries(ads.byVariant) : null);
+  const before = previousPeriod(s.period.from, s.period.to);
+  const [now, prev, prevDays] = s.adSpend
+    ? await Promise.all([
+        loadCampaignRows(storeId, s.period.from, s.period.to),
+        loadCampaignRows(storeId, before.from, before.to),
+        prisma.adSpend.count({ where: { storeId, level: "day", day: { gte: before.from, lte: before.to } } }),
+      ])
+    : [[], [], 0];
+  const prevLength = s.adSpend?.daysInPeriod ?? 0;
+  const campaignsCompared = prevLength > 0 && prevDays === prevLength;
   return {
+    campaigns: s.adSpend ? campaignSpend(now, campaignsCompared ? prev : [], cur) : null,
+    campaignsCompared,
     currency: cur,
     products: e.products,
     storeReturnRate: e.storeReturnRate,
     withAds: e.withAds,
     adDays: s.adSpend ? { fetched: s.adSpend.daysFetched, inPeriod: s.adSpend.daysInPeriod } : null,
   };
+}
+
+/** Campaign-level ad spend for ad-platform days `from`…`to` (measured, not allocated). */
+async function loadCampaignRows(storeId: string, from: string, to: string): Promise<CampaignSpendRow[]> {
+  const rows = await prisma.adSpend.findMany({
+    where: { storeId, level: "campaign", day: { gte: from, lte: to } },
+    select: { day: true, key: true, platform: true, detail: true, spendAmount: true, feesAmount: true, currency: true },
+  });
+  const exact = (d: { toFixed(n: number): string }) => formatAmount(parseAmount(d.toFixed(6))!);
+  return rows.map((r) => ({
+    day: r.day,
+    key: r.key,
+    platform: r.platform,
+    name: typeof (r.detail as Record<string, unknown> | null)?.campaignName === "string" ? ((r.detail as Record<string, string>).campaignName ?? null) : null,
+    spend: { amount: exact(r.spendAmount), currency: r.currency },
+    fees: { amount: exact(r.feesAmount), currency: r.currency },
+  }));
+}
+
+// ── Store versus store (D5) ────────────────────────────────────────────────
+
+export type StoreComparison = {
+  base: string;
+  days: number;
+  columns: StoreColumn[];
+};
+
+/**
+ * The same metrics for each store the viewer may see, side by side: each
+ * store over its own local days, money in the organization's base currency
+ * at each order day's rate, with the rates kept (rule #4, O-2).
+ */
+export async function storeComparison(
+  stores: Array<{ id: string; displayName: string | null; shopDomain: string; timezone: string | null }>,
+  base: string,
+  url: URL,
+): Promise<StoreComparison> {
+  const columns: StoreColumn[] = [];
+  let days = 30;
+  for (const store of stores) {
+    const period = periodFrom(url, store.timezone);
+    days = period.days;
+    const before = previousPeriod(period.from, period.to);
+    const [s, prevCount] = await Promise.all([
+      storeSummary(store.id, period.from, period.to),
+      prisma.orderGrain.count({ where: { storeId: store.id, localDay: { gte: before.from, lte: before.to } } }),
+    ]);
+    const first = await prisma.orderGrain.aggregate({ where: { storeId: store.id }, _min: { localDay: true } });
+    const fx = await loadFxSource(base, s.rows);
+    const dated = (pick: (o: (typeof s.rows)[number]) => Money | null) =>
+      s.rows.flatMap((o) => {
+        const m = pick(o);
+        return m && o.localDay ? [{ day: o.localDay, money: m }] : [];
+      });
+    columns.push(
+      storeColumn({
+        storeId: store.id,
+        name: store.displayName ?? store.shopDomain,
+        currency: s.store.currency,
+        base,
+        period: { from: period.from, to: period.to },
+        orders: s.orders,
+        previousOrders: first._min.localDay && first._min.localDay <= before.from ? prevCount : null,
+        placed: s.rows.length ? convertDated(dated((o) => o.placed), base, fx.source) : null,
+        deliveredRevenue: s.rows.length ? convertDated(dated((o) => (o.outcome === "delivered" ? o.delivered : null)), base, fx.source) : null,
+        profit: s.profit,
+        adSpend: s.adSpend?.spend ?? null,
+        roas: s.roas,
+        courierify: s.courierifyCoverage,
+      }),
+    );
+  }
+  return { base, days, columns };
 }

@@ -245,7 +245,8 @@ type Delta = {
   notComparable?: string;
 };
 type Trend = { unit: "day" | "week"; points: Array<{ label: string; value: number | null }> };
-export type HeadlineView = { delta: Delta; trend: Trend | null; good: "up" | "down" };
+/** `neutral`: a move either way is neither good nor bad (campaign spend, say). */
+export type HeadlineView = { delta: Delta; trend: Trend | null; good: "up" | "down" | "neutral" };
 
 const compact = (n: number) =>
   Math.abs(n) >= 1_000_000
@@ -279,7 +280,7 @@ export function Change({
       </span>
     );
   }
-  const better = d.direction === "flat" ? null : d.direction === h.good;
+  const better = d.direction === "flat" || h.good === "neutral" ? null : d.direction === h.good;
   const tone =
     better === null
       ? dark ? "text-navy-muted" : "text-gray-500"
