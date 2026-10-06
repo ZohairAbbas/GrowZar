@@ -184,8 +184,17 @@ export const AGE_BUCKETS = [
   { key: "61+", label: "Over 60 days", min: 61, max: Infinity },
 ] as const;
 export type AgeBucket = (typeof AGE_BUCKETS)[number]["key"] | "unknown";
+/** A filter value, not a bucket: every age (an untracked courier's whole COD). */
+export type AgeFilter = AgeBucket | "any";
 
-export type Unpaid = { courier: string | null; deliveredAt: Date | null; amount: Money };
+export type Unpaid = {
+  courier: string | null;
+  /** Who pays the COD: the 3PL that booked it (Orio), else the courier — I4's `payerOf`. */
+  payer?: string | null;
+  deliveredAt: Date | null;
+  amount: Money;
+};
+const payerKey = (u: Unpaid) => (u.payer ?? u.courier ?? "unknown").toLowerCase();
 
 export const ageOf = (deliveredAt: Date | null, asOf: Date): AgeBucket => {
   if (!deliveredAt) return "unknown";
@@ -197,8 +206,15 @@ export type PayoutAgeing = {
   currency: string;
   buckets: Array<{ key: AgeBucket; label: string }>;
   couriers: Array<{ courier: string; total: Money; orders: number; cells: Record<string, { amount: Money; orders: number }> }>;
+  /** Tracked couriers only: their payouts are visible, so unpaid means owed. */
   total: Money;
   orders: number;
+  /**
+   * Couriers with no settlement ever recorded: their delivered COD, listed
+   * apart, never as owed (`outcome-sources.ts`).
+   */
+  /** Keyed by payer: a 3PL's parcels are its own to pay, whichever courier carried them. */
+  untracked: Array<{ courier: string; total: Money; orders: number }>;
   /** COD in another currency, not added in (rule #4). */
   otherCurrencies: Money[];
 };
@@ -207,8 +223,18 @@ export type PayoutAgeing = {
  * COD delivered and not yet paid, by courier and by how long ago it was
  * delivered (the visual counterpart of I4). As of today, any order date.
  */
-export function payoutAgeing(unpaid: readonly Unpaid[], currency: string, asOf: Date): PayoutAgeing {
-  const mine = unpaid.filter((u) => u.amount.currency === currency);
+export function payoutAgeing(
+  unpaid: readonly Unpaid[],
+  currency: string,
+  asOf: Date,
+  /** Couriers with a settlement on record; null treats every courier as tracked. */
+  tracked: ReadonlySet<string> | null = null,
+): PayoutAgeing {
+  const inCurrency = unpaid.filter((u) => u.amount.currency === currency);
+  const isTracked = (u: Unpaid) => tracked === null || tracked.has(payerKey(u));
+  const mine = inCurrency.filter(isTracked);
+  const apart = new Map<string, Unpaid[]>();
+  for (const u of inCurrency.filter((x) => !isTracked(x))) apart.set(payerKey(u), [...(apart.get(payerKey(u)) ?? []), u]);
   const hasUnknown = mine.some((u) => !u.deliveredAt);
   const buckets: Array<{ key: AgeBucket; label: string }> = [
     ...AGE_BUCKETS.map((b) => ({ key: b.key as AgeBucket, label: b.label })),
@@ -239,6 +265,9 @@ export function payoutAgeing(unpaid: readonly Unpaid[], currency: string, asOf: 
       .sort((a, b) => (parseAmount(b.total.amount)! > parseAmount(a.total.amount)! ? 1 : -1)),
     total: money(sum(mine), currency),
     orders: mine.length,
+    untracked: [...apart.entries()]
+      .map(([courier, list]) => ({ courier, total: money(sum(list), currency), orders: list.length }))
+      .sort((a, b) => b.orders - a.orders),
     otherCurrencies: [...others.entries()].map(([c, u]) => money(u, c)),
   };
 }

@@ -35,11 +35,12 @@ import { previousPeriod } from "./compare";
 import { convertDated } from "./fx";
 import { loadFxSource } from "./fx.server";
 import { storeSummary, type StoreSummary } from "./summaries.server";
-import { formatAmount, parseAmount, type Money } from "./money";
+import { formatAmount, parseAmount, sumByCurrency, type Money } from "./money";
 import { matchesFilter, orderFilterQuery, type OrderFilter } from "./findings";
 import { toRollupOrder } from "./rollups.server";
 import { loadPayerHistories } from "./settlements.server";
 import { MIN_TIMED_PARCELS_PER_COURIER } from "../shipments/events";
+import { trackedPayers } from "./outcome-sources";
 
 /**
  * View models for the read-only screens (G-GZR2-5).
@@ -113,18 +114,49 @@ export type HomeView = {
  * it judges which payers are late, so Home and the insight never disagree on
  * what is outstanding.
  */
-export async function owedToday(storeId: string): Promise<{ amounts: Money[]; orders: number }> {
-  const groups = await prisma.orderGrain.groupBy({
-    by: ["uncollectedCurrency"],
-    where: { storeId, outcome: "delivered", parcelCount: { gt: 0 }, uncollectedAmount: { gt: 0 } },
-    _sum: { uncollectedAmount: true },
-    _count: { _all: true },
-  });
+export type Owed = {
+  amounts: Money[];
+  orders: number;
+  /** Couriers with no settlement ever recorded: their delivered COD, apart, never owed. */
+  untracked: Array<{ courier: string; amounts: Money[]; orders: number }>;
+};
+
+/**
+ * Only couriers whose payouts Courierify records count as owing: for one
+ * with no settlement ever, "not paid" and "paid, never recorded" look the
+ * same (`outcome-sources.ts`).
+ */
+export async function owedToday(storeId: string): Promise<Owed> {
+  const [groups, payers] = await Promise.all([
+    prisma.orderGrain.groupBy({
+      by: ["courier", "fulfilledVia", "uncollectedCurrency"],
+      where: { storeId, outcome: "delivered", parcelCount: { gt: 0 }, uncollectedAmount: { gt: 0 } },
+      _sum: { uncollectedAmount: true },
+      _count: { _all: true },
+    }),
+    loadPayerHistories(storeId),
+  ]);
+  const tracked = trackedPayers(payers.map((p) => p.payer));
+  // The payer, as I4 has it: the 3PL that booked the parcel, else the courier.
+  const payer = (g: { courier: string | null; fulfilledVia: string | null }) => (g.fulfilledVia ?? g.courier ?? "unknown").toLowerCase();
+  const isTracked = (g: { courier: string | null; fulfilledVia: string | null }) => tracked.has(payer(g));
+  const amounts = (list: typeof groups) =>
+    sumByCurrency(
+      list
+        .filter((g) => g.uncollectedCurrency && g._sum.uncollectedAmount)
+        .map((g) => ({ amount: formatAmount(parseAmount(g._sum.uncollectedAmount!.toFixed(6))!), currency: g.uncollectedCurrency! })),
+    );
+  const owing = groups.filter(isTracked);
+  const apart = new Map<string, typeof groups>();
+  for (const g of groups.filter((x) => !isTracked(x))) apart.set(payer(g), [...(apart.get(payer(g)) ?? []), g]);
   return {
-    amounts: groups
-      .filter((g) => g.uncollectedCurrency && g._sum.uncollectedAmount)
-      .map((g) => ({ amount: g._sum.uncollectedAmount!.toString(), currency: g.uncollectedCurrency! })),
-    orders: groups.reduce((n, g) => n + g._count._all, 0),
+    amounts: amounts(owing),
+    orders: owing.reduce((n, g) => n + g._count._all, 0),
+    untracked: [...apart.entries()].map(([courier, list]) => ({
+      courier,
+      amounts: amounts(list),
+      orders: list.reduce((n, g) => n + g._count._all, 0),
+    })),
   };
 }
 
@@ -610,20 +642,25 @@ export async function storeRetention(storeId: string, asOf: string, scope: Scope
  */
 export async function storePayoutAgeing(storeId: string, currency: string | null, scope: Scope): Promise<PayoutAgeing | null> {
   if (!currency) return null;
-  const rows = await prisma.orderGrain.findMany({
-    where: { storeId, outcome: "delivered", parcelCount: { gt: 0 }, uncollectedAmount: { gt: 0 }, ...scopeWhere(scope) },
-    select: { courier: true, outcomeAt: true, uncollectedAmount: true, uncollectedCurrency: true },
-  });
+  const [rows, payers] = await Promise.all([
+    prisma.orderGrain.findMany({
+      where: { storeId, outcome: "delivered", parcelCount: { gt: 0 }, uncollectedAmount: { gt: 0 }, ...scopeWhere(scope) },
+      select: { courier: true, fulfilledVia: true, outcomeAt: true, uncollectedAmount: true, uncollectedCurrency: true },
+    }),
+    loadPayerHistories(storeId),
+  ]);
   return payoutAgeing(
     rows
       .filter((r) => r.uncollectedCurrency)
       .map((r) => ({
         courier: r.courier,
+        payer: r.fulfilledVia ?? r.courier,
         deliveredAt: r.outcomeAt,
         amount: { amount: formatAmount(parseAmount(r.uncollectedAmount!.toFixed(6))!), currency: r.uncollectedCurrency! },
       })),
     currency,
     new Date(),
+    trackedPayers(payers.map((p) => p.payer)),
   );
 }
 

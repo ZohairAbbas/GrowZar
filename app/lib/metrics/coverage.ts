@@ -74,6 +74,8 @@ export type CoverageInput = {
   buyers: { total: number; named: number };
   /** Orders in another currency with no rate for their day. */
   unconvertedOrders: number;
+  /** Orders whose outcome was withheld as one-sided (`outcome-sources.ts`), and the carriers. */
+  withheld?: { orders: number; returned: number; inTransit: number; couriers: string[] };
 };
 
 /** What each app gives Growzar in this release (R1). */
@@ -129,7 +131,7 @@ function settlementItem(rows: readonly RollupOrder[], payouts: readonly Payout[]
   const silent = owing.filter((c) => !latest.has(c));
   const s: CoverageStatus = settled.length === owing.length ? "complete" : settled.length ? "partial" : "missing";
   const parts = [
-    ...silent.map((c) => `no settlement from ${c} yet`),
+    ...silent.map((c) => `no ${c} settlement has ever been recorded in Courierify, so its delivered COD is shown apart rather than as owed; import ${c}'s statements in Courierify (Settlements → Import) to track it`),
     ...settled.map((c) => {
       const p = latest.get(c)!;
       return `${c} last settled ${shortDay(p.day)}${p.status !== "received" ? ` (${p.status})` : ""}`;
@@ -145,7 +147,7 @@ function settlementItem(rows: readonly RollupOrder[], payouts: readonly Payout[]
     unit: "couriers owed money",
     status: s,
     gap: s === "complete" && settled.every((c) => latest.get(c)!.status === "received") ? null : parts.join("; "),
-    effect: "COD from a courier with no settlement counts as not yet paid, so it shows in money owed and payout ageing",
+    effect: "COD not yet paid counts only couriers whose payouts Courierify records; an untracked courier's COD is listed apart, neither owed nor paid",
     sections: ["home", "finance"],
   };
 }
@@ -196,7 +198,8 @@ export function coverageReport(input: CoverageInput): CoverageReport {
           sections: ["home", "orders", "shipping", "finance"],
         },
         shipped.filter((r) => r.parcelCount > 0).length,
-        shipped.length,
+        // Withheld orders were shipped too, outside Courierify.
+        shipped.length + (input.withheld?.orders ?? 0),
         (n) => `${plural(n, "shipped order")} not booked through Courierify`,
       ),
       counted(
@@ -294,6 +297,23 @@ export function coverageReport(input: CoverageInput): CoverageReport {
         gap: `${plural(input.unconvertedOrders, "order")} in another currency on a day with no rate`,
         effect: "those orders are shown separately, never added into the store's currency",
         sections: ["home", "finance"],
+      });
+    }
+    if (input.withheld?.orders) {
+      const w = input.withheld;
+      const names = w.couriers.map((c) => (c === "unknown" ? "orders with no carrier" : c.replace(/^financify:/, ""))).join(", ");
+      items.push({
+        key: "one_sided_outcomes",
+        app: "FINANCIFY",
+        label: "Outcomes outside Courierify",
+        phrase: "outcomes outside Courierify",
+        have: null,
+        of: null,
+        unit: null,
+        status: "missing",
+        gap: `Financify reports returns but never deliveries for ${names} (none in the last 90 days), so ${plural(w.orders, "order")} this period (${w.returned} returned, ${w.inTransit} dispatched) have no outcome counted`,
+        effect: "those orders count in orders placed but in no delivery rate, return rate or delivered count, which would otherwise read lower than it is",
+        sections: ["home", "orders", "shipping", "finance", "customers", "marketing"],
       });
     }
     // Order-level attribution is what per-campaign orders and returns need.

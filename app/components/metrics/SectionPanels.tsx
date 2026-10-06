@@ -5,6 +5,7 @@ import type {
   FinanceView,
   HomeView,
   MarketingView,
+  Owed,
   OrdersView,
   ShippingView,
 } from "~/lib/metrics/screens.server";
@@ -44,7 +45,7 @@ export function HomePanel({
   period,
 }: {
   view: HomeView;
-  owed: { amounts: { amount: string; currency: string }[]; orders: number } | null;
+  owed: Owed | null;
   inbox: InboxView;
   period: { from: string; to: string };
 }) {
@@ -103,7 +104,7 @@ function BigMoney({ values, base, empty = "—" }: { values: { amount: string; c
  * The headline row: one big figure, two beside it, and what is owed to the
  * merchant in coral. Without Finance permission the same places hold counts.
  */
-function HomeMetrics({ view, owed }: { view: HomeView; owed: { amounts: { amount: string; currency: string }[]; orders: number } | null }) {
+function HomeMetrics({ view, owed }: { view: HomeView; owed: Owed | null }) {
   const rate = view.deliveryRate;
   const peak = Math.max(1, ...view.daily.map((d) => d.delivered));
   const money = view.money;
@@ -167,9 +168,20 @@ function HomeMetrics({ view, owed }: { view: HomeView; owed: { amounts: { amount
           </span>
           <span className="font-medium leading-snug">
             {owed.orders
-              ? `${owed.orders.toLocaleString()} delivered order${owed.orders === 1 ? "" : "s"}, any order date, with no courier payout recorded in Courierify yet.`
+              ? `${owed.orders.toLocaleString()} delivered order${owed.orders === 1 ? "" : "s"}, any order date, from couriers whose payouts Courierify records.`
               : "Every delivered Courierify order has a courier payout recorded."}
           </span>
+          {owed.untracked.length === 1 ? (
+            <Link to={`/orders?unpaid=${encodeURIComponent(owed.untracked[0]!.courier)}`} className="text-sm font-medium leading-snug underline-offset-2 hover:underline">
+              Apart: {owed.untracked[0]!.amounts.map((m) => `${formatAmount(m.amount).replace(/\.\d+$/, "")} ${m.currency}`).join(" + ")} delivered by{" "}
+              {owed.untracked[0]!.courier} ({owed.untracked[0]!.orders.toLocaleString()} orders), whose payouts Courierify has never recorded.
+            </Link>
+          ) : owed.untracked.length > 1 ? (
+            <Link to="/finance" className="text-sm font-medium leading-snug underline-offset-2 hover:underline">
+              Apart: {owed.untracked.reduce((n, u) => n + u.orders, 0).toLocaleString()} delivered orders from {owed.untracked.length} couriers
+              whose payouts Courierify has never recorded.
+            </Link>
+          ) : null}
           <Link
             to="/finance"
             className="mt-auto inline-flex items-center gap-2 self-start rounded-full bg-navy px-5 py-3 text-sm font-bold text-white hover:bg-navy-surface"
@@ -289,7 +301,9 @@ const FILTER_LABEL = (f: NonNullable<OrdersView["filter"]>) =>
           : f.kind === "unanswered_waiting"
           ? "orders the buyer never answered on WhatsApp, not yet with the courier"
           : f.kind === "unpaid"
-          ? `delivered orders with no ${f.courier} payout recorded, delivered ${f.age === "unknown" ? "on no recorded date" : f.age === "61+" ? "over 60 days ago" : `${f.age.replace("-", "–")} days ago`} (any order date, as of today)`
+          ? f.age === "any"
+            ? `delivered ${f.courier} orders with no payout recorded in Courierify (any order date, as of today)`
+            : `delivered orders with no ${f.courier} payout recorded, delivered ${f.age === "unknown" ? "on no recorded date" : f.age === "61+" ? "over 60 days ago" : `${f.age.replace("-", "–")} days ago`} (any order date, as of today)`
           : f.kind === "awaiting_payout"
           ? `delivered orders with no ${f.payer} payout recorded, past its usual gap (any order date, as of today)`
         : f.app === "financify"
