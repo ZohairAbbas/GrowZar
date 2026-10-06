@@ -307,14 +307,19 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
 
     // Timing from the event log. For several parcels, the latest parcel to
     // reach its outcome decides when the order did, and the order only says
-    // "happened on" if every deciding parcel had a courier time.
+    // "happened on" if every deciding parcel had a courier time; "reported by
+    // the 3PL" if each had a courier or a 3PL time; else "status as of".
     const timings = parcels
       .filter((_, i) => perParcel[i] !== "shipment_cancelled")
       .map((p) => currentStatusTiming(p.events));
     if (timings.length && timings.every((t) => t !== null)) {
       const latest = timings.reduce((a, b) => (b!.at > a!.at ? b : a))!;
       outcomeTiming = {
-        basis: timings.every((t) => t!.basis === "happened_on") ? "happened_on" : "status_as_of",
+        basis: timings.every((t) => t!.basis === "happened_on")
+          ? "happened_on"
+          : timings.every((t) => t!.basis !== "status_as_of")
+            ? "reported_by_3pl"
+            : "status_as_of",
         at: latest.at,
       };
     }
@@ -335,7 +340,9 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
       note: outcomeTiming
         ? outcomeTiming.basis === "happened_on"
           ? "the courier gave a time"
-          : "no courier time for the current status: show 'status as of', never 'delivered on'"
+          : outcomeTiming.basis === "reported_by_3pl"
+            ? "the 3PL reported a time (its observation, not the courier's): show 'reported by the 3PL on', never 'delivered on'"
+            : "no courier time for the current status: show 'status as of', never 'delivered on'"
         : "no events for at least one parcel",
     };
   } else if (fin) {

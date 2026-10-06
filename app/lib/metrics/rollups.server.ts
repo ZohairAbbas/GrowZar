@@ -34,7 +34,7 @@ export function toRollupOrder(row: OrderGrainRow): RollupOrder {
     outcome: row.outcome as RollupOrder["outcome"],
     outcomeTiming:
       row.outcomeBasis && row.outcomeAt
-        ? { basis: row.outcomeBasis as "happened_on" | "status_as_of", at: row.outcomeAt }
+        ? { basis: row.outcomeBasis as "happened_on" | "reported_by_3pl" | "status_as_of", at: row.outcomeAt }
         : null,
     financifyOutcome: (row.financifyOutcome as RollupOrder["financifyOutcome"]) ?? null,
     parcelCount: row.parcelCount,
