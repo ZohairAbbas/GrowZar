@@ -261,7 +261,8 @@ export function PayoutAgeingTable({ ageing }: { ageing: PayoutAgeing }) {
       <h2 className="font-display text-lg font-bold text-gray-900">COD delivered, not yet paid, by age</h2>
       <p className="mt-1 text-sm text-gray-600">
         {amount(ageing.total.amount)} {ageing.currency} across {ageing.orders.toLocaleString()} delivered orders with no courier
-        payout recorded, as of today, by days since delivery. Pick a cell for its orders.
+        payout recorded, from couriers whose payouts Courierify records, as of today, by days since delivery. Pick a cell
+        for its orders.
       </p>
       {ageing.orders ? (
         <table className="mt-4 min-w-full text-sm">
@@ -304,6 +305,24 @@ export function PayoutAgeingTable({ ageing }: { ageing: PayoutAgeing }) {
             ))}
           </tbody>
         </table>
+      ) : null}
+      {ageing.untracked.length ? (
+        <div className="mt-4 rounded-xl bg-field p-4 text-sm text-gray-700">
+          <p className="font-semibold text-gray-900">Couriers whose payouts Courierify has never recorded</p>
+          <ul className="mt-2 space-y-1">
+            {ageing.untracked.map((u) => (
+              <li key={u.courier}>
+                <Link to={`/orders?unpaid=${encodeURIComponent(u.courier)}`} className="hover:underline">
+                  <span className="font-medium">{scopeLabel(u.courier)}</span>: {amount(u.total.amount)} {ageing.currency} across{" "}
+                  {u.orders.toLocaleString()} delivered orders
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-gray-500">
+            Not counted as owed: with no settlement on record, an unpaid parcel and a paid one look the same.
+          </p>
+        </div>
       ) : null}
       {ageing.otherCurrencies.length ? (
         <p className="mt-3 text-xs text-gray-500">

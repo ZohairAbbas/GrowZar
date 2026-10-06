@@ -14,7 +14,7 @@
  *  - shows measured money only. No "worth PKR X" estimate appears before a
  *    detector's backtest passes (PLAN.md §3, the money rule).
  */
-import { AGE_BUCKETS, ageOf, type AgeBucket } from "./matrices";
+import { AGE_BUCKETS, ageOf, type AgeFilter } from "./matrices";
 import { formatAmount, isPositive, parseAmount, sumByCurrency, type Money } from "./money";
 import type { Outcome } from "./order-grain";
 import { productLines, type Bucket, type Profit, type RollupOrder } from "./rollups";
@@ -87,7 +87,7 @@ export type OrderFilter =
   | { kind: "city_route"; city: string; courier: string; via: string }
   | { kind: "city"; city: string }
   /** D4's payout ageing cell: unpaid delivered COD of one courier, of one age. */
-  | { kind: "unpaid"; courier: string; age: AgeBucket };
+  | { kind: "unpaid"; courier: string; age: AgeFilter };
 
 export type MarginFinding = {
   kind: "margin";
@@ -889,8 +889,10 @@ export function parseOrderFilter(params: URLSearchParams): OrderFilter | null {
   if (params.get("feeMissing") === "1") return { kind: "fee_missing" };
   const unpaid = params.get("unpaid");
   const age = params.get("age");
-  if (unpaid && /^[a-z0-9_-]{1,40}$/.test(unpaid) && age && ([...AGE_BUCKETS.map((b) => b.key), "unknown"] as string[]).includes(age)) {
-    return { kind: "unpaid", courier: unpaid, age: age as AgeBucket };
+  if (unpaid && /^[a-z0-9_-]{1,40}$/.test(unpaid)) {
+    // No age: every unpaid order of that courier (an untracked courier's list).
+    if (!age) return { kind: "unpaid", courier: unpaid, age: "any" };
+    if (([...AGE_BUCKETS.map((b) => b.key), "unknown"] as string[]).includes(age)) return { kind: "unpaid", courier: unpaid, age: age as AgeFilter };
   }
   const awaiting = params.get("awaitingPayout");
   if (awaiting && /^[a-z0-9_-]{1,40}$/.test(awaiting)) return { kind: "awaiting_payout", payer: awaiting };
@@ -926,7 +928,7 @@ export function orderFilterQuery(filter: OrderFilter): string {
     case "city":
       return `city=${encodeURIComponent(filter.city)}`;
     case "unpaid":
-      return `unpaid=${filter.courier}&age=${filter.age}`;
+      return filter.age === "any" ? `unpaid=${filter.courier}` : `unpaid=${filter.courier}&age=${filter.age}`;
   }
 }
 
@@ -959,10 +961,11 @@ export function matchesFilter(
       return (
         o.outcome === "delivered" &&
         fromCourierify(o) &&
-        (o.courier ?? "unknown") === filter.courier &&
+        // An untracked list (no age) is keyed by payer, an ageing cell by courier.
+        (filter.age === "any" ? payerOf(o).toLowerCase() : (o.courier ?? "unknown")) === filter.courier &&
         !!o.uncollected &&
         parseAmount(o.uncollected.amount)! > 0n &&
-        ageOf(o.outcomeTiming?.at ?? null, ctx?.asOf ?? new Date()) === filter.age
+        (filter.age === "any" || ageOf(o.outcomeTiming?.at ?? null, ctx?.asOf ?? new Date()) === filter.age)
       );
     case "awaiting_payout": {
       const h = ctx?.payers?.find((p) => p.payer === filter.payer);

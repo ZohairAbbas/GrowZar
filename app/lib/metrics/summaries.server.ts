@@ -8,6 +8,7 @@ import { formatAmount, parseAmount, sumByCurrency, type Money } from "./money";
 import { compareSettings, type SettingsComparison, type StoreSettings } from "./profit-settings";
 import { bucketOf, byCity, byCourier, profitAfterReturns, roas, rollup, type Bucket, type Profit, type RollupOrder } from "./rollups";
 import { inScope, isScoped, NO_SCOPE, type Scope } from "./scope";
+import { ONE_SIDED_HISTORY_DAYS, oneSidedSlices, withholdOneSided } from "./outcome-sources";
 import { loadAdSpend, loadOrders } from "./rollups.server";
 import { loadFxSource } from "./fx.server";
 import { convertOrder, fxReport, type FxReport } from "./fx-orders";
@@ -78,6 +79,12 @@ export type StoreSummary = {
    */
   courierifyCoverage: { shippedOrders: number; withParcel: number };
   /**
+   * Orders whose outcome was withheld because their source reports returns
+   * but never deliveries (`outcome-sources.ts`), and the carrier keys
+   * concerned. They count as "unknown" everywhere above.
+   */
+  withheld: { orders: number; returned: number; inTransit: number; couriers: string[] };
+  /**
    * Orders in another currency, converted into the store's at their own
    * day's rate before anything above was added up (rule #4, G-FIN2-1); null
    * when the period had none. `rows` are the converted orders.
@@ -98,6 +105,30 @@ function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
 }
 
+/**
+ * Financify-decided outcomes (no Courierify parcel) per carrier key over the
+ * store's last ONE_SIDED_HISTORY_DAYS days to `to`: what decides whether a
+ * slice is one-sided. Store-wide and period-independent, so the decision does
+ * not flicker with the period picked.
+ */
+async function financifyOnlyHistory(storeId: string, to: string) {
+  const since = new Date(Date.parse(`${to}T00:00:00Z`) - (ONE_SIDED_HISTORY_DAYS - 1) * 86_400_000).toISOString().slice(0, 10);
+  const groups = await prisma.orderGrain.groupBy({
+    by: ["courier", "outcome"],
+    where: { storeId, parcelCount: 0, outcome: { in: ["delivered", "returned"] }, localDay: { gte: since, lte: to } },
+    _count: { _all: true },
+  });
+  const by = new Map<string, { courier: string; delivered: number; returned: number }>();
+  for (const g of groups) {
+    const courier = g.courier ?? "unknown";
+    const e = by.get(courier) ?? { courier, delivered: 0, returned: 0 };
+    if (g.outcome === "delivered") e.delivered += g._count._all;
+    else e.returned += g._count._all;
+    by.set(courier, e);
+  }
+  return [...by.values()];
+}
+
 export async function storeSummary(storeId: string, from: string, to: string, scope: Scope = NO_SCOPE): Promise<StoreSummary> {
   const store = await prisma.store.findUniqueOrThrow({
     where: { id: storeId },
@@ -110,7 +141,11 @@ export async function storeSummary(storeId: string, from: string, to: string, sc
       connections: { where: { app: "FINANCIFY", status: "CONNECTED" }, select: { app: true } },
     },
   });
-  const all = await loadOrders(storeId, from, to);
+  // Outcomes from a source that reports returns but never deliveries are
+  // withheld before anything is counted, so every rate and insight agrees.
+  const slices = oneSidedSlices(await financifyOnlyHistory(storeId, to));
+  const withholding = withholdOneSided(await loadOrders(storeId, from, to), slices);
+  const all = withholding.rows;
   const options = (list: RollupOrder[], key: (o: RollupOrder) => string[]) =>
     rollup(list, key).map((b) => ({ key: b.key, orders: b.orders }));
   const scopeOptions = {
@@ -178,6 +213,7 @@ export async function storeSummary(storeId: string, from: string, to: string, sc
       fetchedAt: store.profitSettings?.fetchedAt ?? null,
     },
     courierifyCoverage: { shippedOrders: shipped.length, withParcel: shipped.filter((r) => r.parcelCount > 0).length },
+    withheld: { ...withholding.withheld, couriers: slices },
     fx,
     scope,
     scopeOptions,
@@ -188,7 +224,7 @@ export async function storeSummary(storeId: string, from: string, to: string, sc
 export type OrganizationSummary = {
   organization: { id: string; name: string; baseCurrency: string };
   period: { from: string; to: string; note: string };
-  stores: Array<Omit<StoreSummary, "rows" | "scope" | "scopeOptions">>;
+  stores: Array<Omit<StoreSummary, "rows" | "scope" | "scopeOptions" | "withheld">>;
   /** Every store's orders together: per currency, never mixed (rule #4). */
   orders: Bucket;
   /** In the base currency, at each order's own day's rate, with the rates shown. */
@@ -257,7 +293,7 @@ export async function organizationSummary(
   return {
     organization: { id: org.id, name: org.name, baseCurrency: org.baseCurrency },
     period: { from, to, note: "each store's own local days (rule #5)" },
-    stores: summaries.map(({ rows: _rows, scope: _scope, scopeOptions: _options, ...rest }) => rest),
+    stores: summaries.map(({ rows: _rows, scope: _scope, scopeOptions: _options, withheld: _withheld, ...rest }) => rest),
     orders: bucketOf(org.name, allRows),
     converted: {
       placed: convertDated(dated((r) => r.placed), org.baseCurrency, fx),

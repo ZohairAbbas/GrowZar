@@ -86,7 +86,7 @@ describe("coverage report", () => {
       "settlements",
     );
     expect(s).toMatchObject({ have: 1, of: 2, status: "partial" });
-    expect(s?.gap).toBe("no settlement from smartlane yet; leopards last settled 30 Sep 2026 (pending)");
+    expect(s?.gap).toBe("no smartlane settlement has ever been recorded in Courierify, so its delivered COD is shown apart rather than as owed; import smartlane's statements in Courierify (Settlements → Import) to track it; leopards last settled 30 Sep 2026 (pending)");
   });
 
   it("says why deliveries have no courier time", () => {

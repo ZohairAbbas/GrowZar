@@ -36,5 +36,6 @@ export async function storeCoverage(s: StoreSummary): Promise<CoverageReport> {
     adSpend: s.adSpend ? { daysFetched: s.adSpend.daysFetched, daysInPeriod: s.adSpend.daysInPeriod } : null,
     buyers: { total: buyerIds.length, named },
     unconvertedOrders: s.fx?.unconverted.reduce((n, u) => n + u.orders, 0) ?? 0,
+    withheld: s.withheld,
   });
 }
