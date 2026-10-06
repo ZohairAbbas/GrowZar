@@ -21,6 +21,8 @@ import {
 } from "./Metrics";
 import { InboxCards } from "./FindingCards";
 import { scopeLabel } from "./FilterBar";
+import { CohortGrid, RepeatCurve } from "./Retention";
+import { MIN_COHORT_BUYERS, MIN_ELIGIBLE_BUYERS } from "~/lib/metrics/cohorts";
 import type { InboxView } from "~/lib/insights/inbox.server";
 
 /**
@@ -601,6 +603,8 @@ export function CustomersPanel({ view }: { view: CustomersView }) {
         </table>
         <p className="border-t border-gray-100 px-5 py-3 text-xs text-gray-500">Top buyers this period, by delivered orders.</p>
       </div>
+      <CohortGrid data={view.retention} minBuyers={MIN_COHORT_BUYERS} />
+      <RepeatCurve data={view.retention} minBuyers={MIN_ELIGIBLE_BUYERS} />
     </section>
   );
 }
