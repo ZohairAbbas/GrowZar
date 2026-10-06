@@ -19,6 +19,7 @@ import {
   type Trend,
 } from "./compare";
 import { scopeWhere, type Scope } from "./scope";
+import { resolveBuyer, retention, type Retention } from "./cohorts";
 import { storeSummary, type StoreSummary } from "./summaries.server";
 import { formatAmount, parseAmount, type Money } from "./money";
 import { matchesFilter, orderFilterQuery, type OrderFilter } from "./findings";
@@ -478,6 +479,8 @@ export type CustomersView = {
   buyersInPeriod: number;
   repeatBuyers: number;
   compare: { buyers: Headline; repeatShare: Headline };
+  /** Cohorts and the repeat curve over all of the store's history (D3), within the filter. */
+  retention: Retention;
   top: Array<{
     customerId: string;
     name: string | null;
@@ -531,6 +534,7 @@ export async function customersView(storeId: string, s: StoreSummary, prev: Stor
     customers: await prisma.customer.count({ where: { storeId, mergedIntoId: null } }),
     buyersInPeriod: inPeriod.size,
     repeatBuyers: repeat,
+    retention: await storeRetention(storeId, s.period.to, s.scope),
     compare: {
       buyers: headline(countDelta(inPeriod.size, inPrev.size), weeklyDistinct(s.rows, s.period.from, s.period.to, (o) => o.customerId)),
       repeatShare: headline(
@@ -555,3 +559,25 @@ export async function customersView(storeId: string, s: StoreSummary, prev: Stor
   };
 }
 
+
+/**
+ * Every delivered order with a buyer, whatever its date: cohorts are built
+ * over all of the history Growzar holds, filtered by courier and city like
+ * the rest of the section. Two columns per order, one query.
+ */
+export async function storeRetention(storeId: string, asOf: string, scope: Scope): Promise<Retention> {
+  const [orders, merged, first] = await Promise.all([
+    prisma.orderGrain.findMany({
+      where: { storeId, outcome: "delivered", customerId: { not: null }, localDay: { not: null }, ...scopeWhere(scope) },
+      select: { customerId: true, localDay: true },
+    }),
+    prisma.customer.findMany({ where: { storeId, mergedIntoId: { not: null } }, select: { id: true, mergedIntoId: true } }),
+    prisma.orderGrain.aggregate({ where: { storeId }, _min: { localDay: true } }),
+  ]);
+  const into = new Map(merged.map((c) => [c.id, c.mergedIntoId!]));
+  return retention(
+    orders.map((o) => ({ customerId: resolveBuyer(o.customerId!, into), localDay: o.localDay! })),
+    asOf,
+    first._min.localDay,
+  );
+}
