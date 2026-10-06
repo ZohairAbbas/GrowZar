@@ -67,7 +67,8 @@ const DECIDED = new Set(["delivered", "returned", "partially_delivered"]);
 const KNOWN_AFTER_DAYS = Number(arg("known-after", "14"));
 /** Was this order's outcome known at T? See the method above. */
 const outcomeKnownAt = (o: RollupOrder) =>
-  (o.outcomeTiming?.basis === "happened_on" && o.outcomeTiming.at <= T) ||
+  // A courier's time, or a 3PL's reported time, before the cut-off.
+  ((o.outcomeTiming?.basis === "happened_on" || o.outcomeTiming?.basis === "reported_by_3pl") && o.outcomeTiming.at <= T) ||
   (!!o.createdAt && T.getTime() - o.createdAt.getTime() >= KNOWN_AFTER_DAYS * dayMs);
 function knownAt(o: RollupOrder): RollupOrder {
   if (DECIDED.has(o.outcome) && !outcomeKnownAt(o)) {

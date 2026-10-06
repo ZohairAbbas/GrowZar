@@ -155,6 +155,7 @@ function settlementItem(rows: readonly RollupOrder[], payouts: readonly Payout[]
 function timingItem(rows: readonly RollupOrder[]): CoverageItem | null {
   const delivered = rows.filter((r) => r.outcome === "delivered" && r.parcelCount > 0);
   const timed = delivered.filter((r) => r.outcomeTiming?.basis === "happened_on");
+  const by3pl = delivered.filter((r) => r.outcomeTiming?.basis === "reported_by_3pl").length;
   const untimed = new Map<string, number>();
   for (const r of delivered) {
     if (r.outcomeTiming?.basis === "happened_on") continue;
@@ -174,7 +175,8 @@ function timingItem(rows: readonly RollupOrder[]): CoverageItem | null {
     timed.length,
     delivered.length,
     () =>
-      `no courier time on ${[...untimed.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n.toLocaleString("en-US")} (${k})`).join(", ")}`,
+      `no courier time on ${[...untimed.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n.toLocaleString("en-US")} (${k})`).join(", ")}` +
+      (by3pl ? `; ${by3pl.toLocaleString("en-US")} of them have a time reported by the 3PL instead, shown separately` : ""),
   );
 }
 

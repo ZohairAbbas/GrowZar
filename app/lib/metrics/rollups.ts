@@ -308,7 +308,20 @@ export function productLines(orders: readonly RollupOrder[]): ProductLine[] {
 // ── Courier timing (rule #9, gated) ─────────────────────────────────────────
 
 export type CourierTiming =
-  | { courier: string; verdict: "ok"; timedOrders: number; medianDaysToDeliver: number }
+  | {
+      courier: string;
+      verdict: "ok";
+      timedOrders: number;
+      medianDaysToDeliver: number;
+      /**
+       * Whose times the median is over. "courier": times the courier gave.
+       * "reported_by_3pl": no courier gave enough, so the 3PL's observed
+       * times (about five minutes behind the courier), named in `reportedBy`.
+       * Never mixed in one median.
+       */
+      basis: "courier" | "reported_by_3pl";
+      reportedBy?: string;
+    }
   | {
       courier: string;
       verdict: "not_enough_data";
@@ -350,6 +363,13 @@ function untimedBecause(
   return { reason: fallback };
 }
 
+/** Median days from order to the timed delivery. */
+function medianDays(timed: readonly RollupOrder[]): number {
+  const days = timed.map((o) => (o.outcomeTiming!.at.getTime() - o.createdAt!.getTime()) / 86_400_000).sort((x, y) => x - y);
+  const mid = Math.floor(days.length / 2);
+  return days.length % 2 ? days[mid]! : (days[mid - 1]! + days[mid]!) / 2;
+}
+
 export function courierTiming(
   orders: readonly RollupOrder[],
   minimum = MIN_TIMED_PARCELS_PER_COURIER,
@@ -365,15 +385,22 @@ export function courierTiming(
     );
     const verdict = coverageVerdict(timed.length, minimum);
     if (verdict.verdict !== "ok") {
+      // Not enough courier times: a 3PL's own times, if there are enough of
+      // them, and labelled as the 3PL's (Courierify G-CFY3-1).
+      const by3pl = orders.filter(
+        (o) => o.courier === b.key && o.outcome === "delivered" && o.outcomeTiming?.basis === "reported_by_3pl" && o.createdAt,
+      );
+      if (coverageVerdict(by3pl.length, minimum).verdict === "ok") {
+        const via = new Map<string, number>();
+        for (const o of by3pl) if (o.fulfilledVia) via.set(o.fulfilledVia, (via.get(o.fulfilledVia) ?? 0) + 1);
+        const [reportedBy] = [...via.entries()].sort((x, y) => y[1] - x[1])[0] ?? ["the 3PL"];
+        out.push({ courier: b.key, verdict: "ok", timedOrders: by3pl.length, medianDaysToDeliver: medianDays(by3pl), basis: "reported_by_3pl", reportedBy });
+        continue;
+      }
       out.push({ courier: b.key, verdict: "not_enough_data", timedOrders: timed.length, ...untimedBecause(b.key, orders, verdict.reason) });
       continue;
     }
-    const days = timed
-      .map((o) => (o.outcomeTiming!.at.getTime() - o.createdAt!.getTime()) / 86_400_000)
-      .sort((x, y) => x - y);
-    const mid = Math.floor(days.length / 2);
-    const median = days.length % 2 ? days[mid]! : (days[mid - 1]! + days[mid]!) / 2;
-    out.push({ courier: b.key, verdict: "ok", timedOrders: timed.length, medianDaysToDeliver: median });
+    out.push({ courier: b.key, verdict: "ok", timedOrders: timed.length, medianDaysToDeliver: medianDays(timed), basis: "courier" });
   }
   return out;
 }

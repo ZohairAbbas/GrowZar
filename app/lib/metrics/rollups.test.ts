@@ -159,6 +159,28 @@ describe("per-courier timing is gated, never a number from no history", () => {
   });
 });
 
+describe("courier timing from a 3PL's reported times (Courierify G-CFY3-1)", () => {
+  const at = (day: string) => new Date(`${day}T06:00:00Z`);
+  const viaOrio = (deliveredOn: string) =>
+    order({ courier: "trax", fulfilledVia: "orio", outcomeTiming: { basis: "reported_by_3pl", at: at(deliveredOn) } });
+
+  it("gives a median from the 3PL's times when the courier gave none, and says whose", () => {
+    const orders = Array.from({ length: 30 }, () => viaOrio("2026-09-24"));
+    expect(courierTiming(orders)[0]).toMatchObject({ courier: "trax", verdict: "ok", basis: "reported_by_3pl", reportedBy: "orio", timedOrders: 30, medianDaysToDeliver: 4 });
+  });
+
+  it("never mixes them with the courier's own times", () => {
+    const own = Array.from({ length: 30 }, () => order({ courier: "trax" })); // courier-timed, 3 days
+    const orders = [...own, ...Array.from({ length: 40 }, () => viaOrio("2026-09-30"))];
+    expect(courierTiming(orders)[0]).toMatchObject({ basis: "courier", timedOrders: 30, medianDaysToDeliver: 3 });
+  });
+
+  it("still says 'shipped through the 3PL' below the minimum", () => {
+    const orders = Array.from({ length: 29 }, () => viaOrio("2026-09-24"));
+    expect(courierTiming(orders)[0]).toMatchObject({ verdict: "not_enough_data", reason: "shipped_via_3pl" });
+  });
+});
+
 describe("courier timing says why it has no number (G-GZR3-2), never 'slow'", () => {
   const untimed = (o: Partial<RollupOrder>) => order({ outcomeTiming: { basis: "status_as_of", at: new Date("2026-09-25T06:00:00Z") }, ...o });
 
