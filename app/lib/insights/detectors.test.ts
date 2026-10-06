@@ -90,6 +90,25 @@ describe("money only for a role that may see Finance (staff may not)", () => {
     expect(d.kind === "disagreements" && d.total).toBe(6);
     expect(JSON.stringify(stripped)).not.toMatch(/"amount"/);
   });
+
+  it("strips I8's and I13's estimates for staff, keeping the cards", () => {
+    const cost = { total: pkr("3000.00"), perReturn: pkr("200.00"), returns: 15, pricedReturns: 196 };
+    const i8 = { detector: "unconfirmed_returns", subject: "store", fingerprint: "unconfirmed_returns:store", rank: { group: "specific", ordersAffected: 15 }, revealsMoney: true, finding: { kind: "unconfirmed_returns", excessReturns: 15, cost } } as unknown as Insight;
+    const i13 = { detector: "missing_courier_fees", subject: "store", fingerprint: "missing_courier_fees:store", rank: { group: "context", ordersAffected: 30 }, revealsMoney: true, finding: { kind: "missing_fees", missing: 30, estimate: { total: pkr("6750.00"), medianFee: pkr("225.00"), pricedOrders: 30 } } } as unknown as Insight;
+    const stripped = withoutMoney([i8, i13]);
+    expect(stripped.map((i) => i.detector)).toEqual(["unconfirmed_returns", "missing_courier_fees"]);
+    expect(JSON.stringify(stripped)).not.toMatch(/"amount"/);
+  });
+
+  it("keeps a returns card for staff, without its money estimate", () => {
+    const withCost = runDetectors({ ...input(), returnCost: { perReturn: pkr("200.00"), priced: 100, returns: 300 } }, both);
+    const insights = found(withCost);
+    const products = insights.filter((i) => i.detector === "variant_returns");
+    expect(products.every((i) => i.revealsMoney)).toBe(true);
+    const stripped = withoutMoney(insights);
+    expect(stripped.filter((i) => i.detector === "variant_returns")).toHaveLength(products.length);
+    expect(JSON.stringify(stripped)).not.toMatch(/"amount"/);
+  });
 });
 
 describe("acting on an insight", () => {

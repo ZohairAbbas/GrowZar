@@ -9,6 +9,7 @@ import { storeSummary, type StoreSummary } from "../metrics/summaries.server";
 import { toRollupOrder } from "../metrics/rollups.server";
 import { loadPayerHistories } from "../metrics/settlements.server";
 import { loadAdSpend } from "../metrics/rollups.server";
+import { loadReturnCost } from "../metrics/return-cost.server";
 import {
   detectorLabel,
   evidenceOf,
@@ -41,7 +42,7 @@ export async function detectorInput(
   s: StoreSummary,
   now = new Date(),
 ): Promise<{ input: FindingsInput; connected: Set<App> }> {
-  const [connections, lastParcel, payers, awaiting, perProduct] = await Promise.all([
+  const [connections, lastParcel, payers, awaiting, perProduct, returnCost] = await Promise.all([
     prisma.appConnection.findMany({
       where: { storeId: s.store.id, status: "CONNECTED", app: { in: ["COURIERIFY", "FINANCIFY"] } },
       select: { app: true },
@@ -58,6 +59,8 @@ export async function detectorInput(
       where: { storeId: s.store.id, outcome: "delivered", parcelCount: { gt: 0 }, uncollectedAmount: { not: null } },
     }),
     loadAdSpend(s.store.id, s.period.from, s.period.to),
+    // What a return costs in courier charges, measured on every returned parcel on record.
+    loadReturnCost(s.store.id, s.store.currency),
   ]);
   const connected = new Set(connections.map((c) => c.app as App));
   const ads = s.adSpend;
@@ -78,6 +81,7 @@ export async function detectorInput(
       // I2: per-product allocation, only when the period is fully fetched.
       adByVariant: complete ? Object.fromEntries(perProduct.byVariant) : undefined,
       periodDays: s.adSpend?.daysInPeriod,
+      returnCost,
     },
   };
 }

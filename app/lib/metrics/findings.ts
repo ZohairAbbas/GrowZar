@@ -19,6 +19,7 @@ import { formatAmount, isPositive, parseAmount, sumByCurrency, type Money } from
 import type { Outcome } from "./order-grain";
 import { productLines, type Bucket, type Profit, type RollupOrder } from "./rollups";
 import type { PayerHistory } from "./settlements";
+import { times, type ReturnCost } from "./return-cost";
 
 /** A variant needs this many delivered-or-returned orders to be compared. */
 export const MIN_DECIDED_PER_VARIANT = 30;
@@ -117,7 +118,22 @@ export type VariantRate = {
   stillOpen: number;
   /** returned ÷ decided, as a percentage with one decimal. */
   returnRate: number;
+  /** Flagged products only: returns beyond the store's own rate, and their courier charges. */
+  excessReturns?: number;
+  cost?: CostEstimate | null;
 };
+
+/**
+ * Courier charges on returns, estimated from the store's measured cost of a
+ * return (return-cost.ts). Approved for cards on 2026-10-06; I1 waits for a
+ * backtest that can be checked.
+ */
+export type CostEstimate = { total: Money; perReturn: Money; returns: number; pricedReturns: number };
+
+function returnsCost(n: number, rc: ReturnCost | null | undefined): CostEstimate | null {
+  if (!rc || n <= 0) return null;
+  return { total: times(rc.perReturn, n), perReturn: rc.perReturn, returns: n, pricedReturns: rc.priced };
+}
 
 export type VariantReturnsFinding = {
   kind: "variant_returns";
@@ -169,6 +185,8 @@ export type MissingFeesFinding = {
   via3pl: number;
   /** Shipped outside Courierify: no fee source exists for them at all. */
   outsideCourierify: number;
+  /** missing × the median known fee on the same period's Courierify orders; null below 30 priced. */
+  estimate: { total: Money; medianFee: Money; pricedOrders: number } | null;
   filter: OrderFilter;
 };
 
@@ -261,6 +279,8 @@ export type UnconfirmedFinding = {
   waiting: number;
   /** Returns among unanswered orders beyond what the confirmed rate would give. */
   excessReturns: number;
+  /** Their courier charges at the store's measured cost of a return. */
+  cost: CostEstimate | null;
   /** Orders with no WhatsApp confirmation record (voice is not synced): left out. */
   noRecord: number;
   /** Who decided the outcomes compared (rule #7). */
@@ -310,6 +330,8 @@ export type FindingsInput = {
    */
   adByVariant?: Record<string, Money[]>;
   periodDays?: number;
+  /** The store's measured courier charge on a return (return-cost.ts); null when not enough is known. */
+  returnCost?: ReturnCost | null;
 };
 
 const DECIDED: Outcome[] = ["delivered", "returned"];
@@ -418,7 +440,12 @@ export function variantReturnsFinding(input: FindingsInput): VariantReturnsFindi
 
   const flagged = rates
     .filter((v) => v.returnRate - storeRate >= MIN_RETURN_GAP_POINTS)
-    .sort((a, b) => b.returnRate - a.returnRate);
+    .sort((a, b) => b.returnRate - a.returnRate)
+    .map((v) => {
+      // Returns beyond what the store's own rate would give, and their courier charges.
+      const excessReturns = Math.max(0, v.returned - Math.round((v.decided * storeRate) / 100));
+      return { ...v, excessReturns, cost: returnsCost(excessReturns, input.returnCost) };
+    });
   if (!rates.length) return notEnough(`no product has ${MIN_DECIDED_PER_VARIANT} delivered or returned orders in this period`);
   if (!flagged.length) {
     return nothing(
@@ -512,9 +539,26 @@ const feeMissing = (o: RollupOrder) => fromCourierify(o) && SHIPPED.includes(o.o
  * parcels only: those are the gap someone can close (the fee arrives through
  * Courierify's courier_costs metafield, rule #13). Orders shipped outside
  * Courierify have no fee source at all; they are counted, not the finding
- * (the "Courierify stopped" card covers them). Counts only: the median-fee
- * estimate waits for its backtest (the money rule).
+ * (the "Courierify stopped" card covers them). The estimate (approved
+ * 2026-10-06) is missing × the median fee known on the same period's
+ * Courierify orders, and only with 30 of them priced.
  */
+/** Priced orders needed before the median fee is used for an estimate. */
+export const MIN_PRICED_FOR_FEE_ESTIMATE = 30;
+
+function medianFeeEstimate(via: readonly RollupOrder[], missing: number, currency: string | null): MissingFeesFinding["estimate"] {
+  if (!currency) return null;
+  const fees = via
+    .map((o) => (o.courierFee && o.courierFee.currency === currency ? parseAmount(o.courierFee.amount) : null))
+    .filter((f): f is bigint => f !== null && f > 0n)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  if (fees.length < MIN_PRICED_FOR_FEE_ESTIMATE) return null;
+  const mid = Math.floor(fees.length / 2);
+  const median = fees.length % 2 ? fees[mid]! : (fees[mid - 1]! + fees[mid]!) / 2n;
+  const medianFee = asMoney(median, currency);
+  return { total: times(medianFee, missing), medianFee, pricedOrders: fees.length };
+}
+
 export function missingFeesFinding(input: FindingsInput): MissingFeesFinding | Skip {
   const shipped = input.rows.filter((o) => SHIPPED.includes(o.outcome));
   const via = shipped.filter(fromCourierify);
@@ -548,6 +592,7 @@ export function missingFeesFinding(input: FindingsInput): MissingFeesFinding | S
       .sort((a, b) => b.missing - a.missing || a.courier.localeCompare(b.courier)),
     via3pl: missing.filter((o) => o.fulfilledVia).length,
     outsideCourierify,
+    estimate: medianFeeEstimate(via, missing.length, input.currency),
     filter: { kind: "fee_missing" },
   };
 }
@@ -772,13 +817,15 @@ export function unconfirmedFinding(input: FindingsInput): UnconfirmedFinding | S
     );
   }
   const declined = group(rows.filter((o) => o.confirmation === "declined"));
+  const excessReturns = Math.max(0, unanswered.returned - Math.round((unanswered.decided * confirmed.returnRate) / 100));
   return {
     kind: "unconfirmed_returns",
     confirmed,
     unanswered,
     declinedShipped: declined.decided >= MIN_DECLINED_SHIPPED ? declined : null,
     waiting: rows.filter((o) => unansweredWaiting(o, input.asOf ?? new Date())).length,
-    excessReturns: Math.max(0, unanswered.returned - Math.round((unanswered.decided * confirmed.returnRate) / 100)),
+    excessReturns,
+    cost: returnsCost(excessReturns, input.returnCost),
     noRecord: rows.filter((o) => !o.confirmation).length,
     decidedBy: decidedBy(rows.filter((o) => DECIDED.includes(o.outcome) && (o.confirmation === "confirmed" || isUnanswered(o)))),
     filter: { kind: "unanswered_waiting" },
