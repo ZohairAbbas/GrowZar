@@ -4,6 +4,7 @@ import type {
   CustomersView,
   FinanceView,
   FinanceDepth,
+  ShippingDepth,
   HomeView,
   MarketingView,
   Owed,
@@ -26,6 +27,7 @@ import { InboxCards } from "./FindingCards";
 import { scopeLabel } from "./FilterBar";
 import { CohortGrid, RepeatCurve } from "./Retention";
 import { CashTimelineCard, CourierDeductions, MoneyBreakdown } from "./FinanceDepth";
+import { CourierPerformanceTable, OutcomesChart, ReturnsCard } from "./ShippingDepth";
 import { CampaignTable, CityCourierTable, ConfirmationFunnelView, PayoutAgeingTable, ProductMatrix } from "./Matrices";
 import type { ConfirmationFunnel, PayoutAgeing } from "~/lib/metrics/matrices";
 import { MIN_DECIDED_TO_RATE } from "~/lib/metrics/compare";
@@ -510,10 +512,12 @@ export function OrdersPanel({
 
 export function ShippingPanel({
   view,
+  depth,
   days,
   scope,
 }: {
   view: ShippingView;
+  depth: ShippingDepth;
   days: number;
   scope: { courier: string | null; city: string | null };
 }) {
@@ -628,6 +632,9 @@ export function ShippingPanel({
           <MoneyList values={view.returnedValue} />
         </Stat>
       </div>
+      <OutcomesChart days={depth.outcomes} />
+      <CourierPerformanceTable rows={depth.performance} />
+      {depth.returns && depth.returns.returned ? <ReturnsCard returns={depth.returns} cities={depth.returnCities} /> : null}
       {table("courier", couriers)}
       {table("city", rows(view.cities, "city"))}
       <CityCourierTable matrix={view.matrix} days={days} min={view.minDecided} />

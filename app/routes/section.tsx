@@ -26,6 +26,7 @@ import {
   marketingView,
   storePayoutAgeing,
   financeDepth,
+  shippingDepth,
 } from "~/lib/metrics/screens.server";
 import { confirmationFunnel, isConfirmationGroup } from "~/lib/metrics/matrices";
 import {
@@ -238,7 +239,12 @@ async function buildMetrics(
         confirmation,
       };
     case "shipping":
-      return { ...base, kind: "shipping" as const, view: compared(shippingView(summary, prev!)) };
+      return {
+        ...base,
+        kind: "shipping" as const,
+        view: compared(shippingView(summary, prev!)),
+        depth: await shippingDepth(storeId, summary),
+      };
     case "customers":
       return { ...base, kind: "customers" as const, view: compared(await customersView(storeId, summary, prev!)) };
     case "marketing":
@@ -283,7 +289,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {metrics.kind === "finance" ? <FinancePanel view={metrics.view} ageing={metrics.ageing} depth={metrics.depth} days={metrics.period.days} scope={scopeQuery(metrics.scope)} /> : null}
           {metrics.kind === "marketing" ? <MarketingPanel view={metrics.view} days={metrics.period.days} scope={scopeQuery(metrics.scope)} /> : null}
           {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} days={metrics.period.days} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
-          {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} days={metrics.period.days} scope={metrics.scope} /> : null}
+          {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} depth={metrics.depth} days={metrics.period.days} scope={metrics.scope} /> : null}
           {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} /> : null}
         </div>
       ) : null}
