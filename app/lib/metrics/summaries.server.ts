@@ -6,7 +6,8 @@ import { getAppCredentials } from "../apps/registry.server";
 import { convertDated, NO_FX_SOURCE, type Conversion, type FxSource } from "./fx";
 import { formatAmount, parseAmount, sumByCurrency, type Money } from "./money";
 import { compareSettings, type SettingsComparison, type StoreSettings } from "./profit-settings";
-import { bucketOf, profitAfterReturns, roas, type Bucket, type Profit, type RollupOrder } from "./rollups";
+import { bucketOf, byCity, byCourier, profitAfterReturns, roas, rollup, type Bucket, type Profit, type RollupOrder } from "./rollups";
+import { inScope, isScoped, NO_SCOPE, type Scope } from "./scope";
 import { loadAdSpend, loadOrders } from "./rollups.server";
 import { loadFxSource } from "./fx.server";
 import { convertOrder, fxReport, type FxReport } from "./fx-orders";
@@ -82,6 +83,14 @@ export type StoreSummary = {
    * when the period had none. `rows` are the converted orders.
    */
   fx: FxReport | null;
+  /**
+   * The filter bar's courier and city (D2). With either set, `rows` and
+   * every total are that slice only, and ad spend is left out: it is
+   * store-wide, never split by courier or city.
+   */
+  scope: Scope;
+  /** What the filter bar offers: couriers within the picked city, and cities within the picked courier. */
+  scopeOptions: { couriers: Array<{ key: string; orders: number }>; cities: Array<{ key: string; orders: number }> };
   rows: RollupOrder[];
 };
 
@@ -89,7 +98,7 @@ function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
 }
 
-export async function storeSummary(storeId: string, from: string, to: string): Promise<StoreSummary> {
+export async function storeSummary(storeId: string, from: string, to: string, scope: Scope = NO_SCOPE): Promise<StoreSummary> {
   const store = await prisma.store.findUniqueOrThrow({
     where: { id: storeId },
     select: {
@@ -101,7 +110,14 @@ export async function storeSummary(storeId: string, from: string, to: string): P
       connections: { where: { app: "FINANCIFY", status: "CONNECTED" }, select: { app: true } },
     },
   });
-  const loaded = await loadOrders(storeId, from, to);
+  const all = await loadOrders(storeId, from, to);
+  const options = (list: RollupOrder[], key: (o: RollupOrder) => string[]) =>
+    rollup(list, key).map((b) => ({ key: b.key, orders: b.orders }));
+  const scopeOptions = {
+    couriers: options(all.filter((o) => inScope(o, { courier: null, city: scope.city })), byCourier),
+    cities: options(all.filter((o) => inScope(o, { courier: scope.courier, city: null })), byCity),
+  };
+  const loaded = isScoped(scope) ? all.filter((o) => inScope(o, scope)) : all;
   // Convert each order's money at its own day's rate first, so every total
   // below, and every card and list built from these rows, agrees (rule #4).
   const fxLoaded = store.currency ? await loadFxSource(store.currency, loaded) : null;
@@ -110,7 +126,7 @@ export async function storeSummary(storeId: string, from: string, to: string): P
   const orders = bucketOf(store.shopDomain, rows);
 
   const hasFinancify = store.connections.length > 0;
-  const ads = hasFinancify ? await loadAdSpend(storeId, from, to) : null;
+  const ads = hasFinancify && !isScoped(scope) ? await loadAdSpend(storeId, from, to) : null;
   const adSpend = ads
     ? {
         spend: ads.total,
@@ -163,6 +179,8 @@ export async function storeSummary(storeId: string, from: string, to: string): P
     },
     courierifyCoverage: { shippedOrders: shipped.length, withParcel: shipped.filter((r) => r.parcelCount > 0).length },
     fx,
+    scope,
+    scopeOptions,
     rows,
   };
 }
@@ -170,7 +188,7 @@ export async function storeSummary(storeId: string, from: string, to: string): P
 export type OrganizationSummary = {
   organization: { id: string; name: string; baseCurrency: string };
   period: { from: string; to: string; note: string };
-  stores: Array<Omit<StoreSummary, "rows">>;
+  stores: Array<Omit<StoreSummary, "rows" | "scope" | "scopeOptions">>;
   /** Every store's orders together: per currency, never mixed (rule #4). */
   orders: Bucket;
   /** In the base currency, at each order's own day's rate, with the rates shown. */
@@ -239,7 +257,7 @@ export async function organizationSummary(
   return {
     organization: { id: org.id, name: org.name, baseCurrency: org.baseCurrency },
     period: { from, to, note: "each store's own local days (rule #5)" },
-    stores: summaries.map(({ rows: _rows, ...rest }) => rest),
+    stores: summaries.map(({ rows: _rows, scope: _scope, scopeOptions: _options, ...rest }) => rest),
     orders: bucketOf(org.name, allRows),
     converted: {
       placed: convertDated(dated((r) => r.placed), org.baseCurrency, fx),

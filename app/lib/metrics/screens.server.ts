@@ -2,7 +2,23 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "../db.server";
 import { localDayOf, type Outcome } from "./order-grain";
-import { byCity, byCourier, courierTiming, rollup, type DeliveryRate } from "./rollups";
+import { bucketOf, byCity, byCourier, courierTiming, rollup, type Bucket, type DeliveryRate } from "./rollups";
+import {
+  MIN_DECIDED_TO_RATE,
+  countDelta,
+  dailyCount,
+  dailyMoney,
+  foldThinRows,
+  moneyDelta,
+  rateDelta,
+  weeklyDistinct,
+  whenCovered,
+  whenSettled,
+  weeklyRate,
+  type Delta,
+  type Trend,
+} from "./compare";
+import { scopeWhere, type Scope } from "./scope";
 import { storeSummary, type StoreSummary } from "./summaries.server";
 import { formatAmount, parseAmount, type Money } from "./money";
 import { matchesFilter, orderFilterQuery, type OrderFilter } from "./findings";
@@ -48,6 +64,15 @@ function coverage(s: StoreSummary): Coverage {
   return { shippedOrders, withParcel, degraded: shippedOrders > 0 && withParcel / shippedOrders < 0.5 };
 }
 
+/**
+ * A headline number with its comparison and trend (D2). `good` is which way
+ * is better for the merchant, so a screen can colour the change without
+ * knowing what the number is.
+ */
+export type Headline = { delta: Delta; trend: Trend | null; good: "up" | "down" };
+
+const headline = (delta: Delta, trend: Trend | null, good: "up" | "down" = "up"): Headline => ({ delta, trend, good });
+
 // ── Home: the funnel strip ─────────────────────────────────────────────────
 
 export type HomeView = {
@@ -64,6 +89,7 @@ export type HomeView = {
   /** The store's currency (it leads), and what happened to orders in others. */
   base: string | null;
   fx: StoreSummary["fx"];
+  compare: { delivered: Headline; deliveryRate: Headline; profit: Headline | null };
 };
 
 /**
@@ -95,7 +121,7 @@ function eachDay(from: string, to: string): string[] {
   return days;
 }
 
-export function homeView(s: StoreSummary, canSeeMoney: boolean): HomeView {
+export function homeView(s: StoreSummary, prev: StoreSummary, canSeeMoney: boolean): HomeView {
   const rows = s.rows;
   const deliveredByDay = new Map<string, number>();
   for (const r of rows) {
@@ -126,8 +152,23 @@ export function homeView(s: StoreSummary, canSeeMoney: boolean): HomeView {
       : null,
     base: s.store.currency,
     fx: canSeeMoney ? s.fx : null,
+    compare: {
+      delivered: canSeeMoney
+        ? headline(settled(moneyDelta(s.orders.deliveredRevenue, prev.orders.deliveredRevenue, s.store.currency), s, prev), dailyMoney(rows, s.period.from, s.period.to, s.store.currency, (o) => (o.outcome === "delivered" ? o.delivered : null)))
+        : headline(settled(countDelta(s.orders.deliveryRate.delivered, prev.orders.deliveryRate.delivered), s, prev), dailyCount(rows, s.period.from, s.period.to, (o) => o.outcome === "delivered")),
+      deliveryRate: headline(rateDelta(s.orders.deliveryRate, prev.orders.deliveryRate), weeklyRate(rows, s.period.from, s.period.to)),
+      profit: canSeeMoney && s.profit ? headline(settled(moneyDelta(profitMoney(s), profitMoney(prev), s.store.currency), s, prev), null) : null,
+    },
   };
 }
+
+const maturity = (s: StoreSummary) => ({ orders: s.orders.orders, stillOpen: s.orders.deliveryRate.stillOpen });
+/** An outcome-dependent delta, withdrawn while either period is still settling. */
+const settled = (d: Delta, s: StoreSummary, prev: StoreSummary) => whenSettled(d, maturity(s), maturity(prev));
+const feeCoverage = (s: StoreSummary) => ({ have: s.orders.shippedOrders - s.orders.shippedOrdersWithoutFee, of: s.orders.shippedOrders });
+const cogsCoverage = (s: StoreSummary) => ({ have: s.orders.deliveryRate.delivered - s.orders.cogsIncompleteOrders, of: s.orders.deliveryRate.delivered });
+
+const profitMoney = (s: StoreSummary) => (s.profit ? { amount: s.profit.amount, currency: s.profit.currency } : null);
 
 // ── Finance: rules #4, #13–17 ──────────────────────────────────────────────
 
@@ -149,10 +190,17 @@ export type FinanceView = {
   settings: StoreSummary["settings"];
   base: string | null;
   fx: StoreSummary["fx"];
+  /** Set when a courier or city is picked: ad spend is store-wide and left out. */
+  scoped: boolean;
+  compare: Record<"placed" | "deliveredRevenue" | "paidByCourier" | "cogsDelivered" | "courierFees" | "adSpend" | "profit", Headline>;
 };
 
-export function financeView(s: StoreSummary): FinanceView {
+export function financeView(s: StoreSummary, prev: StoreSummary): FinanceView {
   const b = s.orders;
+  const p = prev.orders;
+  const cur = s.store.currency;
+  const { from, to } = s.period;
+  const money = (pick: (o: StoreSummary["rows"][number]) => Money | null) => dailyMoney(s.rows, from, to, cur, pick);
   return {
     placed: b.placed,
     deliveredRevenue: b.deliveredRevenue,
@@ -170,6 +218,28 @@ export function financeView(s: StoreSummary): FinanceView {
     settings: s.settings,
     base: s.store.currency,
     fx: s.fx,
+    scoped: s.scope.courier !== null || s.scope.city !== null,
+    compare: {
+      placed: headline(moneyDelta(b.placed, p.placed, cur), money((o) => o.placed)),
+      deliveredRevenue: headline(settled(moneyDelta(b.deliveredRevenue, p.deliveredRevenue, cur), s, prev), money((o) => (o.outcome === "delivered" ? o.delivered : null))),
+      paidByCourier: headline(settled(moneyDelta(b.collected, p.collected, cur), s, prev), money((o) => o.collected)),
+      cogsDelivered: headline(
+        whenCovered(settled(moneyDelta(b.cogsDelivered, p.cogsDelivered, cur), s, prev), "Product cost", cogsCoverage(s), cogsCoverage(prev)),
+        null,
+        "down",
+      ),
+      courierFees: headline(whenCovered(moneyDelta(b.courierFees, p.courierFees, cur), "Courier fees", feeCoverage(s), feeCoverage(prev)), null, "down"),
+      adSpend: headline(moneyDelta(s.adSpend?.spend ?? null, prev.adSpend?.spend ?? null, cur), null, "down"),
+      profit: headline(
+        whenCovered(
+          whenCovered(settled(moneyDelta(profitMoney(s), profitMoney(prev), cur), s, prev), "Courier fees", feeCoverage(s), feeCoverage(prev)),
+          "Product cost",
+          cogsCoverage(s),
+          cogsCoverage(prev),
+        ),
+        null,
+      ),
+    },
   };
 }
 
@@ -206,6 +276,8 @@ export type OrdersView = {
   allTotal: number;
   /** Financify's own outcome per shown order, for the disagreement list. */
   financifySays: Record<string, string | null>;
+  /** Orders in the period against the previous one, and per day (D2). */
+  compare: Headline;
 };
 
 const LIST_LIMIT = 50;
@@ -235,8 +307,18 @@ export async function ordersView(
   to: string,
   filter: OrderFilter | null = null,
   outcome: Outcome | null = null,
+  scope: Scope = { courier: null, city: null },
+  previous: { from: string; to: string } | null = null,
 ): Promise<OrdersView> {
-  const where = { storeId, localDay: { gte: from, lte: to } };
+  const where = { storeId, localDay: { gte: from, lte: to }, ...scopeWhere(scope) };
+  // The comparison counts the same slice, before any outcome pick.
+  const [prevTotal, perDay] = await Promise.all([
+    previous ? prisma.orderGrain.count({ where: { storeId, localDay: { gte: previous.from, lte: previous.to }, ...scopeWhere(scope) } }) : Promise.resolve(null),
+    prisma.orderGrain.groupBy({ by: ["localDay"], where, _count: { _all: true } }),
+  ]);
+  const days = new Map(perDay.map((d) => [d.localDay, d._count._all]));
+  const trend = dailyCount([], from, to, () => false);
+  if (trend) for (const p of trend.points) p.value = days.get(p.label) ?? 0;
   const filterQuery = filter ? orderFilterQuery(filter) : "";
   const money = (a: { toFixed(n: number): string } | null, c: string | null): Money | null =>
     a && c ? { amount: formatAmount(parseAmount(a.toFixed(6))!), currency: c } : null;
@@ -268,7 +350,7 @@ export async function ordersView(
     // Cash held is today's state (I4): any order date, so no period here.
     const cashFilter = filter.kind === "awaiting_payout";
     const all = await prisma.orderGrain.findMany({
-      where: cashFilter ? { storeId, outcome: "delivered", uncollectedAmount: { not: null } } : where,
+      where: cashFilter ? { storeId, outcome: "delivered", uncollectedAmount: { not: null }, ...scopeWhere(scope) } : where,
       orderBy: [{ createdAt: "desc" }, { orderId: "desc" }],
     });
     const ctx = { payers: cashFilter ? await loadPayerHistories(storeId) : [], asOf: new Date() };
@@ -285,6 +367,7 @@ export async function ordersView(
       filterQuery,
       outcome,
       financifySays: Object.fromEntries(shown.map((r) => [r.orderId, r.financifyOutcome])),
+      compare: headline(countDelta(hit.length, null), null),
     };
   }
 
@@ -309,18 +392,47 @@ export async function ordersView(
     filterQuery,
     outcome,
     financifySays: {},
+    compare: headline(countDelta(groups.reduce((sum, g) => sum + g._count._all, 0), prevTotal), trend),
   };
 }
 
 // ── Shipping: rules #7–12 ───────────────────────────────────────────────────
 
+export type BreakdownRow = {
+  /** The roll-up key, which is also the filter value; "other" for folded rows. */
+  key: string;
+  orders: number;
+  deliveryRate: DeliveryRate;
+  /** For the folded row: how many rows it holds. */
+  folded?: number;
+};
+
 export type ShippingView = {
   deliveryRate: DeliveryRate;
   returnedValue: Money[];
-  couriers: Array<{ courier: string; orders: number; deliveryRate: DeliveryRate; timing: string }>;
-  cities: Array<{ city: string; orders: number; deliveryRate: DeliveryRate }>;
+  couriers: Array<BreakdownRow & { timing: string }>;
+  cities: BreakdownRow[];
+  /** Cities with orders in the period, before folding. */
+  cityCount: number;
   coverage: Coverage;
+  minDecided: number;
+  compare: { deliveryRate: Headline; returnedValue: Headline; returned: Headline };
 };
+
+/** Rows under MIN_DECIDED_TO_RATE decided orders become one "other" row (pack §2.5). */
+function folded(buckets: Bucket[], rows: StoreSummary["rows"]): BreakdownRow[] {
+  const byId = new Map(rows.map((o) => [o.orderId, o]));
+  const out = foldThinRows(buckets, MIN_DECIDED_TO_RATE, (thin) =>
+    bucketOf("other", thin.flatMap((t) => t.orderIds.map((id) => byId.get(id)!))),
+  );
+  return out.rows.map((b, i) => ({
+    key: b.key,
+    orders: b.orders,
+    deliveryRate: b.deliveryRate,
+    // The fold is always last.
+    ...(out.folded && i === out.rows.length - 1 ? { folded: out.folded } : {}),
+  }));
+}
 
 /**
  * Never "slow" (G-GZR3-2). Why a courier has no times is the coverage page's
@@ -330,17 +442,16 @@ function timingReason(t: Extract<ReturnType<typeof courierTiming>[number], { ver
   return t.reason === "too_few_parcels" ? `${t.timedOrders} timed, needs ${MIN_TIMED_PARCELS_PER_COURIER}` : "—";
 }
 
-export function shippingView(s: StoreSummary): ShippingView {
+export function shippingView(s: StoreSummary, prev: StoreSummary): ShippingView {
   const timing = new Map(courierTiming(s.rows).map((t) => [t.courier, t]));
+  const cities = rollup(s.rows, byCity);
   return {
     deliveryRate: s.orders.deliveryRate,
     returnedValue: s.orders.returnedValue,
-    couriers: rollup(s.rows, byCourier).map((b) => {
+    couriers: folded(rollup(s.rows, byCourier), s.rows).map((b) => {
       const t = timing.get(b.key);
       return {
-        courier: b.key,
-        orders: b.orders,
-        deliveryRate: b.deliveryRate,
+        ...b,
         timing: !t
           ? "—"
           : t.verdict === "ok"
@@ -348,8 +459,15 @@ export function shippingView(s: StoreSummary): ShippingView {
             : timingReason(t),
       };
     }),
-    cities: rollup(s.rows, byCity).slice(0, 12).map((b) => ({ city: b.key, orders: b.orders, deliveryRate: b.deliveryRate })),
+    cities: folded(cities, s.rows),
+    cityCount: cities.length,
     coverage: coverage(s),
+    minDecided: MIN_DECIDED_TO_RATE,
+    compare: {
+      deliveryRate: headline(rateDelta(s.orders.deliveryRate, prev.orders.deliveryRate), weeklyRate(s.rows, s.period.from, s.period.to)),
+      returnedValue: headline(settled(moneyDelta(s.orders.returnedValue, prev.orders.returnedValue, s.store.currency), s, prev), null, "down"),
+      returned: headline(settled(countDelta(s.orders.deliveryRate.returned, prev.orders.deliveryRate.returned), s, prev), dailyCount(s.rows, s.period.from, s.period.to, (o) => o.outcome === "returned"), "down"),
+    },
   };
 }
 
@@ -359,6 +477,7 @@ export type CustomersView = {
   customers: number;
   buyersInPeriod: number;
   repeatBuyers: number;
+  compare: { buyers: Headline; repeatShare: Headline };
   top: Array<{
     customerId: string;
     name: string | null;
@@ -375,14 +494,27 @@ export type CustomersView = {
  * they spell their number. Lifetime figures (rule #20) come from every order
  * in the grain, not just the period's.
  */
-export async function customersView(storeId: string, s: StoreSummary): Promise<CustomersView> {
+export async function customersView(storeId: string, s: StoreSummary, prev: StoreSummary): Promise<CustomersView> {
   const inPeriod = new Set(s.rows.map((r) => r.customerId).filter((c): c is string => !!c));
-  const allTime = await prisma.orderGrain.findMany({
-    where: { storeId, customerId: { in: [...inPeriod] } },
-    select: { customerId: true },
+  const inPrev = new Set(prev.rows.map((r) => r.customerId).filter((c): c is string => !!c));
+  // Orders up to each period's end, so the previous period's repeat share is
+  // what it was then, not what it is now.
+  const history = await prisma.orderGrain.findMany({
+    where: { storeId, customerId: { in: [...new Set([...inPeriod, ...inPrev])] } },
+    select: { customerId: true, localDay: true },
   });
-  const lifetimeOrders = new Map<string, number>();
-  for (const r of allTime) lifetimeOrders.set(r.customerId!, (lifetimeOrders.get(r.customerId!) ?? 0) + 1);
+  const ordersBy = (to: string) => {
+    const m = new Map<string, number>();
+    for (const r of history) if (r.localDay && r.localDay <= to) m.set(r.customerId!, (m.get(r.customerId!) ?? 0) + 1);
+    return m;
+  };
+  const lifetimeOrders = ordersBy(s.period.to);
+  const prevOrders = ordersBy(prev.period.to);
+  const repeat = [...inPeriod].filter((c) => (lifetimeOrders.get(c) ?? 0) >= 2).length;
+  const prevRepeat = [...inPrev].filter((c) => (prevOrders.get(c) ?? 0) >= 2).length;
+  const share = (n: number, d: number) => (d >= MIN_DECIDED_TO_RATE ? Math.round((1000 * n) / d) / 10 : null);
+  const repeatShare = share(repeat, inPeriod.size);
+  const prevShare = share(prevRepeat, inPrev.size);
 
   const buckets = rollup(s.rows.filter((r) => r.customerId), (r) => [r.customerId!]);
   const top = buckets
@@ -398,7 +530,20 @@ export async function customersView(storeId: string, s: StoreSummary): Promise<C
   return {
     customers: await prisma.customer.count({ where: { storeId, mergedIntoId: null } }),
     buyersInPeriod: inPeriod.size,
-    repeatBuyers: [...inPeriod].filter((c) => (lifetimeOrders.get(c) ?? 0) >= 2).length,
+    repeatBuyers: repeat,
+    compare: {
+      buyers: headline(countDelta(inPeriod.size, inPrev.size), weeklyDistinct(s.rows, s.period.from, s.period.to, (o) => o.customerId)),
+      repeatShare: headline(
+        {
+          current: repeatShare,
+          previous: prevShare,
+          change: repeatShare !== null && prevShare !== null ? Math.round((repeatShare - prevShare) * 10) / 10 : null,
+          direction: repeatShare === null || prevShare === null ? null : repeatShare > prevShare ? "up" : repeatShare < prevShare ? "down" : "flat",
+          unit: "points",
+        },
+        null,
+      ),
+    },
     top: top.map((b) => ({
       customerId: b.key,
       name: names.get(b.key) ?? null,

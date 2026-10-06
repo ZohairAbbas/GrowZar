@@ -8,6 +8,8 @@ import type {
   ShippingView,
 } from "~/lib/metrics/screens.server";
 import {
+  Change,
+  Sparkline,
   DeliveryRateText,
   formatAmount,
   MoneyList,
@@ -18,6 +20,7 @@ import {
   Stat,
 } from "./Metrics";
 import { InboxCards } from "./FindingCards";
+import { scopeLabel } from "./FilterBar";
 import type { InboxView } from "~/lib/insights/inbox.server";
 
 /**
@@ -106,6 +109,7 @@ function HomeMetrics({ view, owed }: { view: HomeView; owed: { amounts: { amount
         <span className="font-display text-4xl font-bold leading-none tracking-tight">
           {money ? <BigMoney values={money.deliveredRevenue} base={view.base} /> : delivered.toLocaleString()}
         </span>
+        <Change h={view.compare.delivered} kind={money ? "money" : "count"} dark />
         <div className="mt-3 flex min-h-[3rem] flex-1 items-end gap-[3px]" aria-hidden="true">
           {view.daily.map((d, i) => (
             <span
@@ -127,8 +131,10 @@ function HomeMetrics({ view, owed }: { view: HomeView; owed: { amounts: { amount
           <span className="font-display text-3xl font-bold tabular-nums">
             {rate.rate === null ? "—" : `${(100 * rate.rate).toFixed(1)}%`}
           </span>
+          <Change h={view.compare.deliveryRate} kind="rate" />
+          <Sparkline trend={view.compare.deliveryRate.trend} />
           <span className="self-start rounded-full bg-field px-2.5 py-0.5 text-xs font-semibold text-gray-700">
-            {rate.stillOpen.toLocaleString()} still in transit
+            {rate.stillOpen.toLocaleString()} still in transit · {(rate.delivered + rate.returned).toLocaleString()} decided
           </span>
         </div>
         <div className="flex flex-1 flex-col gap-1.5 rounded-2xl bg-white p-5">
@@ -140,6 +146,7 @@ function HomeMetrics({ view, owed }: { view: HomeView; owed: { amounts: { amount
               rate.returned.toLocaleString()
             )}
           </span>
+          {view.compare.profit ? <Change h={view.compare.profit} kind="money" /> : null}
           {money?.profit ? (
             <span className="text-xs text-gray-500">Delivered revenue less product cost, courier fees and ads</span>
           ) : null}
@@ -182,13 +189,13 @@ export function FinancePanel({ view }: { view: FinanceView }) {
   return (
     <section className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
-        <Stat label="Placed revenue" note="Orders as placed (Financify)">
+        <Stat label="Placed revenue" note="Orders as placed (Financify)" change={<Change h={view.compare.placed} kind="money" />} trend={<Sparkline trend={view.compare.placed.trend} />}>
           <MoneyList values={baseFirst(view.placed, view.base)} />
         </Stat>
-        <Stat label="Delivered revenue" note="Orders the courier delivered">
+        <Stat label="Delivered revenue" note="Orders the courier delivered" change={<Change h={view.compare.deliveredRevenue} kind="money" />} trend={<Sparkline trend={view.compare.deliveredRevenue.trend} />}>
           <MoneyList values={baseFirst(view.deliveredRevenue, view.base)} />
         </Stat>
-        <Stat label="Paid by courier" note="COD in courier settlements (Courierify)">
+        <Stat label="Paid by courier" note="COD in courier settlements (Courierify)" change={<Change h={view.compare.paidByCourier} kind="money" />} trend={<Sparkline trend={view.compare.paidByCourier.trend} />}>
           <MoneyList values={baseFirst(view.paidByCourier, view.base)} />
         </Stat>
       </div>
@@ -198,12 +205,14 @@ export function FinancePanel({ view }: { view: FinanceView }) {
         <Stat
           label="Product cost, delivered orders"
           note="At the cost when each order was placed"
+          change={<Change h={view.compare.cogsDelivered} kind="money" />}
         >
           <MoneyList values={view.cogsDelivered} />
         </Stat>
         <Stat
           label="Courier fees"
           note="Charged by the courier on shipped orders (Courierify)"
+          change={<Change h={view.compare.courierFees} kind="money" />}
         >
           <MoneyList values={view.courierFees} />
         </Stat>
@@ -212,8 +221,11 @@ export function FinancePanel({ view }: { view: FinanceView }) {
           note={
             view.adSpend
               ? `Fees ${view.adSpend.fees.map((f) => formatAmount(f.amount)).join(" + ") || "0"} on top · by ad-platform day`
-              : "Needs Financify"
+              : view.scoped
+                ? "Store-wide, so not shown for one courier or city"
+                : "Needs Financify"
           }
+          change={view.adSpend ? <Change h={view.compare.adSpend} kind="money" /> : null}
         >
           {view.adSpend ? <MoneyList values={view.adSpend.spend} /> : <span className="text-gray-400">—</span>}
         </Stat>
@@ -226,6 +238,9 @@ export function FinancePanel({ view }: { view: FinanceView }) {
             <p className="mt-2 font-display text-4xl font-bold tabular-nums">
               <MoneyList values={[{ amount: p.amount, currency: p.currency }]} />
             </p>
+            <div className="mt-1">
+              <Change h={view.compare.profit} kind="money" dark />
+            </div>
             <p className="mt-2 text-sm text-navy-muted">
               Delivered revenue {formatAmount(p.parts.deliveredRevenue)} − product cost {formatAmount(p.parts.cogsDelivered)} −
               courier fees {formatAmount(p.parts.courierFees)} − ads{" "}
@@ -303,10 +318,23 @@ function ConfirmationPill({ value }: { value: string }) {
   );
 }
 
-export function OrdersPanel({ view, days }: { view: OrdersView; days: number }) {
+export function OrdersPanel({ view, days, scope = "" }: { view: OrdersView; days: number; scope?: string }) {
   const disagree = view.filter?.kind === "disagree";
   return (
     <section className="space-y-3">
+      {view.filter ? null : (
+        <div className="grid gap-3 sm:grid-cols-[1fr_2fr]">
+          <Stat label="Orders placed" change={<Change h={view.compare} />}>
+            <span className="tabular-nums">{view.allTotal.toLocaleString()}</span>
+          </Stat>
+          <div className="flex flex-col justify-end rounded-2xl bg-white p-5">
+            <p className="text-sm font-semibold text-gray-700">Orders per day</p>
+            <div className="mt-auto pt-2">
+              <Sparkline trend={view.compare.trend} />
+            </div>
+          </div>
+        </div>
+      )}
       {view.filter ? (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl bg-navy px-5 py-4 text-white">
           <p className="flex-1">
@@ -314,7 +342,7 @@ export function OrdersPanel({ view, days }: { view: OrdersView; days: number }) 
             <span className="text-navy-muted">{FILTER_LABEL(view.filter)}.</span>
           </p>
           <Link
-            to={`/orders?days=${days}`}
+            to={`/orders?days=${days}${scope ? `&${scope}` : ""}`}
             className="rounded-full bg-mint px-4 py-2 text-sm font-bold text-navy hover:bg-mint-200"
           >
             Show all orders
@@ -324,7 +352,7 @@ export function OrdersPanel({ view, days }: { view: OrdersView; days: number }) 
       <nav aria-label="Filter by outcome" className="flex flex-wrap gap-2 text-sm font-semibold">
         {[{ outcome: null, count: view.allTotal }, ...view.byOutcome].map((o) => {
           const active = o.outcome === view.outcome;
-          const query = [`days=${days}`, view.filterQuery, o.outcome ? `outcome=${o.outcome}` : ""].filter(Boolean).join("&");
+          const query = [`days=${days}`, view.filterQuery, scope, o.outcome ? `outcome=${o.outcome}` : ""].filter(Boolean).join("&");
           return (
             <Link
               key={o.outcome ?? "all"}
@@ -397,67 +425,128 @@ export function OrdersPanel({ view, days }: { view: OrdersView; days: number }) 
 
 // ── Shipping ────────────────────────────────────────────────────────────────
 
-export function ShippingPanel({ view }: { view: ShippingView }) {
+export function ShippingPanel({
+  view,
+  days,
+  scope,
+}: {
+  view: ShippingView;
+  days: number;
+  scope: { courier: string | null; city: string | null };
+}) {
+  // Every link keeps the period and whichever filter is already set (D2):
+  // city → its couriers → the orders behind them.
+  const link = (path: string, set: { courier?: string; city?: string }) => {
+    const q = new URLSearchParams({ days: String(days) });
+    const courier = set.courier ?? scope.courier;
+    const city = set.city ?? scope.city;
+    if (courier) q.set("courier", courier);
+    if (city) q.set("city", city);
+    return `${path}?${q.toString()}`;
+  };
+  const decided = (r: { deliveryRate: { delivered: number; returned: number } }) => r.deliveryRate.delivered + r.deliveryRate.returned;
+  const rows = (list: ShippingView["cities"], kind: "courier" | "city") =>
+    list.map((r) => {
+      const other = r.key === "other";
+      const name = other
+        ? `${r.folded} more ${kind === "city" ? "cities" : "couriers"}, under ${view.minDecided} decided orders each`
+        : scopeLabel(r.key);
+      return { ...r, other, name };
+    });
+  const couriers = rows(view.couriers, "courier");
+  const timing = new Map(view.couriers.map((c) => [c.key, c.timing]));
+  const picked = (kind: "courier" | "city", key: string) => (kind === "courier" ? scope.courier === key : scope.city === key);
+
+  const table = (kind: "courier" | "city", list: ReturnType<typeof rows>) => (
+    <div className="overflow-x-auto rounded-2xl bg-white">
+      <table className="min-w-full text-sm">
+        <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
+          <tr>
+            <th className="px-5 py-3">
+              {kind === "courier" ? "Courier" : "City"}
+              {kind === "courier" && scope.city ? ` in ${scopeLabel(scope.city)}` : ""}
+              {kind === "city" && scope.courier ? ` for ${scopeLabel(scope.courier)}` : ""}
+            </th>
+            <th className="px-5 py-3 text-right">Orders</th>
+            <th className="px-5 py-3 text-right">Decided</th>
+            <th className="px-5 py-3">Delivery</th>
+            {kind === "courier" ? <th className="px-5 py-3">Time to deliver</th> : null}
+            <th className="px-5 py-3"><span className="sr-only">Orders</span></th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {list.map((r) => (
+            <tr key={r.key} className={picked(kind, r.key) ? "bg-mint-50" : undefined}>
+              <td className="px-5 py-3 font-medium text-gray-900">
+                {r.other || picked(kind, r.key) ? (
+                  <span className={r.other ? "font-normal text-gray-500" : undefined}>{r.name}</span>
+                ) : (
+                  <Link to={link("/shipping", kind === "courier" ? { courier: r.key } : { city: r.key })} preventScrollReset className="hover:underline">
+                    {r.name}
+                  </Link>
+                )}
+                {r.key.startsWith("financify:") ? <span className="ml-1 text-xs text-gray-400">(Financify)</span> : null}
+              </td>
+              <td className="px-5 py-3 text-right tabular-nums">{r.orders.toLocaleString()}</td>
+              <td className="px-5 py-3 text-right tabular-nums text-gray-500">{decided(r).toLocaleString()}</td>
+              <td className="px-5 py-3">
+                {decided(r) >= view.minDecided ? (
+                  <DeliveryRateText rate={r.deliveryRate} />
+                ) : (
+                  <span className="text-gray-500">{r.deliveryRate.stillOpen.toLocaleString()} still in transit</span>
+                )}
+              </td>
+              {kind === "courier" ? <td className="px-5 py-3 text-gray-600">{r.other ? "" : timing.get(r.key)}</td> : null}
+              <td className="px-5 py-3 text-right">
+                {r.other ? null : (
+                  <Link
+                    to={link("/orders", kind === "courier" ? { courier: r.key } : { city: r.key })}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-accent-600 hover:underline"
+                  >
+                    Orders <ArrowRight className="h-3 w-3" />
+                  </Link>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {kind === "city" ? (
+        <p className="border-t border-gray-100 px-5 py-3 text-xs text-gray-500">
+          {view.cityCount.toLocaleString()} {view.cityCount === 1 ? "city" : "cities"}. Pick one to see its couriers. Rates need {view.minDecided} decided orders;
+          smaller cities are added up in one row. Cities use Courierify&apos;s mapping.
+        </p>
+      ) : (
+        <p className="border-t border-gray-100 px-5 py-3 text-xs text-gray-500">Pick a courier to see its cities.</p>
+      )}
+    </div>
+  );
+
   return (
     <section className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Stat label="Delivery rate" note="By order, grouped by the day the order was placed">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Stat
+          label="Delivery rate"
+          note="By order, grouped by the day the order was placed"
+          change={<Change h={view.compare.deliveryRate} kind="rate" />}
+          trend={<Sparkline trend={view.compare.deliveryRate.trend} />}
+        >
           <DeliveryRateText rate={view.deliveryRate} />
         </Stat>
-        <Stat label="Value of returned orders" note="Returned to origin, confirmed by the courier — not cancellations">
+        <Stat
+          label="Returned orders"
+          note="Returned to origin, confirmed by the courier — not cancellations"
+          change={<Change h={view.compare.returned} />}
+          trend={<Sparkline trend={view.compare.returned.trend} className="text-coral-600" />}
+        >
+          <span className="tabular-nums">{view.deliveryRate.returned.toLocaleString()}</span>
+        </Stat>
+        <Stat label="Value of returned orders" change={<Change h={view.compare.returnedValue} kind="money" />}>
           <MoneyList values={view.returnedValue} />
         </Stat>
       </div>
-
-      <div className="overflow-x-auto rounded-2xl bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
-            <tr>
-              <th className="px-5 py-3">Courier</th>
-              <th className="px-5 py-3 text-right">Orders</th>
-              <th className="px-5 py-3">Delivery</th>
-              <th className="px-5 py-3">Time to deliver</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {view.couriers.map((c) => (
-              <tr key={c.courier}>
-                <td className="px-5 py-3 font-medium text-gray-900">
-                  {c.courier.replace(/^financify:/, "")}
-                  {c.courier.startsWith("financify:") ? <span className="ml-1 text-xs text-gray-400">(Financify)</span> : null}
-                </td>
-                <td className="px-5 py-3 text-right tabular-nums">{c.orders.toLocaleString()}</td>
-                <td className="px-5 py-3"><DeliveryRateText rate={c.deliveryRate} /></td>
-                <td className="px-5 py-3 text-gray-600">{c.timing}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="overflow-x-auto rounded-2xl bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
-            <tr>
-              <th className="px-5 py-3">City</th>
-              <th className="px-5 py-3 text-right">Orders</th>
-              <th className="px-5 py-3">Delivery</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {view.cities.map((c) => (
-              <tr key={c.city}>
-                <td className="px-5 py-3 font-medium text-gray-900">{c.city}</td>
-                <td className="px-5 py-3 text-right tabular-nums">{c.orders.toLocaleString()}</td>
-                <td className="px-5 py-3"><DeliveryRateText rate={c.deliveryRate} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className="border-t border-gray-100 px-5 py-3 text-xs text-gray-500">
-          Cities use Courierify's mapping; spellings it cannot place are grouped as “unmapped”, not listed as cities.
-        </p>
-      </div>
+      {table("courier", couriers)}
+      {table("city", rows(view.cities, "city"))}
     </section>
   );
 }
@@ -471,10 +560,10 @@ export function CustomersPanel({ view }: { view: CustomersView }) {
         <Stat label="Buyers, all time" note="Counted once each, however they write their number">
           <span className="font-semibold tabular-nums">{view.customers.toLocaleString()}</span>
         </Stat>
-        <Stat label="Buyers this period">
+        <Stat label="Buyers this period" change={<Change h={view.compare.buyers} />} trend={<Sparkline trend={view.compare.buyers.trend} />}>
           <span className="font-semibold tabular-nums">{view.buyersInPeriod.toLocaleString()}</span>
         </Stat>
-        <Stat label="Repeat buyers" note="Of this period's buyers, those with two or more orders ever">
+        <Stat label="Repeat buyers" note="Of this period's buyers, those with two or more orders ever" change={<Change h={view.compare.repeatShare} kind="rate" />}>
           <span className="font-semibold tabular-nums">
             {view.repeatBuyers.toLocaleString()}
             {view.buyersInPeriod ? (
@@ -500,7 +589,11 @@ export function CustomersPanel({ view }: { view: CustomersView }) {
               <tr key={c.customerId}>
                 <td className="px-5 py-3 font-medium text-gray-900">{c.name ?? (c.phoneTail ? `Buyer ···${c.phoneTail}` : "Buyer")}</td>
                 <td className="px-5 py-3 text-right tabular-nums">{c.orders}</td>
-                <td className="px-5 py-3"><DeliveryRateText rate={c.deliveryRate} /></td>
+                <td className="px-5 py-3 text-gray-700">
+                  {/* Counts, not a rate: two orders make a noisy percentage. */}
+                  {c.deliveryRate.delivered} delivered · {c.deliveryRate.returned} returned
+                  {c.deliveryRate.stillOpen ? ` · ${c.deliveryRate.stillOpen} in transit` : ""}
+                </td>
                 <td className="px-5 py-3 text-right"><MoneyList values={c.deliveredRevenue} /></td>
               </tr>
             ))}
