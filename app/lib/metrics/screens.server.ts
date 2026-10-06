@@ -41,6 +41,19 @@ import { toRollupOrder } from "./rollups.server";
 import { loadPayerHistories } from "./settlements.server";
 import { MIN_TIMED_PARCELS_PER_COURIER } from "../shipments/events";
 import { trackedPayers } from "./outcome-sources";
+import {
+  cashTimeline,
+  courierDeductions,
+  deliveryOdds,
+  expectedProfit,
+  moneyBreakdown,
+  type BreakdownLine,
+  type CashTimeline,
+  type DeductionRow,
+  type ExpectedProfit,
+} from "./cash";
+import { readStatement, type Statement } from "./settlements";
+import { loadSettledHistory } from "./summaries.server";
 
 /**
  * View models for the read-only screens (G-GZR2-5).
@@ -778,4 +791,45 @@ export async function storeComparison(
     );
   }
   return { base, days, columns };
+}
+
+// ── Finance depth (Phase 4c, A1–A4) ────────────────────────────────────────
+
+export type FinanceDepth = {
+  breakdown: BreakdownLine[];
+  expected: ExpectedProfit | null;
+  cash: CashTimeline;
+  deductions: DeductionRow[];
+  /** Statements the period's deductions are drawn from, counted by source. */
+  statementSources: Record<string, number>;
+};
+
+/**
+ * The breakdown, expected profit, cash timeline and courier deductions for a
+ * Finance view, from the same summary its headline figures come from.
+ */
+export async function financeDepth(storeId: string, s: StoreSummary): Promise<FinanceDepth | null> {
+  const cur = s.store.currency;
+  if (!cur) return null;
+  const [history, settlementRows] = await Promise.all([
+    loadSettledHistory(storeId, s.period.to),
+    prisma.rawRecord.findMany({
+      where: { storeId, app: "COURIERIFY", entity: "SETTLEMENT", deletedAt: null },
+      select: { payload: true },
+    }),
+  ]);
+  const statements = settlementRows
+    .map((r) => readStatement((r.payload ?? {}) as Record<string, unknown>))
+    .filter((x): x is Statement => x !== null);
+  // Ads count in the breakdown only when profit subtracts them (every day fetched).
+  const ads = s.adSpend && s.adSpend.daysFetched === s.adSpend.daysInPeriod ? { spend: s.adSpend.spend, fees: s.adSpend.fees } : null;
+  const mine = s.scope.courier ? statements.filter((x) => x.payer === s.scope.courier) : statements;
+  const inPeriod = mine.filter((x) => x.day >= s.period.from && x.day <= s.period.to);
+  return {
+    breakdown: moneyBreakdown(s.rows, cur, s.profit, ads),
+    expected: s.profit ? expectedProfit(s.rows, s.profit, deliveryOdds(history)) : null,
+    cash: cashTimeline(s.rows, cur, trackedPayers(statements.map((x) => x.payer)), new Date()),
+    deductions: courierDeductions(mine, s.period.from, s.period.to, cur),
+    statementSources: inPeriod.reduce<Record<string, number>>((m, x) => ({ ...m, [x.source]: (m[x.source] ?? 0) + 1 }), {}),
+  };
 }

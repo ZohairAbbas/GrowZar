@@ -205,7 +205,14 @@ export const ageOf = (deliveredAt: Date | null, asOf: Date): AgeBucket => {
 export type PayoutAgeing = {
   currency: string;
   buckets: Array<{ key: AgeBucket; label: string }>;
-  couriers: Array<{ courier: string; total: Money; orders: number; cells: Record<string, { amount: Money; orders: number }> }>;
+  couriers: Array<{
+    courier: string;
+    /** Who pays this courier's COD when it is not the courier itself (a 3PL such as Orio). */
+    paidBy: string | null;
+    total: Money;
+    orders: number;
+    cells: Record<string, { amount: Money; orders: number }>;
+  }>;
   /** Tracked couriers only: their payouts are visible, so unpaid means owed. */
   total: Money;
   orders: number;
@@ -253,6 +260,11 @@ export function payoutAgeing(
     couriers: [...byCourier.entries()]
       .map(([courier, list]) => ({
         courier,
+        paidBy: (() => {
+          const payers = new Set(list.map(payerKey));
+          const only = [...payers][0];
+          return payers.size === 1 && only && only !== courier.toLowerCase() ? only : null;
+        })(),
         total: money(sum(list), currency),
         orders: list.length,
         cells: Object.fromEntries(

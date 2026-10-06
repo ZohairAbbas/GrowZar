@@ -19,6 +19,7 @@ export function convertOrder(o: RollupOrder, base: string, source: FxSource): Ro
     placed: one(o.placed),
     delivered: one(o.delivered),
     refunded: one(o.refunded),
+    discounts: one(o.discounts ?? null),
     collected: one(o.collected),
     uncollected: one(o.uncollected),
     cogs: one(o.cogs),

@@ -37,7 +37,10 @@ export type RollupOrder = Pick<
   | "lines"
   | "confirmation"
   | "customerId"
->;
+> & {
+  /** Discounts on the order (Financify), in the order's currency; for the money breakdown. */
+  discounts?: Money | null;
+};
 
 const OPEN: Outcome[] = ["in_transit", "booked", "not_shipped"];
 const CANCELLED: Outcome[] = ["order_cancelled", "shipment_cancelled"];

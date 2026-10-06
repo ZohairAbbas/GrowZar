@@ -15,6 +15,7 @@
  *    detector's backtest passes (PLAN.md §3, the money rule).
  */
 import { AGE_BUCKETS, ageOf, type AgeFilter } from "./matrices";
+import { isStuck } from "./cash";
 import { formatAmount, isPositive, parseAmount, sumByCurrency, type Money } from "./money";
 import type { Outcome } from "./order-grain";
 import { productLines, type Bucket, type Profit, type RollupOrder } from "./rollups";
@@ -88,7 +89,9 @@ export type OrderFilter =
   | { kind: "city_route"; city: string; courier: string; via: string }
   | { kind: "city"; city: string }
   /** D4's payout ageing cell: unpaid delivered COD of one courier, of one age. */
-  | { kind: "unpaid"; courier: string; age: AgeFilter };
+  | { kind: "unpaid"; courier: string; age: AgeFilter }
+  /** Courierify parcels with no status change for STUCK_DAYS (Phase 4c, A3). */
+  | { kind: "stuck" };
 
 export type MarginFinding = {
   kind: "margin";
@@ -934,6 +937,7 @@ export function parseOrderFilter(params: URLSearchParams): OrderFilter | null {
   if (variant && /^\d+$/.test(variant)) return { kind: "variant", variantId: variant };
   if (params.get("disagree") === "1") return { kind: "disagree" };
   if (params.get("feeMissing") === "1") return { kind: "fee_missing" };
+  if (params.get("stuck") === "1") return { kind: "stuck" };
   const unpaid = params.get("unpaid");
   const age = params.get("age");
   if (unpaid && /^[a-z0-9_-]{1,40}$/.test(unpaid)) {
@@ -974,6 +978,8 @@ export function orderFilterQuery(filter: OrderFilter): string {
       return `city=${encodeURIComponent(filter.city)}&courier=${filter.courier}&via=${filter.via}`;
     case "city":
       return `city=${encodeURIComponent(filter.city)}`;
+    case "stuck":
+      return "stuck=1";
     case "unpaid":
       return filter.age === "any" ? `unpaid=${filter.courier}` : `unpaid=${filter.courier}&age=${filter.age}`;
   }
@@ -1004,6 +1010,8 @@ export function matchesFilter(
       return o.currency === currency && inCityRoute(o, filter.city, filter);
     case "city":
       return o.currency === currency && o.city === filter.city;
+    case "stuck":
+      return isStuck(o, ctx?.asOf ?? new Date());
     case "unpaid":
       return (
         o.outcome === "delivered" &&

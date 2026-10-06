@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import type {
   CustomersView,
   FinanceView,
+  FinanceDepth,
   HomeView,
   MarketingView,
   Owed,
@@ -24,6 +25,7 @@ import {
 import { InboxCards } from "./FindingCards";
 import { scopeLabel } from "./FilterBar";
 import { CohortGrid, RepeatCurve } from "./Retention";
+import { CashTimelineCard, CourierDeductions, MoneyBreakdown } from "./FinanceDepth";
 import { CampaignTable, CityCourierTable, ConfirmationFunnelView, PayoutAgeingTable, ProductMatrix } from "./Matrices";
 import type { ConfirmationFunnel, PayoutAgeing } from "~/lib/metrics/matrices";
 import { MIN_DECIDED_TO_RATE } from "~/lib/metrics/compare";
@@ -202,7 +204,19 @@ function HomeMetrics({ view, owed }: { view: HomeView; owed: Owed | null }) {
 
 // ── Finance ─────────────────────────────────────────────────────────────────
 
-export function FinancePanel({ view, ageing }: { view: FinanceView; ageing: PayoutAgeing | null; days: number }) {
+export function FinancePanel({
+  view,
+  ageing,
+  depth,
+  days,
+  scope,
+}: {
+  view: FinanceView;
+  ageing: PayoutAgeing | null;
+  depth: FinanceDepth | null;
+  days: number;
+  scope: string;
+}) {
   const p = view.profit;
   return (
     <section className="space-y-4">
@@ -265,7 +279,24 @@ export function FinancePanel({ view, ageing }: { view: FinanceView; ageing: Payo
               {p.parts.adSpend !== null ? formatAmount(p.parts.adSpend) : "not subtracted"}
               {view.roas !== null ? ` · ROAS ${view.roas.toFixed(2)} (delivered revenue ÷ ad spend)` : ""}
             </p>
-            {view.stillOpen ? (
+            {depth?.expected && depth.expected.withCourier.orders ? (
+              <div className="mt-4 rounded-xl bg-navy-surface p-4">
+                <p className="text-sm font-semibold text-navy-muted">Expected once parcels with couriers settle</p>
+                <p className="mt-1 font-display text-2xl font-bold tabular-nums">
+                  <MoneyList values={[depth.expected.amount]} />
+                </p>
+                <p className="mt-1 text-sm text-navy-muted">
+                  {depth.expected.withCourier.orders.toLocaleString()} parcels with couriers (
+                  {formatAmount(depth.expected.withCourier.placed.amount).replace(/\.\d+$/, "")} {depth.expected.withCourier.placed.currency}),
+                  each counted at its own route&apos;s delivery rate over the last 90 days
+                  {depth.expected.levels.courier || depth.expected.levels.store
+                    ? ` (${depth.expected.levels.route} by city and courier, ${depth.expected.levels.courier} by courier, ${depth.expected.levels.store} by the store's rate where a route had too few)`
+                    : ""}
+                  {depth.expected.unpriced ? `; ${depth.expected.unpriced} with no settled history are left out` : ""}.
+                  {depth.expected.notDispatched ? ` ${depth.expected.notDispatched.toLocaleString()} orders not dispatched yet are not counted.` : ""}
+                </p>
+              </div>
+            ) : view.stillOpen ? (
               <p className="mt-1 text-sm text-navy-muted">
                 {view.stillOpen.toLocaleString()} orders from this period are still with the courier; their revenue counts
                 when they deliver.
@@ -280,6 +311,13 @@ export function FinancePanel({ view, ageing }: { view: FinanceView; ageing: Payo
           <p className="mt-2 text-sm text-navy-muted">This store has not reported its currency yet.</p>
         )}
       </div>
+      {depth ? (
+        <div className="grid gap-4 xl:grid-cols-2">
+          <MoneyBreakdown lines={depth.breakdown} days={days} scope={scope} />
+          <CashTimelineCard cash={depth.cash} days={days} scope={scope} />
+        </div>
+      ) : null}
+      {depth ? <CourierDeductions rows={depth.deductions} sources={depth.statementSources} /> : null}
       {ageing ? <PayoutAgeingTable ageing={ageing} /> : null}
     </section>
   );
@@ -300,6 +338,8 @@ const FILTER_LABEL = (f: NonNullable<OrdersView["filter"]>) =>
           ? `orders shipped to ${f.city} with ${f.courier}${f.via === "direct" ? ", booked directly" : ` through ${f.via}`}`
           : f.kind === "unanswered_waiting"
           ? "orders the buyer never answered on WhatsApp, not yet with the courier"
+          : f.kind === "stuck"
+          ? "parcels with no courier status change for days: booked and not picked up, or in transit with no update"
           : f.kind === "unpaid"
           ? f.age === "any"
             ? `delivered ${f.courier} orders with no payout recorded in Courierify (any order date, as of today)`

@@ -25,6 +25,7 @@ import {
   shippingView,
   marketingView,
   storePayoutAgeing,
+  financeDepth,
 } from "~/lib/metrics/screens.server";
 import { confirmationFunnel, isConfirmationGroup } from "~/lib/metrics/matrices";
 import {
@@ -226,6 +227,7 @@ async function buildMetrics(
         kind: "finance" as const,
         view: compared(financeView(summary, prev!)),
         ageing: await storePayoutAgeing(storeId, summary.store.currency, scope),
+        depth: await financeDepth(storeId, summary),
       };
     case "orders":
       return {
@@ -278,7 +280,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           />
           <CoverageLine gaps={metrics.coverage.gaps} days={metrics.period.days} />
           {metrics.kind === "home" ? <HomePanel view={metrics.view} owed={metrics.owed} inbox={metrics.inbox} period={metrics.period} /> : null}
-          {metrics.kind === "finance" ? <FinancePanel view={metrics.view} ageing={metrics.ageing} days={metrics.period.days} /> : null}
+          {metrics.kind === "finance" ? <FinancePanel view={metrics.view} ageing={metrics.ageing} depth={metrics.depth} days={metrics.period.days} scope={scopeQuery(metrics.scope)} /> : null}
           {metrics.kind === "marketing" ? <MarketingPanel view={metrics.view} days={metrics.period.days} scope={scopeQuery(metrics.scope)} /> : null}
           {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} days={metrics.period.days} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} days={metrics.period.days} scope={metrics.scope} /> : null}
