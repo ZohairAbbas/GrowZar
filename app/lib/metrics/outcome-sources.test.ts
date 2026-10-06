@@ -110,6 +110,7 @@ describe("payer, as I4 has it", () => {
     );
     expect(a.total).toEqual(pkr("100.00"));
     expect(a.untracked).toEqual([{ courier: "trax", total: pkr("40.00"), orders: 1 }]);
+    expect(a.couriers).toMatchObject([{ courier: "trax", paidBy: "orio" }]);
   });
 });
 

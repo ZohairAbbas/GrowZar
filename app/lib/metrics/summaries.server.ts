@@ -129,6 +129,17 @@ async function financifyOnlyHistory(storeId: string, to: string) {
   return [...by.values()];
 }
 
+/**
+ * Every order of the store's last ONE_SIDED_HISTORY_DAYS days to `to`, with
+ * one-sided outcomes withheld exactly as `storeSummary` withholds them: the
+ * settled history delivery odds are read from (Phase 4c, A2).
+ */
+export async function loadSettledHistory(storeId: string, to: string): Promise<RollupOrder[]> {
+  const from = new Date(Date.parse(`${to}T00:00:00Z`) - (ONE_SIDED_HISTORY_DAYS - 1) * 86_400_000).toISOString().slice(0, 10);
+  const slices = oneSidedSlices(await financifyOnlyHistory(storeId, to));
+  return withholdOneSided(await loadOrders(storeId, from, to), slices).rows;
+}
+
 export async function storeSummary(storeId: string, from: string, to: string, scope: Scope = NO_SCOPE): Promise<StoreSummary> {
   const store = await prisma.store.findUniqueOrThrow({
     where: { id: storeId },

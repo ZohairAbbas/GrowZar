@@ -278,7 +278,10 @@ export function PayoutAgeingTable({ ageing }: { ageing: PayoutAgeing }) {
           <tbody className="divide-y divide-gray-100">
             {ageing.couriers.map((c) => (
               <tr key={c.courier}>
-                <td className="py-2 pr-4 font-medium text-gray-900">{scopeLabel(c.courier)}</td>
+                <td className="py-2 pr-4 font-medium text-gray-900">
+                  {scopeLabel(c.courier)}
+                  {c.paidBy ? <span className="block text-xs font-normal text-gray-500">paid by {c.paidBy === "orio" ? "Orio" : c.paidBy}</span> : null}
+                </td>
                 {ageing.buckets.map((b) => {
                   const cell = c.cells[b.key]!;
                   const old = b.key === "31-60" || b.key === "61+";

@@ -9,6 +9,8 @@
  * summing their net amounts as "owed" would invent 1.63M PKR.
  */
 
+import type { Money } from "./money";
+
 export type Payout = { payer: string; day: string; status: string };
 
 export type PayerHistory = {
@@ -56,4 +58,53 @@ export function payerHistories(payouts: readonly Payout[]): PayerHistory[] {
       };
     })
     .sort((a, b) => a.payer.localeCompare(b.payer));
+}
+
+// ── Statements: what a courier deducted (Phase 4c, A4) ─────────────────────
+
+/** One courier settlement with its deductions, as Courierify sends it. */
+export type Statement = {
+  payer: string;
+  day: string;
+  status: string;
+  /** courier_api | csv_import | manual */
+  source: string;
+  shipments: number;
+  returned: number;
+  totalCod: Money | null;
+  codFees: Money | null;
+  deliveryFees: Money | null;
+  /** Null where the courier bills returns inside delivery fees. */
+  reversalFees: Money | null;
+  withholdingTax: Money | null;
+  miscDeduction: Money | null;
+  carryForward: Money | null;
+  netPaid: Money | null;
+};
+
+const asMoney = (v: unknown): Money | null => {
+  if (!v || typeof v !== "object") return null;
+  const m = v as Record<string, unknown>;
+  return typeof m.amount === "string" && typeof m.currency === "string" ? { amount: m.amount, currency: m.currency } : null;
+};
+
+/** A settlement row with its money, or null if it is not a payout we can date. */
+export function readStatement(payload: Record<string, unknown>): Statement | null {
+  const p = readPayout(payload);
+  if (!p) return null;
+  const count = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  return {
+    ...p,
+    source: text(payload.source) ?? "unknown",
+    shipments: count(payload.shipmentsCount),
+    returned: count(payload.returnedCount),
+    totalCod: asMoney(payload.totalCod),
+    codFees: asMoney(payload.codFees),
+    deliveryFees: asMoney(payload.deliveryFees),
+    reversalFees: asMoney(payload.reversalFees),
+    withholdingTax: asMoney(payload.withholdingTax),
+    miscDeduction: asMoney(payload.miscDeduction),
+    carryForward: asMoney(payload.carryForward),
+    netPaid: asMoney(payload.netPaid),
+  };
 }

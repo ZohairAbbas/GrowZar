@@ -26,6 +26,7 @@ export function toRollupOrder(row: OrderGrainRow): RollupOrder {
     placed: money(row.placedAmount, row.currency),
     delivered: money(row.deliveredAmount, row.currency),
     refunded: money(row.refundedAmount, row.currency),
+    discounts: money(row.discountsAmount, row.currency),
     collected: money(row.collectedAmount, row.collectedCurrency),
     uncollected: money(row.uncollectedAmount, row.uncollectedCurrency),
     cogs: money(row.cogsAmount, row.cogsCurrency),
