@@ -136,7 +136,7 @@ describe("card (b): variants that return far more than the store", () => {
     const f = found(variantReturnsFinding(input(rows)));
     expect(f.store).toEqual({ returned: 38, decided: 100, returnRate: 38 });
     expect(f.flagged).toEqual([
-      { variantId: "2", title: "Desk lamp", returned: 18, decided: 30, stillOpen: 0, returnRate: 60 },
+      { variantId: "2", title: "Desk lamp", returned: 18, decided: 30, stillOpen: 0, returnRate: 60, excessReturns: 7, cost: null },
     ]);
     expect(f.bestSellers.map((v) => v.variantId)).toEqual(["1"]);
   });
@@ -483,6 +483,45 @@ describe("I12: a city whose orders come back far more often than the rest", () =
   it("lists exactly the city's orders when its link is followed", () => {
     const rs = [...city("Quetta", 50, 50), ...city("Lahore", 160, 40)];
     expect(rs.filter((o) => matchesFilter(o, { kind: "city", city: "Quetta" }, "PKR"))).toHaveLength(100);
+  });
+});
+
+describe("money on returns cards (approved 2026-10-06)", () => {
+  const rc = { perReturn: pkr("200.00"), priced: 196, returns: 1080 };
+  const c = (confirmation: string, outcome: "delivered" | "returned") =>
+    outcome === "returned" ? returned({ confirmation }) : order({ confirmation });
+  const rows = [
+    ...times(75, () => c("confirmed", "delivered")), ...times(25, () => c("confirmed", "returned")),
+    ...times(60, () => c("timed_out", "delivered")), ...times(40, () => c("timed_out", "returned")),
+  ];
+
+  it("prices I8's extra returns at the store's measured cost of a return", () => {
+    const f = found(unconfirmedFinding(input(rows, { returnCost: rc })));
+    expect(f.excessReturns).toBe(15);
+    expect(f.cost).toEqual({ total: pkr("3000.00"), perReturn: pkr("200.00"), returns: 15, pricedReturns: 196 });
+  });
+
+  it("shows no money when the cost of a return is not known", () => {
+    expect(found(unconfirmedFinding(input(rows))).cost).toBeNull();
+    expect(found(unconfirmedFinding(input(rows, { returnCost: null }))).cost).toBeNull();
+  });
+
+  it("prices a flagged product's returns beyond the store's rate", () => {
+    const line = (v: string) => [{ variantId: v, productId: `p${v}`, title: "Lamp", quantity: 1, value: pkr("1000.00"), cost: pkr("300.00") }];
+    const prod = [
+      ...times(80, () => order({ lines: line("1") })), ...times(20, () => returned({ lines: line("1") })),
+      ...times(12, () => order({ lines: line("2") })), ...times(18, () => returned({ lines: line("2") })),
+    ];
+    const f = found(variantReturnsFinding(input(prod, { returnCost: rc })));
+    // Store: 38 of 130 = 29.2%, so 30 decided "should" bring 9: 9 extra.
+    expect(f.flagged[0]).toMatchObject({ variantId: "2", excessReturns: 9, cost: { total: pkr("1800.00") } });
+  });
+
+  it("estimates I13 at the median known fee, only with 30 priced orders", () => {
+    const via = (fee: string | null) => order({ parcelCount: 1, courier: "trax", courierFee: fee ? pkr(fee) : null });
+    const priced = [...times(15, () => via("200.00")), ...times(15, () => via("250.00")), ...times(30, () => via(null))];
+    expect(found(missingFeesFinding(input(priced))).estimate).toEqual({ total: pkr("6750.00"), medianFee: pkr("225.00"), pricedOrders: 30 });
+    expect(found(missingFeesFinding(input(priced.slice(1)))).estimate).toBeNull();
   });
 });
 

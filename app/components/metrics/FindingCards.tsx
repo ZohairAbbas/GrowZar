@@ -4,6 +4,7 @@ import { ArrowRight, ChevronLeft, ChevronRight, Database, Lightbulb, Target, Tru
 
 import type {
   CashHeldFinding,
+  CostEstimate,
   CityReturnsFinding,
   ProductLossFinding,
   CourierCityFinding,
@@ -220,7 +221,8 @@ function VariantCard({ f, days, id, canManage }: { f: VariantReturnsFinding } & 
       <ul className="space-y-1.5">
         {f.flagged.map((v) => (
           <li key={v.variantId}>
-            <span className="font-medium">{v.title ?? `Variant ${v.variantId}`}</span>: {rateLine(v)}{" "}
+            <span className="font-medium">{v.title ?? `Variant ${v.variantId}`}</span>: {rateLine(v)}
+            {v.cost ? `, ${n(v.excessReturns ?? 0)} more than the store's rate would give, about ${money(v.cost.total)} in courier charges` : ""}{" "}
             <Link to={via(id, `/orders?days=${days}&variant=${v.variantId}`)} className="whitespace-nowrap text-primary-600 hover:underline">
               see orders
             </Link>
@@ -245,6 +247,7 @@ function VariantCard({ f, days, id, canManage }: { f: VariantReturnsFinding } & 
       <Leaves
         items={[
           "Counted by order: no app records which item of a returned order came back, so a returned order counts against every product in it.",
+          ...(f.flagged.some((v) => v.cost) ? [costBasis(f.flagged.find((v) => v.cost)!.cost!)] : []),
           `Only products with at least 30 decided orders are compared.${f.internationalExcluded ? ` ${n(f.internationalExcluded)} international order(s) are left out: they never get a delivery outcome.` : ""}`,
         ]}
       />
@@ -257,7 +260,7 @@ function MarginCard({ f, days, id, canManage }: { f: MarginFinding } & CardProps
   const negative = f.ceiling.amount.startsWith("-");
   const leaves: ReactNode[] = [
     `Courier fees on ${n(f.feesUnknown.orders)} of ${n(f.feesUnknown.shipped)} shipped orders: not recorded.`,
-    "What a return costs (the return fee, goods that cannot be sold again): no app records it.",
+    "Goods that cannot be sold again after a return: no app records them. Courier charges on returns are subtracted where recorded.",
   ];
   if (f.cogsIncompleteOrders) leaves.push(`COGS is incomplete on ${n(f.cogsIncompleteOrders)} delivered order(s).`);
   if (f.excludedCurrencies.length) leaves.push(`Orders in ${f.excludedCurrencies.join(", ")} are left out, not converted.`);
@@ -320,7 +323,8 @@ function MissingFeesCard({ f, days, id, canManage }: { f: MissingFeesFinding } &
     >
       <p>
         Courierify holds no courier cost for these parcels, so neither Financify nor Growzar can subtract it, and every
-        profit figure that includes them reads higher than it is.
+        profit figure that includes them reads higher than it is
+        {f.estimate ? <>, by about <strong>{money(f.estimate.total)}</strong></> : null}.
       </p>
       <ul className="space-y-0.5 text-xs text-gray-600">
         {top.map((c) => (
@@ -334,7 +338,9 @@ function MissingFeesCard({ f, days, id, canManage }: { f: MissingFeesFinding } &
         items={[
           ...(f.via3pl ? [`${n(f.via3pl)} of them went through a 3PL, whose charges may sit with the 3PL rather than in Courierify.`] : []),
           ...(f.outsideCourierify ? [`${n(f.outsideCourierify)} more shipped order(s) did not go through Courierify at all, so no app records their fee.`] : []),
-          "How much this understates costs is not estimated yet: that waits until the estimate has been checked against past data.",
+          f.estimate
+            ? `An estimate: ${n(f.missing)} × ${money(f.estimate.medianFee)}, the median fee on ${n(f.estimate.pricedOrders)} orders in this period that have one. Orio-booked parcels may be charged by Orio rather than Courierify.`
+            : "How much this understates costs is not estimated: fewer than 30 orders in this period have a fee to go on.",
         ]}
       />
     </Card>
@@ -392,6 +398,22 @@ function CashHeldCard({ f, days, id, canManage }: { f: CashHeldFinding } & CardP
   );
 }
 
+/** Courier charges on returns: how the figure was reached. */
+function costBasis(c: CostEstimate): string {
+  return `Courier charges at ${money(c.perReturn)} per return, the median charge on ${n(c.pricedReturns)} returned parcels whose charge Courierify records. Goods that cannot be sold again are not included: no app records them.`;
+}
+
+function ReturnsCostLine({ cost }: { cost: CostEstimate }) {
+  return (
+    <>
+      <p>
+        Those {n(cost.returns)} extra returns cost about <strong>{money(cost.total)}</strong> in courier charges.
+      </p>
+      <p className="text-xs text-gray-500">{costBasis(cost)}</p>
+    </>
+  );
+}
+
 function UnconfirmedCard({ f, days, id, canManage }: { f: UnconfirmedFinding } & CardProps) {
   const ratio = f.confirmed.returnRate ? f.unanswered.returnRate / f.confirmed.returnRate : null;
   return (
@@ -407,6 +429,7 @@ function UnconfirmedCard({ f, days, id, canManage }: { f: UnconfirmedFinding } &
         {n(f.confirmed.returned)} of {n(f.confirmed.decided)}). That is {n(f.excessReturns)} more returns than the confirmed
         rate would give.
       </p>
+      {f.cost ? <ReturnsCostLine cost={f.cost} /> : null}
       {f.waiting ? (
         <p>
           {n(f.waiting)} unanswered order{f.waiting === 1 ? "" : "s"} from the last 7 days {f.waiting === 1 ? "has" : "have"} not gone
@@ -624,8 +647,8 @@ function FullCard({ item, days, canManage }: { item: InboxItem; days: number; ca
  * The face of a compact card. Every figure and sentence comes from the
  * finding or from its full card's own text: "next" only where that text
  * already says what to do, otherwise "why" quotes what the figure means. No
- * recommendation or money estimate is made up here (those wait for each
- * detector's backtest).
+ * recommendation or money is made up here: an estimate appears only when the
+ * finding carries one (approved per detector, 2026-10-06).
  */
 type Summary = {
   headline: string;
@@ -658,8 +681,10 @@ function summaryOf(f: Finding, days: number): Summary {
     case "unconfirmed_returns":
       return {
         headline: "Orders nobody confirmed come back more often",
-        figure: pct(f.unanswered.returnRate),
-        note: `returned when unanswered, against ${pct(f.confirmed.returnRate)} when confirmed`,
+        figure: f.cost ? figure(f.cost.total) : pct(f.unanswered.returnRate),
+        note: f.cost
+          ? `in courier charges on ${n(f.excessReturns)} extra returns: ${pct(f.unanswered.returnRate)} returned unanswered, ${pct(f.confirmed.returnRate)} confirmed`
+          : `returned when unanswered, against ${pct(f.confirmed.returnRate)} when confirmed`,
         ...(f.waiting
           ? { next: `Call the ${n(f.waiting)} unanswered order${f.waiting === 1 ? "" : "s"} before booking: they can still be confirmed or cancelled.` }
           : { why: `${n(f.excessReturns)} more returns than the confirmed rate would give.` }),
@@ -671,8 +696,10 @@ function summaryOf(f: Finding, days: number): Summary {
       const name = v.title ?? `Variant ${v.variantId}`;
       return {
         headline: f.flagged.length === 1 ? `${name} comes back far more often` : `${n(f.flagged.length)} products come back far more often`,
-        figure: pct(v.returnRate),
-        note: `${f.flagged.length === 1 ? "" : `${name}: `}returned, against ${pct(f.store.returnRate)} for the whole store`,
+        figure: v.cost ? figure(v.cost.total) : pct(v.returnRate),
+        note: v.cost
+          ? `in courier charges on ${n(v.excessReturns ?? 0)} extra returns: ${pct(v.returnRate)} returned, ${pct(f.store.returnRate)} for the store`
+          : `${f.flagged.length === 1 ? "" : `${name}: `}returned, against ${pct(f.store.returnRate)} for the whole store`,
         why: "Counted by order: a returned order counts against every product in it.",
         affects: `${n(v.decided)} decided orders`,
         link: { to: `/orders?days=${days}&variant=${v.variantId}`, label: "See orders" },
@@ -726,7 +753,9 @@ function summaryOf(f: Finding, days: number): Summary {
         headline: "Courier fees missing on Courierify orders",
         figure: n(f.missing),
         note: `of ${n(f.viaCourierify)} orders shipped through Courierify have no fee`,
-        why: "Every profit figure that includes them reads higher than it is.",
+        why: f.estimate
+          ? `Profit reads about ${figure(f.estimate.total)} too high (at the median fee of ${figure(f.estimate.medianFee)}).`
+          : "Every profit figure that includes them reads higher than it is.",
         affects: `${n(f.missing)} shipped orders`,
         link: { to: `/orders?days=${days}&feeMissing=1`, label: "See orders" },
       };

@@ -28,7 +28,6 @@ import {
   type Finding,
   type FindingsInput,
   type Skip,
-  type VariantReturnsFinding,
 } from "../metrics/findings";
 
 export type App = "COURIERIFY" | "FINANCIFY";
@@ -88,10 +87,6 @@ const insight = (
   revealsMoney: boolean,
 ): Insight => ({ detector, subject, fingerprint: `${detector}:${subject}`, rank, revealsMoney, finding });
 
-/** Returns above the store's own rate, in orders: what the gap amounts to. */
-function excessReturns(f: VariantReturnsFinding, v: VariantReturnsFinding["flagged"][number]): number {
-  return Math.max(0, v.returned - Math.round((v.decided * f.store.returnRate) / 100));
-}
 
 export const DETECTORS: readonly Detector[] = [
   {
@@ -120,8 +115,8 @@ export const DETECTORS: readonly Detector[] = [
           "variant_returns",
           v.variantId,
           { ...f, flagged: [v] },
-          { group: "specific", ordersAffected: excessReturns(f, v) },
-          false,
+          { group: "specific", ordersAffected: v.excessReturns ?? 0 },
+          !!v.cost,
         ),
       );
     },
@@ -158,7 +153,7 @@ export const DETECTORS: readonly Detector[] = [
       if (isSkip(f)) return f;
       // Context, not specific: a data gap of thousands of orders would
       // otherwise outrank every finding about the business itself.
-      return [insight("missing_courier_fees", "store", f, { group: "context", ordersAffected: f.missing }, false)];
+      return [insight("missing_courier_fees", "store", f, { group: "context", ordersAffected: f.missing }, !!f.estimate)];
     },
   },
   {
@@ -181,7 +176,7 @@ export const DETECTORS: readonly Detector[] = [
     run(input) {
       const f = unconfirmedFinding(input);
       if (isSkip(f)) return f;
-      return [insight("unconfirmed_returns", "store", f, { group: "specific", ordersAffected: f.excessReturns }, false)];
+      return [insight("unconfirmed_returns", "store", f, { group: "specific", ordersAffected: f.excessReturns }, !!f.cost)];
     },
   },
   {
@@ -258,8 +253,15 @@ export function rankInsights(insights: readonly Insight[]): Insight[] {
 export function withoutMoney(insights: readonly Insight[]): Insight[] {
   return insights.flatMap((i) => {
     if (!i.revealsMoney) return [i];
-    if (i.finding.kind === "disagreements") {
-      return [{ ...i, revealsMoney: false, finding: { ...i.finding, groups: i.finding.groups.map((g) => ({ ...g, placed: [] })) } }];
+    const f = i.finding;
+    if (f.kind === "disagreements") {
+      return [{ ...i, revealsMoney: false, finding: { ...f, groups: f.groups.map((g) => ({ ...g, placed: [] })) } }];
+    }
+    // Estimates go; the card, in orders, stays.
+    if (f.kind === "unconfirmed_returns") return [{ ...i, revealsMoney: false, finding: { ...f, cost: null } }];
+    if (f.kind === "missing_fees") return [{ ...i, revealsMoney: false, finding: { ...f, estimate: null } }];
+    if (f.kind === "variant_returns") {
+      return [{ ...i, revealsMoney: false, finding: { ...f, flagged: f.flagged.map((v) => ({ ...v, cost: null })) } }];
     }
     return [];
   });
