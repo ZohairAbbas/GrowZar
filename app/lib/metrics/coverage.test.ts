@@ -127,3 +127,10 @@ describe("coverage line", () => {
     expect(coverageLine(r, "shipping").gaps).toEqual([]);
   });
 });
+
+describe("settlements over time", () => {
+  it("counts a courier still holding unpaid COD from before the period", () => {
+    const r = coverageReport(input([order()], { owingCouriers: ["smartlane"] }));
+    expect(r.items.find((i) => i.key === "settlements")).toMatchObject({ have: 1, of: 2, status: "partial" });
+  });
+});

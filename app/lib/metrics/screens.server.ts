@@ -20,6 +20,16 @@ import {
 } from "./compare";
 import { scopeWhere, type Scope } from "./scope";
 import { resolveBuyer, retention, type Retention } from "./cohorts";
+import {
+  cityCourierMatrix,
+  payoutAgeing,
+  productEconomics,
+  statusesOf,
+  type CityCourierMatrix,
+  type PayoutAgeing,
+  type ProductPoint,
+} from "./matrices";
+import { loadAdSpend } from "./rollups.server";
 import { storeSummary, type StoreSummary } from "./summaries.server";
 import { formatAmount, parseAmount, type Money } from "./money";
 import { matchesFilter, orderFilterQuery, type OrderFilter } from "./findings";
@@ -310,8 +320,12 @@ export async function ordersView(
   outcome: Outcome | null = null,
   scope: Scope = { courier: null, city: null },
   previous: { from: string; to: string } | null = null,
+  confirmation: string | null = null,
 ): Promise<OrdersView> {
-  const where = { storeId, localDay: { gte: from, lte: to }, ...scopeWhere(scope) };
+  // A confirmation state picked in the funnel narrows the list like an outcome chip.
+  const statuses = confirmation ? statusesOf(confirmation) : undefined;
+  const confirmationWhere = confirmation ? { confirmation: statuses === null ? null : { in: statuses } } : {};
+  const where = { storeId, localDay: { gte: from, lte: to }, ...scopeWhere(scope), ...confirmationWhere };
   // The comparison counts the same slice, before any outcome pick.
   const [prevTotal, perDay] = await Promise.all([
     previous ? prisma.orderGrain.count({ where: { storeId, localDay: { gte: previous.from, lte: previous.to }, ...scopeWhere(scope) } }) : Promise.resolve(null),
@@ -349,12 +363,12 @@ export async function ordersView(
     // grain rows, so the list is exactly the card's evidence.
     const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { currency: true } });
     // Cash held is today's state (I4): any order date, so no period here.
-    const cashFilter = filter.kind === "awaiting_payout";
+    const cashFilter = filter.kind === "awaiting_payout" || filter.kind === "unpaid";
     const all = await prisma.orderGrain.findMany({
       where: cashFilter ? { storeId, outcome: "delivered", uncollectedAmount: { not: null }, ...scopeWhere(scope) } : where,
       orderBy: [{ createdAt: "desc" }, { orderId: "desc" }],
     });
-    const ctx = { payers: cashFilter ? await loadPayerHistories(storeId) : [], asOf: new Date() };
+    const ctx = { payers: filter.kind === "awaiting_payout" ? await loadPayerHistories(storeId) : [], asOf: new Date() };
     const hit = all.filter((r) => matchesFilter(toRollupOrder(r), filter, store.currency, ctx));
     const picked = outcome ? hit.filter((r) => r.outcome === outcome) : hit;
     const shown = picked.slice(0, FILTERED_LIST_LIMIT);
@@ -418,6 +432,7 @@ export type ShippingView = {
   coverage: Coverage;
   minDecided: number;
   compare: { deliveryRate: Headline; returnedValue: Headline; returned: Headline };
+  matrix: CityCourierMatrix;
 };
 
 /** Rows under MIN_DECIDED_TO_RATE decided orders become one "other" row (pack §2.5). */
@@ -462,6 +477,7 @@ export function shippingView(s: StoreSummary, prev: StoreSummary): ShippingView 
     }),
     cities: folded(cities, s.rows),
     cityCount: cities.length,
+    matrix: cityCourierMatrix(s.rows),
     coverage: coverage(s),
     minDecided: MIN_DECIDED_TO_RATE,
     compare: {
@@ -580,4 +596,54 @@ export async function storeRetention(storeId: string, asOf: string, scope: Scope
     asOf,
     first._min.localDay,
   );
+}
+
+// ── Finance: payout ageing (D4) ────────────────────────────────────────────
+
+/**
+ * Delivered Courierify COD no settlement covers yet, by courier and age, as
+ * of today and whatever the order date: the rows `owedToday` and I4 read.
+ */
+export async function storePayoutAgeing(storeId: string, currency: string | null, scope: Scope): Promise<PayoutAgeing | null> {
+  if (!currency) return null;
+  const rows = await prisma.orderGrain.findMany({
+    where: { storeId, outcome: "delivered", parcelCount: { gt: 0 }, uncollectedAmount: { gt: 0 }, ...scopeWhere(scope) },
+    select: { courier: true, outcomeAt: true, uncollectedAmount: true, uncollectedCurrency: true },
+  });
+  return payoutAgeing(
+    rows
+      .filter((r) => r.uncollectedCurrency)
+      .map((r) => ({
+        courier: r.courier,
+        deliveredAt: r.outcomeAt,
+        amount: { amount: formatAmount(parseAmount(r.uncollectedAmount!.toFixed(6))!), currency: r.uncollectedCurrency! },
+      })),
+    currency,
+    new Date(),
+  );
+}
+
+// ── Marketing: product matrix (D4) ─────────────────────────────────────────
+
+export type MarketingView = {
+  currency: string | null;
+  products: ProductPoint[];
+  storeReturnRate: number | null;
+  /** Ad spend is subtracted only when every day of the period is fetched. */
+  withAds: boolean;
+  adDays: { fetched: number; inPeriod: number } | null;
+};
+
+export async function marketingView(storeId: string, s: StoreSummary): Promise<MarketingView> {
+  const cur = s.store.currency;
+  if (!cur) return { currency: null, products: [], storeReturnRate: null, withAds: false, adDays: null };
+  const ads = s.adSpend && s.adSpend.daysFetched === s.adSpend.daysInPeriod ? await loadAdSpend(storeId, s.period.from, s.period.to) : null;
+  const e = productEconomics(s.rows, cur, ads ? Object.fromEntries(ads.byVariant) : null);
+  return {
+    currency: cur,
+    products: e.products,
+    storeReturnRate: e.storeReturnRate,
+    withAds: e.withAds,
+    adDays: s.adSpend ? { fetched: s.adSpend.daysFetched, inPeriod: s.adSpend.daysInPeriod } : null,
+  };
 }

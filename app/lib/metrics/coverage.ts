@@ -64,6 +64,11 @@ export type CoverageInput = {
   connected: readonly SuiteApp[];
   /** Courierify settlements, every date (a payout covers older parcels too). */
   payouts: readonly Payout[];
+  /**
+   * Couriers holding unpaid delivered COD, any order date: they owe the
+   * store money now, so their settlements matter whatever the period.
+   */
+  owingCouriers?: readonly string[];
   adSpend: { daysFetched: number; daysInPeriod: number } | null;
   /** Of the period's distinct buyers, how many have a name on record. */
   buyers: { total: number; named: number };
@@ -108,9 +113,12 @@ function counted(
   return { ...base, have, of, status: s, gap: s === "complete" ? null : gap(of - have) };
 }
 
-function settlementItem(rows: readonly RollupOrder[], payouts: readonly Payout[]): CoverageItem | null {
-  // The couriers that owe this store cash: those that delivered a Courierify parcel.
-  const owing = [...new Set(rows.filter((r) => r.outcome === "delivered" && r.parcelCount > 0 && r.courier).map((r) => r.courier!))].sort();
+function settlementItem(rows: readonly RollupOrder[], payouts: readonly Payout[], alsoOwing: readonly string[] = []): CoverageItem | null {
+  // The couriers that owe this store cash: those that delivered a Courierify
+  // parcel in the period, and any still holding unpaid COD from before.
+  const owing = [
+    ...new Set([...rows.filter((r) => r.outcome === "delivered" && r.parcelCount > 0 && r.courier).map((r) => r.courier!), ...alsoOwing]),
+  ].sort();
   if (!owing.length) return null;
   const latest = new Map<string, Payout>();
   for (const p of payouts) {
@@ -134,7 +142,7 @@ function settlementItem(rows: readonly RollupOrder[], payouts: readonly Payout[]
     phrase: "settlements",
     have: settled.length,
     of: owing.length,
-    unit: "couriers that delivered",
+    unit: "couriers owed money",
     status: s,
     gap: s === "complete" && settled.every((c) => latest.get(c)!.status === "received") ? null : parts.join("; "),
     effect: "COD from a courier with no settlement counts as not yet paid, so it shows in money owed and payout ageing",
@@ -205,7 +213,7 @@ export function coverageReport(input: CoverageInput): CoverageReport {
         shipped.length,
         (n) => `no courier fee on ${plural(n, "shipped order")}`,
       ),
-      settlementItem(rows, input.payouts),
+      settlementItem(rows, input.payouts, input.owingCouriers),
       counted(
         {
           key: "cities",

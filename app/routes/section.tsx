@@ -23,10 +23,14 @@ import {
   owedToday,
   periodFrom,
   shippingView,
+  marketingView,
+  storePayoutAgeing,
 } from "~/lib/metrics/screens.server";
+import { confirmationFunnel, isConfirmationGroup } from "~/lib/metrics/matrices";
 import {
   CustomersPanel,
   FinancePanel,
+  MarketingPanel,
   HomePanel,
   OrdersPanel,
   ShippingPanel,
@@ -156,7 +160,7 @@ export async function loader({ request, url }: Route.LoaderArgs) {
   };
 }
 
-const METRIC_SECTIONS = new Set<Section>(["home", "finance", "orders", "shipping", "customers"]);
+const METRIC_SECTIONS = new Set<Section>(["home", "finance", "orders", "shipping", "customers", "marketing"]);
 
 async function buildMetrics(
   section: Section,
@@ -180,10 +184,17 @@ async function buildMetrics(
   const comparable = historyFrom !== null && historyFrom <= before.from;
   const compared = <T,>(view: T): T => (comparable ? view : withoutComparison(view));
   // A filter (a finding's evidence) survives a change of period.
-  const filter = section === "orders" ? parseOrderFilter(url.searchParams) : null;
+  // A bare `city` is the filter bar's now (D2), not the city card's filter:
+  // the two select the same orders, and one banner is enough.
+  const parsed = section === "orders" ? parseOrderFilter(url.searchParams) : null;
+  const filter = parsed?.kind === "city" ? null : parsed;
+  const confirmation = section === "orders" && isConfirmationGroup(url.searchParams.get("confirmation")) ? url.searchParams.get("confirmation") : null;
   // So does an outcome picked from the Orders chips.
   const outcome = section === "orders" ? parseOutcome(url.searchParams) : null;
-  const keep = [filter ? orderFilterQuery(filter) : "", outcome ? `outcome=${outcome}` : "", scopeQuery(scope)].filter(Boolean).join("&");
+  // The finding filter's own city and courier travel in the scope query.
+  const filterQuery = filter ? new URLSearchParams([...new URLSearchParams(orderFilterQuery(filter))].filter(([k]) => k !== "city" && k !== "courier")).toString() : "";
+  const extra = [filterQuery, outcome ? `outcome=${outcome}` : "", confirmation ? `confirmation=${confirmation}` : ""].filter(Boolean).join("&");
+  const keep = [extra, scopeQuery(scope)].filter(Boolean).join("&");
   // One line naming the gaps behind this section's numbers (D1).
   const coverage = coverageLine(await storeCoverage(summary), section);
   const base = {
@@ -196,7 +207,7 @@ async function buildMetrics(
     scope,
     scopeOptions: section === "home" ? null : summary.scopeOptions,
     /** Query parameters a change of courier or city keeps (the finding filter and outcome). */
-    keepForScope: [filter ? orderFilterQuery(filter) : "", outcome ? `outcome=${outcome}` : ""].filter(Boolean).join("&"),
+    keepForScope: extra,
   };
   switch (section) {
     case "home": {
@@ -210,13 +221,26 @@ async function buildMetrics(
       };
     }
     case "finance":
-      return { ...base, kind: "finance" as const, view: compared(financeView(summary, prev!)) };
+      return {
+        ...base,
+        kind: "finance" as const,
+        view: compared(financeView(summary, prev!)),
+        ageing: await storePayoutAgeing(storeId, summary.store.currency, scope),
+      };
     case "orders":
-      return { ...base, kind: "orders" as const, view: compared(await ordersView(storeId, period.from, period.to, filter, outcome, scope, before)) };
+      return {
+        ...base,
+        kind: "orders" as const,
+        view: compared(await ordersView(storeId, period.from, period.to, filter, outcome, scope, before, confirmation)),
+        funnel: confirmationFunnel(summary.rows),
+        confirmation,
+      };
     case "shipping":
       return { ...base, kind: "shipping" as const, view: compared(shippingView(summary, prev!)) };
     case "customers":
       return { ...base, kind: "customers" as const, view: compared(await customersView(storeId, summary, prev!)) };
+    case "marketing":
+      return { ...base, kind: "marketing" as const, view: await marketingView(storeId, summary) };
     default:
       return null;
   }
@@ -254,8 +278,9 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           />
           <CoverageLine gaps={metrics.coverage.gaps} days={metrics.period.days} />
           {metrics.kind === "home" ? <HomePanel view={metrics.view} owed={metrics.owed} inbox={metrics.inbox} period={metrics.period} /> : null}
-          {metrics.kind === "finance" ? <FinancePanel view={metrics.view} /> : null}
-          {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} days={metrics.period.days} scope={scopeQuery(metrics.scope)} /> : null}
+          {metrics.kind === "finance" ? <FinancePanel view={metrics.view} ageing={metrics.ageing} days={metrics.period.days} /> : null}
+          {metrics.kind === "marketing" ? <MarketingPanel view={metrics.view} days={metrics.period.days} scope={scopeQuery(metrics.scope)} /> : null}
+          {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} days={metrics.period.days} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} days={metrics.period.days} scope={metrics.scope} /> : null}
           {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} /> : null}
         </div>
