@@ -54,6 +54,17 @@ import {
 } from "./cash";
 import { readStatement, type Statement } from "./settlements";
 import { loadSettledHistory } from "./summaries.server";
+import {
+  courierPerformance,
+  outcomesByDay,
+  returnsByCity,
+  returnsView,
+  type CourierNote,
+  type CourierPerformance,
+  type DayOutcome,
+  type ParcelFacts,
+  type ReturnsView,
+} from "./returns";
 
 /**
  * View models for the read-only screens (G-GZR2-5).
@@ -831,5 +842,78 @@ export async function financeDepth(storeId: string, s: StoreSummary): Promise<Fi
     cash: cashTimeline(s.rows, cur, trackedPayers(statements.map((x) => x.payer)), new Date()),
     deductions: courierDeductions(mine, s.period.from, s.period.to, cur),
     statementSources: inPeriod.reduce<Record<string, number>>((m, x) => ({ ...m, [x.source]: (m[x.source] ?? 0) + 1 }), {}),
+  };
+}
+
+// ── Shipping depth (Phase 4c, A5–A8) ───────────────────────────────────────
+
+export type ShippingDepth = {
+  outcomes: DayOutcome[];
+  performance: CourierPerformance[];
+  returns: ReturnsView | null;
+  returnCities: ReturnType<typeof returnsByCity>;
+};
+
+const moneyOf = (v: unknown): Money | null => {
+  if (!v || typeof v !== "object") return null;
+  const m = v as Record<string, unknown>;
+  return typeof m.amount === "string" && typeof m.currency === "string" ? { amount: m.amount, currency: m.currency } : null;
+};
+
+/**
+ * The period's parcel facts and courier notes, then the shipping depth
+ * views. Parcels are read from Courierify's PARCEL rows (whether a return was
+ * received, the fees it recorded) and notes from Growzar's own event log;
+ * both are keyed to orders through the parcel's order id (rule #6).
+ */
+export async function shippingDepth(storeId: string, s: StoreSummary): Promise<ShippingDepth> {
+  const ids = s.rows.filter((o) => o.parcelCount > 0).map((o) => o.orderId);
+  const [parcelRows, noteRows] = ids.length
+    ? await Promise.all([
+        prisma.$queryRaw<Array<{ orderId: string; courier: string | null; outcome: string | null; received: string | null; returnedAt: string | null; deliveryFee: unknown; reversalFee: unknown }>>`
+          SELECT payload->>'orderId' AS "orderId", lower(payload->>'courier') AS courier, payload->>'outcome' AS outcome,
+                 payload->>'returnReceived' AS received, payload->>'returnedAt' AS "returnedAt",
+                 payload->'deliveryFee' AS "deliveryFee", payload->'reversalFee' AS "reversalFee"
+          FROM raw_records
+          WHERE "storeId" = ${storeId} AND app = 'COURIERIFY' AND entity = 'PARCEL' AND "deletedAt" IS NULL
+            AND payload->>'orderId' = ANY(${ids})`,
+        prisma.$queryRaw<Array<{ orderId: string; status: string; raw: string; at: Date }>>`
+          SELECT r.payload->>'orderId' AS "orderId", e.status, e.raw, COALESCE(e."courierEventAt", e."observedAt") AS at
+          FROM shipment_events e
+          JOIN raw_records r ON r."storeId" = e."storeId" AND r.app = 'COURIERIFY' AND r.entity = 'PARCEL' AND r."externalId" = e."shipmentId"
+          WHERE e."storeId" = ${storeId} AND e.status IN ('returned', 'attempted') AND e.raw IS NOT NULL
+            -- A 3PL's Shopify fulfilment event (Orio's "FAILURE") is its mark, not a
+            -- courier's attempt or reason (rule #9, G-CFY3-1).
+            AND e.source <> 'shopify_fulfillment_event'
+            AND r.payload->>'orderId' = ANY(${ids})`,
+      ])
+    : [[], []];
+  const parcels: ParcelFacts[] = parcelRows
+    .filter((p) => p.orderId)
+    .map((p) => {
+      const fees = [moneyOf(p.deliveryFee), moneyOf(p.reversalFee)].filter((m): m is Money => m !== null);
+      return {
+        orderId: p.orderId,
+        courier: p.courier,
+        outcome: p.outcome ?? "unknown",
+        returnReceived: p.received === "true",
+        returnedAt: p.returnedAt ? new Date(p.returnedAt) : null,
+        fee: fees.length
+          ? { amount: formatAmount(fees.reduce((a, m) => a + parseAmount(m.amount)!, 0n)), currency: fees[0]!.currency }
+          : null,
+      };
+    });
+  const notes: CourierNote[] = noteRows.map((n) => ({
+    orderId: n.orderId,
+    kind: n.status === "attempted" ? "attempted" : "returned",
+    raw: n.raw,
+    at: new Date(n.at),
+  }));
+  const asOf = new Date();
+  return {
+    outcomes: outcomesByDay(s.rows, s.period.from, s.period.to),
+    performance: courierPerformance(s.rows, notes, asOf),
+    returns: s.store.currency ? returnsView(s.rows, parcels, notes, s.store.currency, asOf) : null,
+    returnCities: returnsByCity(s.rows),
   };
 }
