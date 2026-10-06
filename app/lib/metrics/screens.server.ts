@@ -507,7 +507,9 @@ export function shippingView(s: StoreSummary, prev: StoreSummary): ShippingView 
         timing: !t
           ? "—"
           : t.verdict === "ok"
-            ? `${t.medianDaysToDeliver.toFixed(1)} days (median, ${t.timedOrders} timed)`
+            ? t.basis === "reported_by_3pl"
+              ? `${t.medianDaysToDeliver.toFixed(1)} days (median, ${t.timedOrders} reported by ${t.reportedBy === "orio" ? "Orio" : "the 3PL"}, not the courier)`
+              : `${t.medianDaysToDeliver.toFixed(1)} days (median, ${t.timedOrders} timed)`
             : timingReason(t),
       };
     }),
