@@ -141,6 +141,23 @@ describe("currentStatusTiming (rule #9)", () => {
     expect(timing).toMatchObject({ basis: "happened_on", source: "tracking_poll_correction" });
   });
 
+  it("labels a 3PL's time as reported by the 3PL, never as the courier's", () => {
+    const timing = currentStatusTiming([
+      event("in_transit", "2026-09-02T00:00:00Z", "2026-09-02T00:00:00Z", 1, "shopify_fulfillment_event"),
+      event("delivered", "2026-09-05T00:00:00Z", "2026-09-04T13:01:00Z", 2, "shopify_fulfillment_event"),
+    ]);
+    expect(timing).toMatchObject({ basis: "reported_by_3pl", status: "delivered" });
+    expect(timing?.at.toISOString()).toBe("2026-09-04T13:01:00.000Z");
+  });
+
+  it("prefers the courier's own time over a 3PL's for the same status", () => {
+    const timing = currentStatusTiming([
+      event("delivered", "2026-09-04T13:06:00Z", "2026-09-04T13:01:00Z", 1, "shopify_fulfillment_event"),
+      event("delivered", "2026-09-04T18:00:00Z", "2026-09-04T13:10:00Z", 2, "tracking_poll"),
+    ]);
+    expect(timing).toMatchObject({ basis: "happened_on", source: "tracking_poll" });
+  });
+
   it("does not borrow a courier time from an earlier, different status", () => {
     const timing = currentStatusTiming([
       event("in_transit", "2026-09-02T00:00:00Z", "2026-09-02T00:00:00Z", 1),
@@ -166,6 +183,12 @@ describe("courierCoverage", () => {
         reason: "no_courier_history",
       },
     ]);
+  });
+
+  it("does not count a 3PL's times as courier history", () => {
+    const viaOrio = () => [event("delivered", "2026-09-04T13:06:00Z", "2026-09-04T13:01:00Z", 1, "shopify_fulfillment_event")];
+    const parcels = Array.from({ length: 50 }, () => ({ courier: "trax", events: viaOrio() }));
+    expect(courierCoverage(parcels)[0]).toMatchObject({ parcelsWithCourierTime: 0, reason: "no_courier_history" });
   });
 
   it("returns not_enough_data below the sample floor", () => {

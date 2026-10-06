@@ -152,6 +152,24 @@ describe("rule #7: Courierify is the delivery authority when connected", () => {
     expect(rebooked.fulfilledVia).toBeNull();
   });
 
+  it("says an order's delivery was reported by the 3PL when that is the only time, and why", () => {
+    const ev = (source: string, courierEventAt: string | null) => ({
+      shipmentId: "s", status: "delivered", previousStatus: null, source, courierEventAt: courierEventAt ? new Date(courierEventAt) : null,
+      observedAt: new Date("2026-09-05T00:00:00Z"), raw: null, sourceEventId: 1n, sourceCreatedAt: new Date("2026-09-05T00:00:00Z"), eventKey: "k",
+    });
+    const g = grain({ parcels: [{ row: parcel("delivered", { fulfilledVia: "orio" }), events: [ev("shopify_fulfillment_event", "2026-09-04T13:01:00Z")] }] });
+    expect(g.outcomeTiming).toMatchObject({ basis: "reported_by_3pl" });
+    expect(g.explain.outcomeTiming?.note).toMatch(/3PL reported a time/);
+    // Two parcels: one courier-timed, one 3PL-timed, so the order is not "happened on".
+    const mixed = grain({
+      parcels: [
+        { row: parcel("delivered"), events: [ev("tracking_poll", "2026-09-03T09:00:00Z")] },
+        { row: parcel("delivered", { fulfilledVia: "orio" }), events: [ev("shopify_fulfillment_event", "2026-09-04T13:01:00Z")] },
+      ],
+    });
+    expect(mixed.outcomeTiming?.basis).toBe("reported_by_3pl");
+  });
+
   it("keeps Financify's own outcome beside the authority's, so a disagreement can be counted", () => {
     const g = grain({ parcels: [{ row: parcel("returned"), events: [] }] });
     expect(g.outcome).toBe("returned");

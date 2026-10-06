@@ -150,7 +150,13 @@ export function replayStatus(events: readonly TimelineEvent[]): string | null {
  * `happened_on`: the courier gave a time for entering this status. The screen
  * may say "delivered on <at>".
  *
- * `status_as_of`: no event of the current stretch has a courier time. The
+ * `reported_by_3pl`: no courier time, but the 3PL that booked the parcel
+ * posted a dated event (Courierify G-CFY3-1, `source =
+ * "shopify_fulfillment_event"`). Those are the 3PL's observations, about five
+ * minutes behind the courier, not times the courier asserted, so the screen
+ * says "reported by <3PL> on <at>" and they never count as courier times.
+ *
+ * `status_as_of`: no event of the current stretch has a time. The
  * screen says "status as of <at>" and never "delivered on". `at` is the most
  * recent observation, because that is the latest moment we know it held.
  *
@@ -161,7 +167,14 @@ export function replayStatus(events: readonly TimelineEvent[]): string | null {
  */
 export type StatusTiming =
   | { status: string; basis: "happened_on"; at: Date; source: string }
+  | { status: string; basis: "reported_by_3pl"; at: Date; source: string }
   | { status: string; basis: "status_as_of"; at: Date; source: string };
+
+/** Events a 3PL posted: its observations, never courier times (rule #9). */
+export const THIRD_PARTY_SOURCE = "shopify_fulfillment_event";
+/** A time the courier itself gave. */
+export const isCourierTimed = (e: { source: string; courierEventAt: Date | null }) =>
+  !!e.courierEventAt && e.source !== THIRD_PARTY_SOURCE;
 
 export function currentStatusTiming(
   events: readonly TimelineEvent[],
@@ -175,15 +188,19 @@ export function currentStatusTiming(
   while (start > 0 && ordered[start - 1]!.status === status) start -= 1;
   const run = ordered.slice(start);
 
-  let timed: TimelineEvent | null = null;
-  for (const event of run) {
-    if (!event.courierEventAt) continue;
-    if (!timed || event.courierEventAt < timed.courierEventAt!) timed = event;
-  }
-
-  if (timed) {
-    return { status, basis: "happened_on", at: timed.courierEventAt!, source: timed.source };
-  }
+  // A courier's own time wins; a 3PL's comes next; then "as of".
+  const earliest = (keep: (e: TimelineEvent) => boolean) => {
+    let found: TimelineEvent | null = null;
+    for (const event of run) {
+      if (!event.courierEventAt || !keep(event)) continue;
+      if (!found || event.courierEventAt < found.courierEventAt!) found = event;
+    }
+    return found;
+  };
+  const courier = earliest(isCourierTimed);
+  if (courier) return { status, basis: "happened_on", at: courier.courierEventAt!, source: courier.source };
+  const thirdParty = earliest((e) => e.source === THIRD_PARTY_SOURCE);
+  if (thirdParty) return { status, basis: "reported_by_3pl", at: thirdParty.courierEventAt!, source: thirdParty.source };
 
   return { status, basis: "status_as_of", at: latest.observedAt, source: latest.source };
 }
@@ -250,7 +267,7 @@ export function courierCoverage(
     const entry = byCourier.get(courier) ?? { parcels: 0, withEvents: 0, timed: 0 };
     entry.parcels += 1;
     if (parcel.events.length) entry.withEvents += 1;
-    if (parcel.events.some((e) => e.courierEventAt)) entry.timed += 1;
+    if (parcel.events.some(isCourierTimed)) entry.timed += 1;
     byCourier.set(courier, entry);
   }
 

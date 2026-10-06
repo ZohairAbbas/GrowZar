@@ -88,7 +88,9 @@ export function OutcomeText({
     <span>
       {timing?.basis === "happened_on"
         ? `${label} on ${day(timing.at)}`
-        : timing
+        : timing?.basis === "reported_by_3pl"
+          ? `${label}, reported by the 3PL on ${day(timing.at)}`
+          : timing
           ? `${label}, status as of ${day(timing.at)}`
           : label}
       {authority !== "none" ? (
