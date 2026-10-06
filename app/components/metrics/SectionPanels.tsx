@@ -4,6 +4,7 @@ import type {
   CustomersView,
   FinanceView,
   HomeView,
+  MarketingView,
   OrdersView,
   ShippingView,
 } from "~/lib/metrics/screens.server";
@@ -22,6 +23,9 @@ import {
 import { InboxCards } from "./FindingCards";
 import { scopeLabel } from "./FilterBar";
 import { CohortGrid, RepeatCurve } from "./Retention";
+import { CityCourierTable, ConfirmationFunnelView, PayoutAgeingTable, ProductMatrix } from "./Matrices";
+import type { ConfirmationFunnel, PayoutAgeing } from "~/lib/metrics/matrices";
+import { MIN_DECIDED_TO_RATE } from "~/lib/metrics/compare";
 import { MIN_COHORT_BUYERS, MIN_ELIGIBLE_BUYERS } from "~/lib/metrics/cohorts";
 import type { InboxView } from "~/lib/insights/inbox.server";
 
@@ -186,7 +190,7 @@ function HomeMetrics({ view, owed }: { view: HomeView; owed: { amounts: { amount
 
 // ── Finance ─────────────────────────────────────────────────────────────────
 
-export function FinancePanel({ view }: { view: FinanceView }) {
+export function FinancePanel({ view, ageing }: { view: FinanceView; ageing: PayoutAgeing | null; days: number }) {
   const p = view.profit;
   return (
     <section className="space-y-4">
@@ -264,6 +268,7 @@ export function FinancePanel({ view }: { view: FinanceView }) {
           <p className="mt-2 text-sm text-navy-muted">This store has not reported its currency yet.</p>
         )}
       </div>
+      {ageing ? <PayoutAgeingTable ageing={ageing} /> : null}
     </section>
   );
 }
@@ -283,6 +288,8 @@ const FILTER_LABEL = (f: NonNullable<OrdersView["filter"]>) =>
           ? `orders shipped to ${f.city} with ${f.courier}${f.via === "direct" ? ", booked directly" : ` through ${f.via}`}`
           : f.kind === "unanswered_waiting"
           ? "orders the buyer never answered on WhatsApp, not yet with the courier"
+          : f.kind === "unpaid"
+          ? `delivered orders with no ${f.courier} payout recorded, delivered ${f.age === "unknown" ? "on no recorded date" : f.age === "61+" ? "over 60 days ago" : `${f.age.replace("-", "–")} days ago`} (any order date, as of today)`
           : f.kind === "awaiting_payout"
           ? `delivered orders with no ${f.payer} payout recorded, past its usual gap (any order date, as of today)`
         : f.app === "financify"
@@ -320,7 +327,19 @@ function ConfirmationPill({ value }: { value: string }) {
   );
 }
 
-export function OrdersPanel({ view, days, scope = "" }: { view: OrdersView; days: number; scope?: string }) {
+export function OrdersPanel({
+  view,
+  days,
+  scope = "",
+  funnel,
+  confirmation,
+}: {
+  view: OrdersView;
+  days: number;
+  scope?: string;
+  funnel: ConfirmationFunnel;
+  confirmation: string | null;
+}) {
   const disagree = view.filter?.kind === "disagree";
   return (
     <section className="space-y-3">
@@ -351,10 +370,18 @@ export function OrdersPanel({ view, days, scope = "" }: { view: OrdersView; days
           </Link>
         </div>
       ) : null}
+      {view.filter ? null : (
+        <ConfirmationFunnelView funnel={funnel} days={days} scope={scope} active={confirmation} min={MIN_DECIDED_TO_RATE} />
+      )}
       <nav aria-label="Filter by outcome" className="flex flex-wrap gap-2 text-sm font-semibold">
         {[{ outcome: null, count: view.allTotal }, ...view.byOutcome].map((o) => {
           const active = o.outcome === view.outcome;
-          const query = [`days=${days}`, view.filterQuery, scope, o.outcome ? `outcome=${o.outcome}` : ""].filter(Boolean).join("&");
+          // Set, not append: a finding filter and the filter bar can both carry a city.
+          const q = new URLSearchParams(`days=${days}`);
+          for (const part of [view.filterQuery, scope, confirmation ? `confirmation=${confirmation}` : "", o.outcome ? `outcome=${o.outcome}` : ""]) {
+            for (const [k, v] of new URLSearchParams(part)) q.set(k, v);
+          }
+          const query = q.toString();
           return (
             <Link
               key={o.outcome ?? "all"}
@@ -549,6 +576,7 @@ export function ShippingPanel({
       </div>
       {table("courier", couriers)}
       {table("city", rows(view.cities, "city"))}
+      <CityCourierTable matrix={view.matrix} days={days} min={view.minDecided} />
     </section>
   );
 }
@@ -605,6 +633,16 @@ export function CustomersPanel({ view }: { view: CustomersView }) {
       </div>
       <CohortGrid data={view.retention} minBuyers={MIN_COHORT_BUYERS} />
       <RepeatCurve data={view.retention} minBuyers={MIN_ELIGIBLE_BUYERS} />
+    </section>
+  );
+}
+
+// ── Marketing ───────────────────────────────────────────────────────────────
+
+export function MarketingPanel({ view, days, scope }: { view: MarketingView; days: number; scope: string }) {
+  return (
+    <section className="space-y-4">
+      <ProductMatrix products={view.products} storeReturnRate={view.storeReturnRate} withAds={view.withAds} days={days} scope={scope} />
     </section>
   );
 }

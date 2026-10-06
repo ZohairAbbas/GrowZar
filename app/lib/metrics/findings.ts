@@ -14,6 +14,7 @@
  *  - shows measured money only. No "worth PKR X" estimate appears before a
  *    detector's backtest passes (PLAN.md §3, the money rule).
  */
+import { AGE_BUCKETS, ageOf, type AgeBucket } from "./matrices";
 import { formatAmount, isPositive, parseAmount, sumByCurrency, type Money } from "./money";
 import type { Outcome } from "./order-grain";
 import { productLines, type Bucket, type Profit, type RollupOrder } from "./rollups";
@@ -84,7 +85,9 @@ export type OrderFilter =
   | { kind: "awaiting_payout"; payer: string }
   | { kind: "unanswered_waiting" }
   | { kind: "city_route"; city: string; courier: string; via: string }
-  | { kind: "city"; city: string };
+  | { kind: "city"; city: string }
+  /** D4's payout ageing cell: unpaid delivered COD of one courier, of one age. */
+  | { kind: "unpaid"; courier: string; age: AgeBucket };
 
 export type MarginFinding = {
   kind: "margin";
@@ -884,6 +887,11 @@ export function parseOrderFilter(params: URLSearchParams): OrderFilter | null {
   if (variant && /^\d+$/.test(variant)) return { kind: "variant", variantId: variant };
   if (params.get("disagree") === "1") return { kind: "disagree" };
   if (params.get("feeMissing") === "1") return { kind: "fee_missing" };
+  const unpaid = params.get("unpaid");
+  const age = params.get("age");
+  if (unpaid && /^[a-z0-9_-]{1,40}$/.test(unpaid) && age && ([...AGE_BUCKETS.map((b) => b.key), "unknown"] as string[]).includes(age)) {
+    return { kind: "unpaid", courier: unpaid, age: age as AgeBucket };
+  }
   const awaiting = params.get("awaitingPayout");
   if (awaiting && /^[a-z0-9_-]{1,40}$/.test(awaiting)) return { kind: "awaiting_payout", payer: awaiting };
   if (params.get("unanswered") === "waiting") return { kind: "unanswered_waiting" };
@@ -917,6 +925,8 @@ export function orderFilterQuery(filter: OrderFilter): string {
       return `city=${encodeURIComponent(filter.city)}&courier=${filter.courier}&via=${filter.via}`;
     case "city":
       return `city=${encodeURIComponent(filter.city)}`;
+    case "unpaid":
+      return `unpaid=${filter.courier}&age=${filter.age}`;
   }
 }
 
@@ -945,6 +955,15 @@ export function matchesFilter(
       return o.currency === currency && inCityRoute(o, filter.city, filter);
     case "city":
       return o.currency === currency && o.city === filter.city;
+    case "unpaid":
+      return (
+        o.outcome === "delivered" &&
+        fromCourierify(o) &&
+        (o.courier ?? "unknown") === filter.courier &&
+        !!o.uncollected &&
+        parseAmount(o.uncollected.amount)! > 0n &&
+        ageOf(o.outcomeTiming?.at ?? null, ctx?.asOf ?? new Date()) === filter.age
+      );
     case "awaiting_payout": {
       const h = ctx?.payers?.find((p) => p.payer === filter.payer);
       return !!h && o.outcome === "delivered" && fromCourierify(o) && payerOf(o) === filter.payer && isDue(o, h, ctx!.asOf ?? new Date());
