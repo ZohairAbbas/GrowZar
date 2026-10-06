@@ -8,6 +8,7 @@ import { formatAmount, parseAmount, type Money } from "./money";
 import { matchesFilter, orderFilterQuery, type OrderFilter } from "./findings";
 import { toRollupOrder } from "./rollups.server";
 import { loadPayerHistories } from "./settlements.server";
+import { MIN_TIMED_PARCELS_PER_COURIER } from "../shipments/events";
 
 /**
  * View models for the read-only screens (G-GZR2-5).
@@ -143,6 +144,8 @@ export type FinanceView = {
   adSpend: StoreSummary["adSpend"];
   profit: StoreSummary["profit"];
   roas: number | null;
+  /** Orders with no outcome yet: their revenue arrives when they deliver. */
+  stillOpen: number;
   settings: StoreSummary["settings"];
   base: string | null;
   fx: StoreSummary["fx"];
@@ -163,6 +166,7 @@ export function financeView(s: StoreSummary): FinanceView {
     adSpend: s.adSpend,
     profit: s.profit,
     roas: s.roas,
+    stillOpen: b.deliveryRate.stillOpen,
     settings: s.settings,
     base: s.store.currency,
     fx: s.fx,
@@ -318,20 +322,12 @@ export type ShippingView = {
   coverage: Coverage;
 };
 
-const THIRD_PARTY: Record<string, string> = { orio: "Orio", shopify: "another fulfilment app" };
-
-/** Never "slow": say why there is no time (G-GZR3-2). */
+/**
+ * Never "slow" (G-GZR3-2). Why a courier has no times is the coverage page's
+ * to say (D1); the table states only the sample it has.
+ */
 function timingReason(t: Extract<ReturnType<typeof courierTiming>[number], { verdict: "not_enough_data" }>): string {
-  switch (t.reason) {
-    case "not_via_courierify":
-      return "not available: not shipped through Courierify";
-    case "shipped_via_3pl":
-      return `not available: shipped through ${THIRD_PARTY[t.via!.name] ?? t.via!.name} (${t.via!.orders} of ${t.via!.delivered} delivered), which sends no courier times`;
-    case "no_courier_history":
-      return "not enough data: no courier-timed deliveries";
-    case "too_few_parcels":
-      return `not enough data: ${t.timedOrders} timed deliveries`;
-  }
+  return t.reason === "too_few_parcels" ? `${t.timedOrders} timed, needs ${MIN_TIMED_PARCELS_PER_COURIER}` : "—";
 }
 
 export function shippingView(s: StoreSummary): ShippingView {
@@ -366,6 +362,8 @@ export type CustomersView = {
   top: Array<{
     customerId: string;
     name: string | null;
+    /** Last four digits of the buyer's phone, for a buyer with no name. */
+    phoneTail: string | null;
     orders: number;
     deliveryRate: DeliveryRate;
     deliveredRevenue: Money[];
@@ -390,10 +388,12 @@ export async function customersView(storeId: string, s: StoreSummary): Promise<C
   const top = buckets
     .sort((a, b) => b.deliveryRate.delivered - a.deliveryRate.delivered || b.orders - a.orders)
     .slice(0, 10);
-  const names = new Map(
-    (await prisma.customer.findMany({ where: { id: { in: top.map((b) => b.key) } }, select: { id: true, displayName: true } }))
-      .map((c) => [c.id, c.displayName]),
-  );
+  const people = await prisma.customer.findMany({
+    where: { id: { in: top.map((b) => b.key) } },
+    select: { id: true, displayName: true, identities: { where: { kind: "PHONE" }, select: { value: true }, take: 1 } },
+  });
+  const names = new Map(people.map((c) => [c.id, c.displayName]));
+  const tails = new Map(people.map((c) => [c.id, c.identities[0]?.value.replace(/\D/g, "").slice(-4) || null]));
 
   return {
     customers: await prisma.customer.count({ where: { storeId, mergedIntoId: null } }),
@@ -402,6 +402,7 @@ export async function customersView(storeId: string, s: StoreSummary): Promise<C
     top: top.map((b) => ({
       customerId: b.key,
       name: names.get(b.key) ?? null,
+      phoneTail: tails.get(b.key) ?? null,
       orders: b.orders,
       deliveryRate: b.deliveryRate,
       deliveredRevenue: b.deliveredRevenue,

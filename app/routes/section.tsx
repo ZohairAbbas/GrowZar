@@ -31,7 +31,9 @@ import {
   OrdersPanel,
   ShippingPanel,
 } from "~/components/metrics/SectionPanels";
-import { PeriodPicker } from "~/components/metrics/Metrics";
+import { CoverageLine, PeriodPicker } from "~/components/metrics/Metrics";
+import { storeCoverage } from "~/lib/metrics/coverage.server";
+import { coverageLine } from "~/lib/metrics/coverage";
 import { orderFilterQuery, parseOrderFilter } from "~/lib/metrics/findings";
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -162,7 +164,9 @@ async function buildMetrics(
   // So does an outcome picked from the Orders chips.
   const outcome = section === "orders" ? parseOutcome(url.searchParams) : null;
   const keep = [filter ? orderFilterQuery(filter) : "", outcome ? `outcome=${outcome}` : ""].filter(Boolean).join("&");
-  const base = { period, periods: PERIODS, keep };
+  // One line naming the gaps behind this section's numbers (D1).
+  const coverage = coverageLine(await storeCoverage(summary), section);
+  const base = { period, periods: PERIODS, keep, coverage };
   switch (section) {
     case "home": {
       const viewer = await inboxViewer();
@@ -207,6 +211,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             {storeName} · {metrics.period.from} to {metrics.period.to}, the store's own days (
             {metrics.period.timezoneKnown ? metrics.period.timezone : "timezone not reported yet, shown in UTC"})
           </p>
+          <CoverageLine gaps={metrics.coverage.gaps} days={metrics.period.days} />
           {metrics.kind === "home" ? <HomePanel view={metrics.view} owed={metrics.owed} inbox={metrics.inbox} period={metrics.period} /> : null}
           {metrics.kind === "finance" ? <FinancePanel view={metrics.view} /> : null}
           {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} days={metrics.period.days} /> : null}

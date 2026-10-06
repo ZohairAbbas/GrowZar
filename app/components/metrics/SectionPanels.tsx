@@ -8,13 +8,11 @@ import type {
   ShippingView,
 } from "~/lib/metrics/screens.server";
 import {
-  CoverageNotice,
   DeliveryRateText,
   formatAmount,
   MoneyList,
   baseFirst,
   FxNotice,
-  Notice,
   OutcomeText,
   outcomeLabel,
   Stat,
@@ -41,8 +39,6 @@ export function HomePanel({
   inbox: InboxView;
   period: { from: string; to: string };
 }) {
-  // The Courierify card says what the coverage notice says, with a link.
-  const stopped = inbox.items.some((i) => i.insight.finding.kind === "courierify_stopped");
   return (
     <section className="space-y-6">
       <HomeMetrics view={view} owed={owed} />
@@ -69,7 +65,6 @@ export function HomePanel({
             <span className="text-gray-500"> — delivered ÷ (delivered + returned), by order, grouped by order date</span>
           </p>
         </div>
-        {stopped ? null : <CoverageNotice coverage={view.coverage} />}
       </div>
     </section>
   );
@@ -145,10 +140,8 @@ function HomeMetrics({ view, owed }: { view: HomeView; owed: { amounts: { amount
               rate.returned.toLocaleString()
             )}
           </span>
-          {money?.profit && !money.profit.complete ? (
-            <span className="self-start rounded-full bg-coral-100 px-2.5 py-0.5 text-xs font-bold text-coral-700">
-              at most — {money.profit.missing.length} cost{money.profit.missing.length === 1 ? "" : "s"} missing
-            </span>
+          {money?.profit ? (
+            <span className="text-xs text-gray-500">Delivered revenue less product cost, courier fees and ads</span>
           ) : null}
         </div>
       </div>
@@ -200,26 +193,17 @@ export function FinancePanel({ view }: { view: FinanceView }) {
         </Stat>
       </div>
       <FxNotice fx={view.fx} />
-      {/* Rule #17's second stage does not exist for any merchant yet (PLAN §10). */}
-      <Notice>
-        Received in bank: not yet available. Bank reconciliation needs Financify's cash ledger, which has not held a
-        settlement yet — so this shows what couriers paid, not what reached your account.
-      </Notice>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat
           label="Product cost, delivered orders"
-          note={view.cogsIncompleteOrders ? `${view.cogsIncompleteOrders} delivered order(s) have a line with no cost` : "At the cost when each order was placed"}
+          note="At the cost when each order was placed"
         >
           <MoneyList values={view.cogsDelivered} />
         </Stat>
         <Stat
           label="Courier fees"
-          note={
-            view.shippedOrdersWithoutFee
-              ? `Known for ${(view.shippedOrders - view.shippedOrdersWithoutFee).toLocaleString()} of ${view.shippedOrders.toLocaleString()} shipped orders`
-              : "Known for every shipped order"
-          }
+          note="Charged by the courier on shipped orders (Courierify)"
         >
           <MoneyList values={view.courierFees} />
         </Stat>
@@ -227,7 +211,7 @@ export function FinancePanel({ view }: { view: FinanceView }) {
           label="Ad spend"
           note={
             view.adSpend
-              ? `Fees ${view.adSpend.fees.map((f) => formatAmount(f.amount)).join(" + ") || "0"} on top · ad-platform days, ${view.adSpend.daysFetched} of ${view.adSpend.daysInPeriod} fetched`
+              ? `Fees ${view.adSpend.fees.map((f) => formatAmount(f.amount)).join(" + ") || "0"} on top · by ad-platform day`
               : "Needs Financify"
           }
         >
@@ -241,9 +225,6 @@ export function FinancePanel({ view }: { view: FinanceView }) {
           <>
             <p className="mt-2 font-display text-4xl font-bold tabular-nums">
               <MoneyList values={[{ amount: p.amount, currency: p.currency }]} />
-              {!p.complete ? (
-                <span className="ml-3 rounded-full bg-coral px-2.5 py-0.5 align-middle font-sans text-sm font-bold text-navy">at most</span>
-              ) : null}
             </p>
             <p className="mt-2 text-sm text-navy-muted">
               Delivered revenue {formatAmount(p.parts.deliveredRevenue)} − product cost {formatAmount(p.parts.cogsDelivered)} −
@@ -251,16 +232,15 @@ export function FinancePanel({ view }: { view: FinanceView }) {
               {p.parts.adSpend !== null ? formatAmount(p.parts.adSpend) : "not subtracted"}
               {view.roas !== null ? ` · ROAS ${view.roas.toFixed(2)} (delivered revenue ÷ ad spend)` : ""}
             </p>
-            {p.missing.length ? (
-              <div className="mt-3">
-                <Notice tone="warn">
-                  Not a final figure — missing: {p.missing.join("; ")}.
-                </Notice>
-              </div>
+            {view.stillOpen ? (
+              <p className="mt-1 text-sm text-navy-muted">
+                {view.stillOpen.toLocaleString()} orders from this period are still with the courier; their revenue counts
+                when they deliver.
+              </p>
             ) : null}
             <p className="mt-3 text-xs text-navy-muted">
-              Growzar's own definition, the same for every store. Financify's net profit follows this store's settings
-              {view.settings.settingsHash ? "" : " (not known: Financify is not connected)"} — see Settings → Profit.
+              Growzar's own definition, the same for every store. Financify's net profit follows this store's settings —
+              see Settings → Profit.
             </p>
           </>
         ) : (
@@ -362,10 +342,6 @@ export function OrdersPanel({ view, days }: { view: OrdersView; days: number }) 
           );
         })}
       </nav>
-      <Notice>
-        Buyer risk is not shown yet: it needs Courierify's network band or Preventify, neither of which Growzar reads in
-        this release.
-      </Notice>
       <div className="overflow-x-auto rounded-2xl bg-white">
         <table className="min-w-full text-sm">
           <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
@@ -432,7 +408,6 @@ export function ShippingPanel({ view }: { view: ShippingView }) {
           <MoneyList values={view.returnedValue} />
         </Stat>
       </div>
-      <CoverageNotice coverage={view.coverage} />
 
       <div className="overflow-x-auto rounded-2xl bg-white">
         <table className="min-w-full text-sm">
@@ -510,10 +485,6 @@ export function CustomersPanel({ view }: { view: CustomersView }) {
           </span>
         </Stat>
       </div>
-      <Notice>
-        Consent and opt-outs are not shown yet: they live in Retainify and WhatKaBot, which Growzar reads from the next
-        release.
-      </Notice>
       <div className="overflow-x-auto rounded-2xl bg-white">
         <table className="min-w-full text-sm">
           <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
@@ -527,7 +498,7 @@ export function CustomersPanel({ view }: { view: CustomersView }) {
           <tbody className="divide-y divide-gray-100">
             {view.top.map((c) => (
               <tr key={c.customerId}>
-                <td className="px-5 py-3 font-medium text-gray-900">{c.name ?? "Unnamed buyer"}</td>
+                <td className="px-5 py-3 font-medium text-gray-900">{c.name ?? (c.phoneTail ? `Buyer ···${c.phoneTail}` : "Buyer")}</td>
                 <td className="px-5 py-3 text-right tabular-nums">{c.orders}</td>
                 <td className="px-5 py-3"><DeliveryRateText rate={c.deliveryRate} /></td>
                 <td className="px-5 py-3 text-right"><MoneyList values={c.deliveredRevenue} /></td>

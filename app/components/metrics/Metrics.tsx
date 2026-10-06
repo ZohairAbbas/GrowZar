@@ -193,13 +193,28 @@ export function PeriodPicker({ days, options, keep = "" }: { days: number; optio
   );
 }
 
-export function CoverageNotice({ coverage }: { coverage: { shippedOrders: number; withParcel: number; degraded: boolean } }) {
-  if (!coverage.degraded) return null;
+/**
+ * The one line at the top of a section (D1): which sources behind its
+ * numbers are incomplete, and a link to the page that says why. The body of
+ * a screen carries no hedges of its own; this replaces them.
+ */
+export function CoverageLine({ gaps, days }: { gaps: Array<{ key: string; text: string }>; days: number }) {
+  const link = (
+    <Link to={`/settings/coverage?days=${days}`} className="font-semibold text-accent-600 hover:underline">
+      {gaps.length ? "What's missing" : "Data coverage"}
+    </Link>
+  );
+  if (!gaps.length) {
+    return (
+      <p className="text-xs text-gray-500">
+        Every source behind these numbers is complete for this period. {link}
+      </p>
+    );
+  }
   return (
-    <Notice tone="warn">
-      Only {coverage.withParcel.toLocaleString()} of {coverage.shippedOrders.toLocaleString()} shipped orders in this
-      period were booked through Courierify. For the rest, delivery status comes from Financify, and there is no
-      city, courier delivery time or courier fee.
-    </Notice>
+    <p className="text-xs text-gray-600">
+      <span className="font-semibold text-gray-700">Based on </span>
+      {gaps.map((g) => g.text).join(" · ")}. {link}
+    </p>
   );
 }

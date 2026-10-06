@@ -1,5 +1,5 @@
 import { NavLink } from "react-router";
-import { Building2, CreditCard, Scale, Shield, User, Users } from "lucide-react";
+import { Building2, CreditCard, Gauge, Scale, Shield, User, Users } from "lucide-react";
 
 import { cn } from "~/lib/utils";
 
@@ -43,6 +43,12 @@ const navigation: NavItem[] = [
     to: "/settings/profit",
     icon: Scale,
     description: "Each store's profit settings",
+  },
+  {
+    name: "Data coverage",
+    to: "/settings/coverage",
+    icon: Gauge,
+    description: "What each app sends, and what is missing",
   },
   {
     name: "Billing",
