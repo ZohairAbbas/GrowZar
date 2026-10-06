@@ -348,6 +348,14 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
 
       {state.kind === "open" && section === "home" ? (
         <section className="space-y-3">
+          {homeStores.length >= 2 ? (
+            <div className="flex items-center justify-between">
+              <h2 className="font-display text-lg font-bold text-gray-900">Your stores</h2>
+              <Link to={`/compare?days=${metrics?.period.days ?? 30}`} className="text-sm font-semibold text-accent-600 hover:underline">
+                Compare stores side by side →
+              </Link>
+            </div>
+          ) : null}
           {homeStores.length === 0 ? (
             <p className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-600">
               Nothing to show yet.

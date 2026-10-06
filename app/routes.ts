@@ -58,6 +58,8 @@ export default [
     route("inventory", "routes/section.tsx", { id: "section-inventory" }),
     route("marketing", "routes/section.tsx", { id: "section-marketing" }),
     route("inbox", "routes/section.tsx", { id: "section-inbox" }),
+    // Store versus store for multi-store organizations (Phase 4b, D5).
+    route("compare", "routes/compare.tsx"),
   ]),
 
   layout("routes/settings.tsx", [

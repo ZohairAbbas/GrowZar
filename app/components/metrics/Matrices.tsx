@@ -1,9 +1,10 @@
 import { Link } from "react-router";
 import { ArrowRight } from "lucide-react";
 
+import type { CampaignSpend } from "~/lib/metrics/campaigns";
 import { MIN_COSTED_LINE_SHARE, type CityCourierMatrix, type ConfirmationFunnel, type PayoutAgeing, type ProductPoint } from "~/lib/metrics/matrices";
 import { MIN_DECIDED_TO_RATE } from "~/lib/metrics/compare";
-import { formatAmount } from "./Metrics";
+import { Change, formatAmount } from "./Metrics";
 import { scopeLabel } from "./FilterBar";
 
 /**
@@ -55,7 +56,7 @@ export function ProductMatrix({
   // Volumes span orders of magnitude, so the x axis is logarithmic.
   const x = (n: number) => pad.l + (Math.log10(Math.max(1, n)) / Math.log10(maxX)) * (w - pad.l - pad.r);
   const y = (v: number) => pad.t + ((hi - v) / (hi - lo)) * (h - pad.t - pad.b);
-  const xTicks = [1, 10, 100, 1000, 10000].filter((t) => t <= maxX * 1.05 && t >= 10);
+  const xTicks = [1, 10, 100, 1000, 10000].filter((t) => t <= maxX * 1.05);
   const tick = hi - lo > 80 ? 20 : 10;
   const yTicks = Array.from({ length: Math.floor((hi - lo) / tick) + 1 }, (_, i) => Math.ceil(lo / tick) * tick + i * tick).filter((t) => t <= hi);
   const flagged = plotted.filter(looksProfitableIsNot);
@@ -380,6 +381,72 @@ export function ConfirmationFunnelView({
           </tbody>
         </table>
         <p className="mt-3 text-xs text-gray-500">Return rate is returned ÷ decided; under {min} decided orders the count is shown instead.</p>
+      </div>
+    </div>
+  );
+}
+
+// ── Campaigns (D5) ─────────────────────────────────────────────────────────
+
+const PLATFORM: Record<string, string> = { facebook: "Meta", tiktok: "TikTok", google: "Google", snapchat: "Snapchat" };
+const platformName = (p: string) => PLATFORM[p] ?? p.charAt(0).toUpperCase() + p.slice(1);
+
+export function CampaignTable({ data, compared }: { data: CampaignSpend; compared: boolean }) {
+  const amount = (a: string) => formatAmount(a).replace(/\.\d+$/, "");
+  return (
+    <div className="rounded-2xl bg-white p-5">
+      <h2 className="font-display text-lg font-bold text-gray-900">Where the ad money went</h2>
+      <p className="mt-1 text-sm text-gray-600">
+        {amount(data.total.amount)} {data.currency} across {data.campaigns.length.toLocaleString()} campaigns, plus{" "}
+        {amount(data.fees.amount)} in platform fees, by ad-platform day as the platforms reported it.
+      </p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {data.platforms.map((p) => (
+          <span key={p.platform} className="rounded-full bg-field px-3 py-1.5 text-sm">
+            <span className="font-semibold text-gray-900">{platformName(p.platform)}</span>{" "}
+            <span className="tabular-nums text-gray-700">
+              {amount(p.spend.amount)} · {p.share.toFixed(1)}% · {p.campaigns} {p.campaigns === 1 ? "campaign" : "campaigns"}
+            </span>
+          </span>
+        ))}
+      </div>
+      <div className="mt-4 overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
+            <tr>
+              <th className="py-2 pr-4">Campaign</th>
+              <th className="py-2 pr-4">Platform</th>
+              <th className="py-2 pr-4 text-right">Spend</th>
+              <th className="py-2 pr-4 text-right">Share</th>
+              <th className="py-2 pr-4 text-right">Days running</th>
+              <th className="py-2 text-right">{compared ? "Against previous period" : ""}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {data.campaigns.slice(0, 20).map((c) => (
+              <tr key={c.key}>
+                <td className="max-w-sm truncate py-2 pr-4 font-medium text-gray-900" title={c.name}>{c.name}</td>
+                <td className="py-2 pr-4 text-gray-600">{platformName(c.platform)}</td>
+                <td className="py-2 pr-4 text-right tabular-nums text-gray-900">{amount(c.spend.amount)}</td>
+                <td className="py-2 pr-4">
+                  <span className="flex items-center justify-end gap-2">
+                    <span className="h-2 w-16 rounded-sm bg-field">
+                      <span className="block h-2 rounded-sm bg-data-700" style={{ width: `${Math.min(100, (100 * c.share) / Math.max(1, data.campaigns[0]!.share))}%` }} />
+                    </span>
+                    <span className="w-12 text-right tabular-nums text-gray-700">{c.share.toFixed(1)}%</span>
+                  </span>
+                </td>
+                <td className="py-2 pr-4 text-right tabular-nums text-gray-700">{c.daysWithSpend}</td>
+                <td className="py-2 text-right">
+                  {compared ? c.change.previous === null ? <span className="text-xs text-gray-500">new</span> : <Change h={{ delta: c.change, trend: null, good: "neutral" }} kind="money" /> : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {data.campaigns.length > 20 ? (
+          <p className="mt-2 text-xs text-gray-500">Top 20 of {data.campaigns.length.toLocaleString()} campaigns by spend.</p>
+        ) : null}
       </div>
     </div>
   );

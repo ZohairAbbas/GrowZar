@@ -23,7 +23,7 @@ import {
 import { InboxCards } from "./FindingCards";
 import { scopeLabel } from "./FilterBar";
 import { CohortGrid, RepeatCurve } from "./Retention";
-import { CityCourierTable, ConfirmationFunnelView, PayoutAgeingTable, ProductMatrix } from "./Matrices";
+import { CampaignTable, CityCourierTable, ConfirmationFunnelView, PayoutAgeingTable, ProductMatrix } from "./Matrices";
 import type { ConfirmationFunnel, PayoutAgeing } from "~/lib/metrics/matrices";
 import { MIN_DECIDED_TO_RATE } from "~/lib/metrics/compare";
 import { MIN_COHORT_BUYERS, MIN_ELIGIBLE_BUYERS } from "~/lib/metrics/cohorts";
@@ -642,6 +642,7 @@ export function CustomersPanel({ view }: { view: CustomersView }) {
 export function MarketingPanel({ view, days, scope }: { view: MarketingView; days: number; scope: string }) {
   return (
     <section className="space-y-4">
+      {view.campaigns ? <CampaignTable data={view.campaigns} compared={view.campaignsCompared} /> : null}
       <ProductMatrix products={view.products} storeReturnRate={view.storeReturnRate} withAds={view.withAds} days={days} scope={scope} />
     </section>
   );
