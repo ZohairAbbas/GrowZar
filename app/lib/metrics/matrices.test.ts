@@ -63,6 +63,19 @@ describe("city × courier", () => {
     expect(m.cities[0]!.cells.tcs).toMatchObject({ orders: 5, rate: null });
     expect(m.cities[0]!.orders).toBe(25);
   });
+
+  it("lists the city table's rows when given, unmapped cities included", () => {
+    const rows = [
+      ...times(3, () => order()),
+      ...times(2, () => order({ city: null, cityRaw: "Lhr" })),
+      ...times(4, () => order({ city: "Karachi", courier: "tcs" })),
+    ];
+    const m = cityCourierMatrix(rows, ["unmapped", "Lahore", "Quetta"]);
+    expect(m.cities.map((c) => [c.city, c.orders])).toEqual([["unmapped", 2], ["Lahore", 3], ["Quetta", 0]]);
+    expect(m.cities[0]!.cells.leopards).toMatchObject({ orders: 2 });
+    expect(m.moreCities).toEqual({ cities: 1, orders: 4 });
+    expect(m.couriers).toEqual(["leopards"]);
+  });
 });
 
 describe("payout ageing", () => {
