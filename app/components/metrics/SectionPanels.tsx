@@ -633,7 +633,7 @@ export function ShippingPanel({
 
 // ── Customers ───────────────────────────────────────────────────────────────
 
-export function CustomersPanel({ view }: { view: CustomersView }) {
+export function CustomersPanel({ view, canSeeMoney = false }: { view: CustomersView; canSeeMoney?: boolean }) {
   return (
     <section className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
@@ -681,7 +681,7 @@ export function CustomersPanel({ view }: { view: CustomersView }) {
         </table>
         <p className="border-t border-gray-100 px-5 py-3 text-xs text-gray-500">Top buyers this period, by delivered orders.</p>
       </div>
-      <CohortGrid data={view.retention} minBuyers={MIN_COHORT_BUYERS} />
+      <CohortGrid data={view.retention} minBuyers={MIN_COHORT_BUYERS} canSeeMoney={canSeeMoney} />
       <RepeatCurve data={view.retention} minBuyers={MIN_ELIGIBLE_BUYERS} />
     </section>
   );

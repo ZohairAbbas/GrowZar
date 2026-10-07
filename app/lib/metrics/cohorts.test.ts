@@ -62,3 +62,31 @@ describe("merged buyers", () => {
     expect(resolveBuyer("q", merged)).toBe("q");
   });
 });
+
+describe("cohort money", () => {
+  const M = 1_000_000n;
+  it("sums revenue per cohort month, first month included, and profit only where costs cover the revenue", () => {
+    const orders: DeliveredOrder[] = [
+      { customerId: "a", localDay: "2026-07-10", revenue: 1000n * M, cost: 400n * M },
+      { customerId: "a", localDay: "2026-08-02", revenue: 500n * M, cost: 200n * M },
+      { customerId: "b", localDay: "2026-07-15", revenue: 1000n * M, cost: 700n * M },
+      { customerId: "b", localDay: "2026-08-20", revenue: 500n * M, cost: null }, // August is half costed
+      { customerId: "c", localDay: "2026-07-20", revenue: null }, // another currency
+    ];
+    const r = retention(orders, "2026-08-25", "2026-07-01");
+    const july = r.cohorts[0]!.money!;
+    expect(july.cells.map((c) => [c.offset, c.revenue, c.profit, c.partial])).toEqual([
+      [0, "2000.00", "900.00", false],
+      [1, "1000.00", null, true],
+    ]);
+    // 2500 of 3000 costed is under 90%: no total profit either.
+    expect(july).toMatchObject({ revenue: "3000.00", profit: null, perBuyer: "1000.00" });
+    expect(r.otherCurrencyOrders).toBe(1);
+    expect(r.costedRevenueShare).toBe(83.3);
+  });
+
+  it("has no money without revenue on the orders", () => {
+    const r = retention(buyers(3, "a", ["2026-07-10"]), "2026-08-25", null);
+    expect(r.cohorts[0]!.money).toBeNull();
+  });
+});
