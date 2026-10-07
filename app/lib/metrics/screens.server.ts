@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "../db.server";
 import { localDayOf, type Outcome } from "./order-grain";
+import { customRange, daysBetween, PERIODS, type Period } from "./period";
 import { bucketOf, byCity, byCourier, courierTiming, rollup, type Bucket, type DeliveryRate } from "./rollups";
 import {
   MIN_DECIDED_TO_RATE,
@@ -82,20 +83,31 @@ import {
  * Periods are the store's own local days (rule #5), ending today.
  */
 
-export const PERIODS = [7, 30, 60, 90] as const;
-export type PeriodDays = (typeof PERIODS)[number];
+export { PERIODS, type PeriodDays } from "./period";
 
+/**
+ * The period a request asks for: `from` and `to` when they make a valid
+ * custom range (see `customRange`), else `days` when it is one of PERIODS,
+ * else 30 days, ending today in the store's timezone.
+ */
 export function periodFrom(url: URL, timezone: string | null, at: Date = new Date()) {
-  const asked = Number(url.searchParams.get("days"));
-  const days: PeriodDays = (PERIODS as readonly number[]).includes(asked) ? (asked as PeriodDays) : 30;
   const tz = timezone ?? "UTC";
   const now = at.getTime();
+  const today = localDayOf(new Date(now), tz);
+  const custom = customRange(url.searchParams.get("from"), url.searchParams.get("to"), today);
+  const where = { timezone: tz, timezoneKnown: timezone !== null, today };
+  if (custom) {
+    return { ...custom, days: daysBetween(custom.from, custom.to), custom: true, query: `from=${custom.from}&to=${custom.to}`, ...where };
+  }
+  const asked = Number(url.searchParams.get("days"));
+  const days: number = (PERIODS as readonly number[]).includes(asked) ? asked : 30;
   return {
     days,
     from: localDayOf(new Date(now - (days - 1) * 86_400_000), tz),
-    to: localDayOf(new Date(now), tz),
-    timezone: tz,
-    timezoneKnown: timezone !== null,
+    to: today,
+    custom: false,
+    query: `days=${days}`,
+    ...where,
   };
 }
 
@@ -793,6 +805,7 @@ async function loadCampaignRows(storeId: string, from: string, to: string): Prom
 export type StoreComparison = {
   base: string;
   days: number;
+  period: Pick<Period, "days" | "from" | "to" | "custom" | "query"> & { today: string };
   columns: StoreColumn[];
 };
 
@@ -807,10 +820,10 @@ export async function storeComparison(
   url: URL,
 ): Promise<StoreComparison> {
   const columns: StoreColumn[] = [];
-  let days = 30;
+  // Every store's own days; the period's shape (and a custom range's dates) is the same for all.
+  let period = periodFrom(url, null);
   for (const store of stores) {
-    const period = periodFrom(url, store.timezone);
-    days = period.days;
+    period = periodFrom(url, store.timezone);
     const before = previousPeriod(period.from, period.to);
     const [s, prevCount] = await Promise.all([
       storeSummary(store.id, period.from, period.to),
@@ -841,7 +854,7 @@ export async function storeComparison(
       }),
     );
   }
-  return { base, days, columns };
+  return { base, days: period.days, period, columns };
 }
 
 // ── Finance depth (Phase 4c, A1–A4) ────────────────────────────────────────

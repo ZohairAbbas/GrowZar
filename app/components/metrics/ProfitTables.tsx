@@ -37,7 +37,7 @@ export function ProfitTables({
   data,
   labels,
   images,
-  days,
+  period,
   scope,
   initialTab = "product",
 }: {
@@ -45,14 +45,14 @@ export function ProfitTables({
   data: NonNullable<FinanceDepth["profitBy"]>;
   labels: Record<string, string>;
   images: Record<string, string>;
-  days: number;
+  period: string;
   scope: string;
 }) {
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>(initialTab);
   const table = data[tab];
   const name = (key: string) => (tab === "city" || tab === "courier" ? scopeLabel(key) : (labels[key] ?? key));
   const link = (key: string) => {
-    const base = `/orders?days=${days}${scope ? `&${scope}` : ""}`;
+    const base = `/orders?${period}${scope ? `&${scope}` : ""}`;
     if (tab === "city") return `${base}&city=${encodeURIComponent(key)}`;
     if (tab === "courier") return `${base}&courier=${encodeURIComponent(key)}`;
     if (tab === "product" && /^\d+$/.test(key)) return `${base}&variant=${key}`;

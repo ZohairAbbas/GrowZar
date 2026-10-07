@@ -37,7 +37,7 @@ const whole = (m: { amount: string; currency: string } | null | undefined) =>
   m ? `${formatAmount(m.amount).replace(/\.\d+$/, "")} ${m.currency}` : "";
 
 export default function Compare({ loaderData }: Route.ComponentProps) {
-  const { organization, canSeeMoney, periods, base, days, columns } = loaderData;
+  const { organization, canSeeMoney, periods, base, period, columns } = loaderData;
   const rows: Array<{ label: string; note?: string; cell: (c: (typeof columns)[number]) => ReactNode; money?: boolean }> = [
     {
       label: "Orders placed",
@@ -77,10 +77,11 @@ export default function Compare({ loaderData }: Route.ComponentProps) {
         <div>
           <h1 className="font-display text-3xl font-bold tracking-tight text-gray-900">Compare stores</h1>
           <p className="mt-1 text-gray-600">
-            {organization}: the same numbers for each store, over each store&apos;s own last {days} days.
+            {organization}: the same numbers for each store,{" "}
+            {period.custom ? `from ${period.from} to ${period.to}, in each store's own days.` : `over each store's own last ${period.days} days.`}
           </p>
         </div>
-        <PeriodPicker days={days} options={periods} />
+        <PeriodPicker period={period} options={periods} />
       </header>
 
       {columns.length < 2 ? (

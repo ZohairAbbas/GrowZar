@@ -16,7 +16,7 @@ const whole = (amount: string) => formatAmount(amount).replace(/\.\d+$/, "");
 const signed = (amount: string) =>
   Number(amount) === 0 ? "0" : amount.startsWith("-") ? `−${whole(amount.slice(1).replace(/^-/, ""))}` : whole(amount);
 
-export function MoneyBreakdown({ lines, days, scope }: { lines: FinanceDepth["breakdown"]; days: number; scope: string }) {
+export function MoneyBreakdown({ lines, period, scope }: { lines: FinanceDepth["breakdown"]; period: string; scope: string }) {
   const net = lines.find((l) => l.key === "net");
   const top = Math.max(1, ...lines.map((l) => Math.abs(Number(l.amount.amount))));
   const link: Record<string, string> = { open: "in_transit", returned: "returned", cancelled: "order_cancelled", unknown: "unknown" };
@@ -36,7 +36,7 @@ export function MoneyBreakdown({ lines, days, scope }: { lines: FinanceDepth["br
               <tr key={l.key} className={l.subtotal ? "border-t border-gray-100" : undefined}>
                 <td className={`py-1.5 pr-4 ${l.subtotal ? "font-semibold text-gray-900" : "pl-3 text-gray-700"}`}>
                   {link[l.key] && l.orders ? (
-                    <Link to={`/orders?days=${days}&outcome=${link[l.key]}${scope ? `&${scope}` : ""}`} className="hover:underline">
+                    <Link to={`/orders?${period}&outcome=${link[l.key]}${scope ? `&${scope}` : ""}`} className="hover:underline">
                       {l.label}
                     </Link>
                   ) : (
@@ -71,16 +71,16 @@ export function MoneyBreakdown({ lines, days, scope }: { lines: FinanceDepth["br
 
 export function CashTimelineCard({
   cash,
-  days,
+  period,
   scope,
   payment = null,
 }: {
   cash: FinanceDepth["cash"];
-  days: number;
+  period: string;
   scope: string;
   payment?: FinanceDepth["payment"];
 }) {
-  const q = (extra: string) => `/orders?days=${days}&${extra}${scope ? `&${scope}` : ""}`;
+  const q = (extra: string) => `/orders?${period}&${extra}${scope ? `&${scope}` : ""}`;
   const to: Record<string, string> = {
     not_dispatched: q("outcome=not_shipped"),
     booked: q("outcome=booked"),
