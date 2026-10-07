@@ -127,6 +127,9 @@ const FINANCIFY_FEEDS: EntityFeed[] = [
     // product; it is display data and nothing is counted from it.
     entity: "PRODUCT",
     path: "/api/v1/products",
+    // The endpoint allows 1–100 per page (by product, so a page can hold
+    // several hundred variants); our default of 200 was refused.
+    pageLimit: 100,
     idFields: ["variantId"],
     tombstoneKeys: ["deletedIds"],
   },
