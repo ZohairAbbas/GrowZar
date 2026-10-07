@@ -1,6 +1,9 @@
 import { Form, Link } from "react-router";
 import { X } from "lucide-react";
 
+import { withPeriod } from "~/lib/metrics/period";
+import { CustomRange, type PickedPeriod } from "./Metrics";
+
 /**
  * One filter bar per section (Phase 4b, D2): store, period, courier and
  * city. Store switches through /switch like the sidebar; the rest are query
@@ -22,7 +25,8 @@ const shortDay = (d: string) => {
 export function FilterBar({
   section,
   stores,
-  days,
+  period,
+  firstDay,
   periods,
   previous,
   historyFrom,
@@ -32,7 +36,9 @@ export function FilterBar({
 }: {
   section: string;
   stores: { activeId: string | null; list: Array<{ id: string; name: string }>; returnTo: string };
-  days: number;
+  period: PickedPeriod;
+  /** The first day of the store's history, the earliest a custom range can start. */
+  firstDay: string | null;
   periods: readonly number[];
   previous: { from: string; to: string };
   /** Set when the store's history starts after the previous period does. */
@@ -44,8 +50,7 @@ export function FilterBar({
   keep: string;
 }) {
   const query = (o: { days?: number; courier?: string | null; city?: string | null }) => {
-    const q = new URLSearchParams(keep);
-    q.set("days", String(o.days ?? days));
+    const q = withPeriod(new URLSearchParams(keep), o.days ? `days=${o.days}` : period.query);
     const courier = o.courier === undefined ? scope.courier : o.courier;
     const city = o.city === undefined ? scope.city : o.city;
     if (courier) q.set("courier", courier);
@@ -59,7 +64,7 @@ export function FilterBar({
       {stores.list.length > 1 ? (
         <Form method="post" action="/switch" className="contents">
           <input type="hidden" name="intent" value="switch-store" />
-          <input type="hidden" name="returnTo" value={`${stores.returnTo}?days=${days}`} />
+          <input type="hidden" name="returnTo" value={`${stores.returnTo}?${period.query}`} />
           <label className="sr-only" htmlFor="filter-store">Store</label>
           <select
             id="filter-store"
@@ -76,18 +81,22 @@ export function FilterBar({
         </Form>
       ) : null}
 
-      <nav aria-label="Period" className="inline-flex rounded-full bg-white p-1 text-sm font-semibold">
-        {periods.map((d) => (
-          <Link
-            key={d}
-            to={query({ days: d })}
-            preventScrollReset
-            aria-current={d === days ? "page" : undefined}
-            className={`rounded-full px-3 py-1 ${d === days ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
-          >
-            {d}d
-          </Link>
-        ))}
+      <nav aria-label="Period" className="inline-flex items-center rounded-full bg-white p-1 text-sm font-semibold">
+        {periods.map((d) => {
+          const on = !period.custom && d === period.days;
+          return (
+            <Link
+              key={d}
+              to={query({ days: d })}
+              preventScrollReset
+              aria-current={on ? "page" : undefined}
+              className={`rounded-full px-3 py-1 ${on ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
+            >
+              {d}d
+            </Link>
+          );
+        })}
+        <CustomRange period={period} keep={query({}).slice(1)} firstDay={firstDay} />
       </nav>
 
       {options ? (
@@ -95,7 +104,9 @@ export function FilterBar({
           {[...new URLSearchParams(keep).entries()].map(([k, v]) => (
             <input key={k} type="hidden" name={k} value={v} />
           ))}
-          <input type="hidden" name="days" value={days} />
+          {[...new URLSearchParams(period.query).entries()].map(([k, v]) => (
+            <input key={k} type="hidden" name={k} value={v} />
+          ))}
           <label className="sr-only" htmlFor="filter-courier">Courier</label>
           <select id="filter-courier" name="courier" defaultValue={scope.courier ?? ""} className={select} onChange={(e) => e.currentTarget.form?.requestSubmit()}>
             <option value="">All couriers</option>
@@ -127,7 +138,7 @@ export function FilterBar({
 
       <span className="text-xs text-gray-500">
         {historyFrom
-          ? `History starts ${shortDay(historyFrom)}, so there is no full previous ${days} days to compare with`
+          ? `History starts ${shortDay(historyFrom)}, so there is no full previous ${period.days} days to compare with`
           : `Compared with ${shortDay(previous.from)}–${shortDay(previous.to)}`}
         {(scope.courier || scope.city) && (section === "finance" || section === "home") ? " · ad spend is store-wide, so it is left out while filtered" : ""}
       </span>

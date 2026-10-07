@@ -126,7 +126,7 @@ type Money = { amount: string; currency: string };
 const money = (m: Money) => `${formatAmount(m.amount)} ${m.currency}`;
 const n = (x: number) => x.toLocaleString("en-GB");
 
-type CardProps = { id: string; days: number; canManage: boolean };
+type CardProps = { id: string; period: string; canManage: boolean };
 
 function Card({
   title,
@@ -182,13 +182,13 @@ function Sources({ by, extra }: { by: DecidedBy; extra?: string }) {
   );
 }
 
-function DisagreementCard({ f, days, id, canManage }: { f: DisagreementFinding } & CardProps) {
+function DisagreementCard({ f, period, id, canManage }: { f: DisagreementFinding } & CardProps) {
   return (
     <Card
       id={id}
       canManage={canManage}
       title={`Courierify and Financify disagree on what happened to ${n(f.total)} orders`}
-      link={{ to: `/orders?days=${days}&disagree=1`, label: `See the ${n(f.total)} orders` }}
+      link={{ to: `/orders?${period}&disagree=1`, label: `See the ${n(f.total)} orders` }}
     >
       <p>
         Growzar takes the courier's answer, through Courierify (rule #7). Financify's own screens count these
@@ -221,7 +221,7 @@ function DisagreementCard({ f, days, id, canManage }: { f: DisagreementFinding }
 const rateLine = (v: VariantRate) =>
   `${v.returnRate.toFixed(1)}% returned (${n(v.returned)} of ${n(v.decided)} decided orders${v.stillOpen ? `, ${n(v.stillOpen)} still open` : ""})`;
 
-function VariantCard({ f, days, id, canManage }: { f: VariantReturnsFinding } & CardProps) {
+function VariantCard({ f, period, id, canManage }: { f: VariantReturnsFinding } & CardProps) {
   return (
     <Card id={id} canManage={canManage} title={`${f.flagged.length === 1 ? "A product comes" : `${f.flagged.length} products come`} back far more often than the rest`}>
       <ul className="space-y-1.5">
@@ -229,7 +229,7 @@ function VariantCard({ f, days, id, canManage }: { f: VariantReturnsFinding } & 
           <li key={v.variantId}>
             <span className="font-medium">{v.title ?? `Variant ${v.variantId}`}</span>: {rateLine(v)}
             {v.cost ? `, ${n(v.excessReturns ?? 0)} more than the store's rate would give, about ${money(v.cost.total)} in courier charges` : ""}{" "}
-            <Link to={via(id, `/orders?days=${days}&variant=${v.variantId}`)} className="whitespace-nowrap text-primary-600 hover:underline">
+            <Link to={via(id, `/orders?${period}&variant=${v.variantId}`)} className="whitespace-nowrap text-primary-600 hover:underline">
               see orders
             </Link>
           </li>
@@ -262,7 +262,7 @@ function VariantCard({ f, days, id, canManage }: { f: VariantReturnsFinding } & 
   );
 }
 
-function MarginCard({ f, days, id, canManage }: { f: MarginFinding } & CardProps) {
+function MarginCard({ f, period, id, canManage }: { f: MarginFinding } & CardProps) {
   const negative = f.ceiling.amount.startsWith("-");
   const leaves: ReactNode[] = [
     `Courier fees on ${n(f.feesUnknown.orders)} of ${n(f.feesUnknown.shipped)} shipped orders: not recorded.`,
@@ -275,7 +275,7 @@ function MarginCard({ f, days, id, canManage }: { f: MarginFinding } & CardProps
       id={id}
       canManage={canManage}
       title={`Ads took ${f.adsShareOfDelivered.toFixed(1)}% of delivered revenue`}
-      link={{ to: `/finance?days=${days}`, label: "See the arithmetic" }}
+      link={{ to: `/finance?${period}`, label: "See the arithmetic" }}
     >
       <p>
         Delivered orders brought <strong>{money(f.deliveredRevenue)}</strong>. Less their COGS ({money(f.cogsDelivered)}), ad
@@ -298,13 +298,13 @@ function MarginCard({ f, days, id, canManage }: { f: MarginFinding } & CardProps
   );
 }
 
-function CourierifyStoppedCard({ f, days, id, canManage }: { f: CourierifyStoppedFinding } & CardProps) {
+function CourierifyStoppedCard({ f, period, id, canManage }: { f: CourierifyStoppedFinding } & CardProps) {
   return (
     <Card
       id={id}
       canManage={canManage}
       title={`Orders stopped going through Courierify after ${f.lastParcelDay}`}
-      link={{ to: `/orders?days=${days}&decidedBy=financify`, label: "See the orders Courierify did not ship" }}
+      link={{ to: `/orders?${period}&decidedBy=financify`, label: "See the orders Courierify did not ship" }}
     >
       <p>
         Only {n(f.withParcel)} of {n(f.shipped)} shipped orders in this period were booked through Courierify. The last
@@ -318,13 +318,13 @@ function CourierifyStoppedCard({ f, days, id, canManage }: { f: CourierifyStoppe
   );
 }
 
-function StuckCard({ f, days, id, canManage }: { f: StuckFinding } & CardProps) {
+function StuckCard({ f, period, id, canManage }: { f: StuckFinding } & CardProps) {
   return (
     <Card
       id={id}
       canManage={canManage}
       title={`${n(f.booked + f.inTransit)} parcels have not moved for days`}
-      link={{ to: `/orders?days=${days}&stuck=1`, label: `See the ${n(f.booked + f.inTransit)} orders` }}
+      link={{ to: `/orders?${period}&stuck=1`, label: `See the ${n(f.booked + f.inTransit)} orders` }}
     >
       <p>
         {f.booked ? <>{n(f.booked)} were booked 3 or more days ago and the courier has not picked them up. </> : null}
@@ -344,9 +344,9 @@ function StuckCard({ f, days, id, canManage }: { f: StuckFinding } & CardProps) 
   );
 }
 
-function NotReceivedCard({ f, days, id, canManage }: { f: NotReceivedFinding } & CardProps) {
+function NotReceivedCard({ f, period, id, canManage }: { f: NotReceivedFinding } & CardProps) {
   return (
-    <Card id={id} canManage={canManage} title={`${n(f.older)} returns not confirmed back after 14 days`} link={{ to: `/shipping?days=${days}`, label: "See returns on Shipping" }}>
+    <Card id={id} canManage={canManage} title={`${n(f.older)} returns not confirmed back after 14 days`} link={{ to: `/shipping?${period}`, label: "See returns on Shipping" }}>
       <p>
         {n(f.orders)} returned orders in this period are not marked received in Courierify, {n(f.older)} of them returned more than 14
         days ago
@@ -369,13 +369,13 @@ function NotReceivedCard({ f, days, id, canManage }: { f: NotReceivedFinding } &
   );
 }
 
-function DeductionsCard({ f, days, id, canManage }: { f: DeductionsFinding } & CardProps) {
+function DeductionsCard({ f, period, id, canManage }: { f: DeductionsFinding } & CardProps) {
   return (
     <Card
       id={id}
       canManage={canManage}
       title={`${payerName(f.payer)} kept COD its statement does not explain`}
-      link={{ to: `/finance?days=${days}`, label: "See courier deductions on Finance" }}
+      link={{ to: `/finance?${period}`, label: "See courier deductions on Finance" }}
     >
       <p>
         On {n(f.statements)} statement{f.statements === 1 ? "" : "s"} dated in this period, {payerName(f.payer)} collected{" "}
@@ -392,14 +392,14 @@ function DeductionsCard({ f, days, id, canManage }: { f: DeductionsFinding } & C
   );
 }
 
-function MissingFeesCard({ f, days, id, canManage }: { f: MissingFeesFinding } & CardProps) {
+function MissingFeesCard({ f, period, id, canManage }: { f: MissingFeesFinding } & CardProps) {
   const top = f.byCourier.slice(0, 4);
   return (
     <Card
       id={id}
       canManage={canManage}
       title={`No courier fee recorded on ${n(f.missing)} of ${n(f.viaCourierify)} orders shipped through Courierify`}
-      link={{ to: `/orders?days=${days}&feeMissing=1`, label: `See the ${n(f.missing)} orders` }}
+      link={{ to: `/orders?${period}&feeMissing=1`, label: `See the ${n(f.missing)} orders` }}
     >
       <p>
         Courierify holds no courier cost for these parcels, so neither Financify nor Growzar can subtract it, and every
@@ -441,14 +441,14 @@ const COURIER_NAMES: Record<string, string> = {
 };
 const payerName = (p: string) => COURIER_NAMES[p] ?? p.charAt(0).toUpperCase() + p.slice(1);
 
-function CashHeldCard({ f, days, id, canManage }: { f: CashHeldFinding } & CardProps) {
+function CashHeldCard({ f, period, id, canManage }: { f: CashHeldFinding } & CardProps) {
   const who = payerName(f.payer);
   return (
     <Card
       id={id}
       canManage={canManage}
       title={`No payout recorded from ${who} for ${n(f.orders)} delivered order${f.orders === 1 ? "" : "s"}`}
-      link={{ to: `/orders?days=${days}&awaitingPayout=${f.payer}`, label: `See the ${n(f.orders)} orders` }}
+      link={{ to: `/orders?${period}&awaitingPayout=${f.payer}`, label: `See the ${n(f.orders)} orders` }}
     >
       <p>
         COD of <MoneyList values={f.cod} />, delivered
@@ -494,14 +494,14 @@ function ReturnsCostLine({ cost }: { cost: CostEstimate }) {
   );
 }
 
-function UnconfirmedCard({ f, days, id, canManage }: { f: UnconfirmedFinding } & CardProps) {
+function UnconfirmedCard({ f, period, id, canManage }: { f: UnconfirmedFinding } & CardProps) {
   const ratio = f.confirmed.returnRate ? f.unanswered.returnRate / f.confirmed.returnRate : null;
   return (
     <Card
       id={id}
       canManage={canManage}
       title={`Orders nobody confirmed come back ${ratio ? `${ratio.toFixed(1)}× as often` : "more often"}`}
-      link={f.waiting ? { to: `/orders?days=${days}&unanswered=waiting`, label: `See the ${n(f.waiting)} waiting to be confirmed` } : undefined}
+      link={f.waiting ? { to: `/orders?${period}&unanswered=waiting`, label: `See the ${n(f.waiting)} waiting to be confirmed` } : undefined}
     >
       <p>
         Asked on WhatsApp and never answered: <strong>{f.unanswered.returnRate.toFixed(1)}%</strong> returned (
@@ -536,10 +536,10 @@ function UnconfirmedCard({ f, days, id, canManage }: { f: UnconfirmedFinding } &
 const routeName = (r: { courier: string; via: string }) =>
   `${payerName(r.courier)}${r.via === "direct" ? ", booked directly" : ` through ${payerName(r.via)}`}`;
 
-function CourierCityCard({ f, days, id, canManage }: { f: CourierCityFinding } & CardProps) {
+function CourierCityCard({ f, period, id, canManage }: { f: CourierCityFinding } & CardProps) {
   const w = f.worse[0]!;
   const list = (r: { courier: string; via: string }) =>
-    via(id, `/orders?days=${days}&city=${encodeURIComponent(f.city)}&courier=${r.courier}&via=${r.via}`);
+    via(id, `/orders?${period}&city=${encodeURIComponent(f.city)}&courier=${r.courier}&via=${r.via}`);
   return (
     <Card
       id={id}
@@ -572,13 +572,13 @@ function CourierCityCard({ f, days, id, canManage }: { f: CourierCityFinding } &
 
 const unsigned = (m: Money) => ({ ...m, amount: m.amount.replace(/^-/, "") });
 
-function ProductLossCard({ f, days, id, canManage }: { f: ProductLossFinding } & CardProps) {
+function ProductLossCard({ f, period, id, canManage }: { f: ProductLossFinding } & CardProps) {
   return (
     <Card
       id={id}
       canManage={canManage}
       title={`${f.title ?? `Variant ${f.variantId}`} loses money once returns are counted`}
-      link={{ to: `/orders?days=${days}&variant=${f.variantId}`, label: `See its ${n(f.orders)} orders` }}
+      link={{ to: `/orders?${period}&variant=${f.variantId}`, label: `See its ${n(f.orders)} orders` }}
     >
       <p>
         Had every order been delivered, it would have made {money(f.ifAllDelivered)} after its cost and its ad spend. As
@@ -602,13 +602,13 @@ function ProductLossCard({ f, days, id, canManage }: { f: ProductLossFinding } &
   );
 }
 
-function CityReturnsCard({ f, days, id, canManage }: { f: CityReturnsFinding } & CardProps) {
+function CityReturnsCard({ f, period, id, canManage }: { f: CityReturnsFinding } & CardProps) {
   return (
     <Card
       id={id}
       canManage={canManage}
       title={`Orders to ${f.city} come back far more often than the rest`}
-      link={{ to: `/orders?days=${days}&city=${encodeURIComponent(f.city)}`, label: `See the ${n(f.orders)} orders` }}
+      link={{ to: `/orders?${period}&city=${encodeURIComponent(f.city)}`, label: `See the ${n(f.orders)} orders` }}
     >
       <p>
         {f.city}: <strong>{f.returnRate.toFixed(1)}%</strong> returned ({n(f.returned)} of {n(f.decided)}). The rest of
@@ -625,7 +625,7 @@ function CityReturnsCard({ f, days, id, canManage }: { f: CityReturnsFinding } &
   );
 }
 
-export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string; to: string }) {
+export function InboxCards({ inbox, from, to, period }: { inbox: InboxView; from: string; to: string; period: string }) {
   const reopen = useFetcher();
   return (
     <section className="space-y-3" aria-labelledby="findings-heading">
@@ -644,7 +644,7 @@ export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string
           Nothing to show in this period. What was checked, and why it found nothing, is listed below.
         </p>
       ) : (
-        <InsightCarousel items={inbox.items} days={inbox.days} canManage={inbox.canManage} />
+        <InsightCarousel items={inbox.items} period={period} canManage={inbox.canManage} />
       )}
       {inbox.overflow ? (
         <p className="text-xs text-gray-500">{n(inbox.overflow)} more found; dismiss or snooze one to see the next.</p>
@@ -692,9 +692,9 @@ export function InboxCards({ inbox, from, to }: { inbox: InboxView; from: string
 }
 
 /** The full card for a finding: everything it measured and left out. Shown in Details. */
-function FullCard({ item, days, canManage }: { item: InboxItem; days: number; canManage: boolean }) {
+function FullCard({ item, period, canManage }: { item: InboxItem; period: string; canManage: boolean }) {
   const { id, insight } = item;
-  const props = { id, days, canManage };
+  const props = { id, period, canManage };
   const f = insight.finding;
   const card = (() => {
     switch (f.kind) {
@@ -751,7 +751,7 @@ const pct = (x: number) => `${x.toFixed(1)}%`;
 const figure = (m: Money) => `${m.currency} ${formatAmount(m.amount).replace(/\.\d+$/, "")}`;
 const first = (m: Money[]) => (m[0] ? figure(m[0]) : "—");
 
-function summaryOf(f: Finding, days: number): Summary {
+function summaryOf(f: Finding, period: string): Summary {
   switch (f.kind) {
     case "cash_held": {
       const who = payerName(f.payer);
@@ -761,7 +761,7 @@ function summaryOf(f: Finding, days: number): Summary {
         note: f.daysLate > 0 ? `${n(f.daysLate)} days past its usual ${f.medianGapDays}-day payout` : `Last payout ${f.lastPaidDay}`,
         next: `Check ${who}'s own statement, then chase the payout.`,
         affects: `${n(f.orders)} delivered orders`,
-        link: { to: `/orders?days=${days}&awaitingPayout=${f.payer}`, label: "See orders" },
+        link: { to: `/orders?${period}&awaitingPayout=${f.payer}`, label: "See orders" },
       };
     }
     case "unconfirmed_returns":
@@ -775,7 +775,7 @@ function summaryOf(f: Finding, days: number): Summary {
           ? { next: `Call the ${n(f.waiting)} unanswered order${f.waiting === 1 ? "" : "s"} before booking: they can still be confirmed or cancelled.` }
           : { why: `${n(f.excessReturns)} more returns than the confirmed rate would give.` }),
         affects: `${n(f.unanswered.decided)} unanswered orders`,
-        link: f.waiting ? { to: `/orders?days=${days}&unanswered=waiting`, label: "See orders" } : undefined,
+        link: f.waiting ? { to: `/orders?${period}&unanswered=waiting`, label: "See orders" } : undefined,
       };
     case "variant_returns": {
       const v = f.flagged[0]!;
@@ -788,7 +788,7 @@ function summaryOf(f: Finding, days: number): Summary {
           : `${f.flagged.length === 1 ? "" : `${name}: `}returned, against ${pct(f.store.returnRate)} for the whole store`,
         why: "Counted by order: a returned order counts against every product in it.",
         affects: `${n(v.decided)} decided orders`,
-        link: { to: `/orders?days=${days}&variant=${v.variantId}`, label: "See orders" },
+        link: { to: `/orders?${period}&variant=${v.variantId}`, label: "See orders" },
       };
     }
     case "margin": {
@@ -799,7 +799,7 @@ function summaryOf(f: Finding, days: number): Summary {
         note: loss ? "lost after cost and ads, at least" : "left after cost and ads, at most",
         why: "Before the rest of the courier fees and the cost of returns.",
         affects: `${n(f.delivered)} delivered orders`,
-        link: { to: `/finance?days=${days}`, label: "See the arithmetic" },
+        link: { to: `/finance?${period}`, label: "See the arithmetic" },
       };
     }
     case "product_loss":
@@ -809,7 +809,7 @@ function summaryOf(f: Finding, days: number): Summary {
         note: `lost at least, with ${pct(f.returnRate)} of its orders returned`,
         why: `Had every order been delivered it would have made ${money(f.ifAllDelivered)}.`,
         affects: `${n(f.orders)} orders`,
-        link: { to: `/orders?days=${days}&variant=${f.variantId}`, label: "See orders" },
+        link: { to: `/orders?${period}&variant=${f.variantId}`, label: "See orders" },
       };
     case "city_returns":
       return {
@@ -818,7 +818,7 @@ function summaryOf(f: Finding, days: number): Summary {
         note: `returned, against ${pct(f.rest.returnRate)} for the rest of the store`,
         why: "Unlikely to be chance alone (95%).",
         affects: `${n(f.orders)} orders`,
-        link: { to: `/orders?days=${days}&city=${encodeURIComponent(f.city)}`, label: "See orders" },
+        link: { to: `/orders?${period}&city=${encodeURIComponent(f.city)}`, label: "See orders" },
       };
     case "courier_for_city": {
       const w = f.worse[0]!;
@@ -829,7 +829,7 @@ function summaryOf(f: Finding, days: number): Summary {
         why: "Unlikely to be chance alone (95%), though what went each way can differ.",
         affects: `${n(f.best.decided + w.decided)} decided orders`,
         link: {
-          to: `/orders?days=${days}&city=${encodeURIComponent(f.city)}&courier=${f.best.courier}&via=${f.best.via}`,
+          to: `/orders?${period}&city=${encodeURIComponent(f.city)}&courier=${f.best.courier}&via=${f.best.via}`,
           label: "See orders",
         },
       };
@@ -843,7 +843,7 @@ function summaryOf(f: Finding, days: number): Summary {
           ? `Profit reads about ${figure(f.estimate.total)} too high (at the median fee of ${figure(f.estimate.medianFee)}).`
           : "Every profit figure that includes them reads higher than it is.",
         affects: `${n(f.missing)} shipped orders`,
-        link: { to: `/orders?days=${days}&feeMissing=1`, label: "See orders" },
+        link: { to: `/orders?${period}&feeMissing=1`, label: "See orders" },
       };
     case "disagreements":
       return {
@@ -852,7 +852,7 @@ function summaryOf(f: Finding, days: number): Summary {
         note: `orders, out of ${n(f.bothApps)} both apps know about`,
         why: "Growzar takes the courier's answer, through Courierify.",
         affects: `${n(f.total)} orders`,
-        link: { to: `/orders?days=${days}&disagree=1`, label: "See orders" },
+        link: { to: `/orders?${period}&disagree=1`, label: "See orders" },
       };
     case "stuck_parcels":
       return {
@@ -863,7 +863,7 @@ function summaryOf(f: Finding, days: number): Summary {
           : `${n(f.booked)} booked and never picked up, ${n(f.inTransit)} in transit with no update`,
         next: f.booked ? "Ask the courier to pick up the booked parcels, or cancel the ones that will not ship." : "Ask the courier where the parcels in transit are.",
         affects: `${n(f.booked + f.inTransit)} orders`,
-        link: { to: `/orders?days=${days}&stuck=1`, label: "See orders" },
+        link: { to: `/orders?${period}&stuck=1`, label: "See orders" },
       };
     case "returns_not_received":
       return {
@@ -872,7 +872,7 @@ function summaryOf(f: Finding, days: number): Summary {
         note: f.productCost ? `of product in ${n(f.orders)} returned orders not marked received in Courierify` : "returned orders not marked received in Courierify",
         next: "Check them against the courier's return slip, and mark the ones that arrived as received in Courierify.",
         affects: `${n(f.orders)} returned orders`,
-        link: { to: `/shipping?days=${days}`, label: "See returns" },
+        link: { to: `/shipping?${period}`, label: "See returns" },
       };
     case "courier_deductions":
       return {
@@ -881,7 +881,7 @@ function summaryOf(f: Finding, days: number): Summary {
         note: `${pct(f.unitemizedShare)} of the ${figure(f.cod)} COD it collected, on ${n(f.statements)} statement${f.statements === 1 ? "" : "s"}`,
         next: `Ask ${payerName(f.payer)} for a breakdown of the deduction.`,
         affects: `${n(f.statements)} statement${f.statements === 1 ? "" : "s"}`,
-        link: { to: `/finance?days=${days}`, label: "See deductions" },
+        link: { to: `/finance?${period}`, label: "See deductions" },
       };
     case "courierify_stopped":
       return {
@@ -890,7 +890,7 @@ function summaryOf(f: Finding, days: number): Summary {
         note: "shipped orders this period were booked through Courierify",
         why: "For the rest there is no courier time, city or fee, so those comparisons stop at that date.",
         affects: `${n(f.shipped - f.withParcel)} shipped orders`,
-        link: { to: `/orders?days=${days}&decidedBy=financify`, label: "See orders" },
+        link: { to: `/orders?${period}&decidedBy=financify`, label: "See orders" },
       };
   }
 }
@@ -901,10 +901,10 @@ const URGENCY = {
   context: { label: "Good to know", tone: "bg-field text-gray-600" },
 } as const;
 
-function CompactCard({ item, days, onDetails }: { item: InboxItem; days: number; onDetails: () => void }) {
+function CompactCard({ item, period, onDetails }: { item: InboxItem; period: string; onDetails: () => void }) {
   const { id, insight } = item;
   const f = insight.finding;
-  const s = summaryOf(f, days);
+  const s = summaryOf(f, period);
   const area = AREAS[f.kind];
   const urgency = URGENCY[insight.rank.group];
   return (
@@ -957,7 +957,7 @@ function CompactCard({ item, days, onDetails }: { item: InboxItem; days: number;
  * phone (swipe, or the arrows). Details opens the full card in a dialog,
  * with snooze and dismiss.
  */
-function InsightCarousel({ items, days, canManage }: { items: InboxItem[]; days: number; canManage: boolean }) {
+function InsightCarousel({ items, period, canManage }: { items: InboxItem[]; period: string; canManage: boolean }) {
   const track = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState(0);
   const [perView, setPerView] = useState(1);
@@ -1004,7 +1004,7 @@ function InsightCarousel({ items, days, canManage }: { items: InboxItem[]; days:
       >
         {items.map((item) => (
           <div key={item.id} className="w-[85%] flex-none snap-start sm:w-[calc((100%-1rem)/2)] xl:w-[calc((100%-2rem)/3)]">
-            <CompactCard item={item} days={days} onDetails={() => setOpen(item)} />
+            <CompactCard item={item} period={period} onDetails={() => setOpen(item)} />
           </div>
         ))}
       </div>
@@ -1043,7 +1043,7 @@ function InsightCarousel({ items, days, canManage }: { items: InboxItem[]; days:
             >
               <X className="h-4 w-4" />
             </button>
-            <FullCard item={open} days={days} canManage={canManage} />
+            <FullCard item={open} period={period} canManage={canManage} />
           </div>
         ) : null}
       </dialog>

@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router";
+import { Form, Link } from "react-router";
 import { AlertTriangle, Info } from "lucide-react";
+
+import { dayLabel, MAX_CUSTOM_DAYS, rangeLabel, withPeriod } from "~/lib/metrics/period";
 
 /**
  * Display pieces for the read-only screens (G-GZR2-5).
@@ -192,20 +194,68 @@ export function Notice({ tone = "info", children }: { tone?: "info" | "warn"; ch
   );
 }
 
-export function PeriodPicker({ days, options, keep = "" }: { days: number; options: readonly number[]; keep?: string }) {
+/** What a period picker needs to know about the period on screen. */
+export type PickedPeriod = { days: number; from: string; to: string; custom: boolean; query: string; today: string };
+
+/**
+ * "Custom": two dates and Apply, as a plain GET form so it works before
+ * scripts load. `keep` is the rest of the query (filters) to carry.
+ */
+export function CustomRange({ period, keep = "", firstDay = null }: { period: PickedPeriod; keep?: string; firstDay?: string | null }) {
+  const hidden = [...new URLSearchParams(keep).entries()].filter(([k]) => k !== "days" && k !== "from" && k !== "to");
+  const input = "rounded-lg border-0 bg-field px-2.5 py-1.5 text-sm text-gray-900 focus:ring-2 focus:ring-mint";
   return (
-    <nav aria-label="Period" className="inline-flex rounded-full bg-white p-1 text-sm font-semibold">
-      {options.map((d) => (
-        <Link
-          key={d}
-          to={`?days=${d}${keep ? `&${keep}` : ""}`}
-          preventScrollReset
-          aria-current={d === days ? "page" : undefined}
-          className={`rounded-full px-3.5 py-1.5 ${d === days ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
-        >
-          {d} days
-        </Link>
-      ))}
+    <details className="relative">
+      <summary
+        className={`cursor-pointer list-none rounded-full px-3 py-1 [&::-webkit-details-marker]:hidden ${
+          period.custom ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"
+        }`}
+      >
+        {period.custom ? rangeLabel(period.from, period.to) : "Custom"}
+      </summary>
+      <Form method="get" preventScrollReset className="absolute left-0 z-20 mt-2 w-max max-w-[calc(100vw-2rem)] rounded-2xl bg-white p-4 shadow-lg ring-1 ring-gray-200">
+        {hidden.map(([k, v]) => (
+          <input key={k} type="hidden" name={k} value={v} />
+        ))}
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="text-xs font-semibold text-gray-600">
+            From
+            <input type="date" name="from" required defaultValue={period.from} min={firstDay ?? undefined} max={period.today} className={`mt-1 block ${input}`} />
+          </label>
+          <label className="text-xs font-semibold text-gray-600">
+            To
+            <input type="date" name="to" required defaultValue={period.to} min={firstDay ?? undefined} max={period.today} className={`mt-1 block ${input}`} />
+          </label>
+          <button type="submit" className="rounded-full bg-navy px-4 py-2 text-sm font-bold text-white hover:bg-navy-surface">
+            Apply
+          </button>
+        </div>
+        <p className="mt-2 text-xs font-normal text-gray-500">
+          Up to {MAX_CUSTOM_DAYS} days, in the store&apos;s own days.{firstDay ? ` History starts ${dayLabel(firstDay)}.` : ""}
+        </p>
+      </Form>
+    </details>
+  );
+}
+
+export function PeriodPicker({ period, options, keep = "" }: { period: PickedPeriod; options: readonly number[]; keep?: string }) {
+  return (
+    <nav aria-label="Period" className="inline-flex items-center rounded-full bg-white p-1 text-sm font-semibold">
+      {options.map((d) => {
+        const on = !period.custom && d === period.days;
+        return (
+          <Link
+            key={d}
+            to={`?${withPeriod(new URLSearchParams(keep), `days=${d}`).toString()}`}
+            preventScrollReset
+            aria-current={on ? "page" : undefined}
+            className={`rounded-full px-3.5 py-1.5 ${on ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
+          >
+            {d} days
+          </Link>
+        );
+      })}
+      <CustomRange period={period} keep={keep} />
     </nav>
   );
 }
@@ -215,9 +265,9 @@ export function PeriodPicker({ days, options, keep = "" }: { days: number; optio
  * numbers are incomplete, and a link to the page that says why. The body of
  * a screen carries no hedges of its own; this replaces them.
  */
-export function CoverageLine({ gaps, days }: { gaps: Array<{ key: string; text: string }>; days: number }) {
+export function CoverageLine({ gaps, period }: { gaps: Array<{ key: string; text: string }>; period: string }) {
   const link = (
-    <Link to={`/settings/coverage?days=${days}`} className="font-semibold text-accent-600 hover:underline">
+    <Link to={`/settings/coverage?${period}`} className="font-semibold text-accent-600 hover:underline">
       {gaps.length ? "What's missing" : "Data coverage"}
     </Link>
   );

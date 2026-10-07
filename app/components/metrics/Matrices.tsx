@@ -37,7 +37,7 @@ export function ProductMatrix({
   products,
   storeReturnRate,
   withAds,
-  days,
+  period,
   scope,
   catalog = {},
 }: {
@@ -46,7 +46,7 @@ export function ProductMatrix({
   products: ProductPoint[];
   storeReturnRate: number | null;
   withAds: boolean;
-  days: number;
+  period: string;
   scope: string;
 }) {
   const plotted = products.filter((p) => p.plotted);
@@ -81,7 +81,7 @@ export function ProductMatrix({
     boxes.push({ x0, x1: x0 + width, y0: ly - 9, y1: ly + 4 });
     labels.push({ p, x: px, y: ly, left });
   }
-  const link = (p: ProductPoint) => `/orders?days=${days}&variant=${p.variantId}${scope ? `&${scope}` : ""}`;
+  const link = (p: ProductPoint) => `/orders?${period}&variant=${p.variantId}${scope ? `&${scope}` : ""}`;
 
   return (
     <div className="rounded-2xl bg-white p-5">
@@ -548,13 +548,13 @@ export function PayoutAgeingTable({ ageing }: { ageing: PayoutAgeing }) {
 
 export function ConfirmationFunnelView({
   funnel,
-  days,
+  period,
   scope,
   active,
   min,
 }: {
   funnel: ConfirmationFunnel;
-  days: number;
+  period: string;
   scope: string;
   active: string | null;
   min: number;
@@ -562,7 +562,7 @@ export function ConfirmationFunnelView({
   const total = funnel.total;
   const top = Math.max(1, total.orders);
   const step = (key: string) => funnel.steps.find((s) => s.key === key)?.orders ?? 0;
-  const base = `/orders?days=${days}${scope ? `&${scope}` : ""}`;
+  const base = `/orders?${period}${scope ? `&${scope}` : ""}`;
   return (
     <div className="overflow-x-auto rounded-2xl bg-white p-5">
       <h2 className="font-display text-lg font-bold text-gray-900">From order to outcome, by confirmation</h2>

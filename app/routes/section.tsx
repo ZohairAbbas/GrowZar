@@ -206,6 +206,7 @@ async function buildMetrics(
     coverage,
     previous: before,
     historyFrom: comparable ? null : historyFrom,
+    firstDay: historyFrom,
     scope,
     scopeOptions: section === "home" ? null : summary.scopeOptions,
     /** Query parameters a change of courier or city keeps (the finding filter and outcome). */
@@ -279,7 +280,8 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           <FilterBar
             section={section}
             stores={filterStores}
-            days={metrics.period.days}
+            period={metrics.period}
+            firstDay={metrics.firstDay}
             periods={metrics.periods}
             previous={metrics.previous}
             historyFrom={metrics.historyFrom}
@@ -287,12 +289,12 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             options={metrics.scopeOptions}
             keep={metrics.keepForScope}
           />
-          <CoverageLine gaps={metrics.coverage.gaps} days={metrics.period.days} />
+          <CoverageLine gaps={metrics.coverage.gaps} period={metrics.period.query} />
           {metrics.kind === "home" ? <HomePanel view={metrics.view} owed={metrics.owed} inbox={metrics.inbox} period={metrics.period} /> : null}
-          {metrics.kind === "finance" ? <FinancePanel view={metrics.view} ageing={metrics.ageing} depth={metrics.depth} days={metrics.period.days} scope={scopeQuery(metrics.scope)} /> : null}
-          {metrics.kind === "marketing" ? <MarketingPanel view={metrics.view} days={metrics.period.days} scope={scopeQuery(metrics.scope)} /> : null}
-          {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} days={metrics.period.days} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
-          {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} depth={metrics.depth} days={metrics.period.days} scope={metrics.scope} /> : null}
+          {metrics.kind === "finance" ? <FinancePanel view={metrics.view} ageing={metrics.ageing} depth={metrics.depth} period={metrics.period.query} scope={scopeQuery(metrics.scope)} /> : null}
+          {metrics.kind === "marketing" ? <MarketingPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} /> : null}
+          {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
+          {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} depth={metrics.depth} period={metrics.period.query} scope={metrics.scope} /> : null}
           {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} canSeeMoney={metrics.canSeeMoney} /> : null}
         </div>
       ) : null}
@@ -362,7 +364,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {homeStores.length >= 2 ? (
             <div className="flex items-center justify-between">
               <h2 className="font-display text-lg font-bold text-gray-900">Your stores</h2>
-              <Link to={`/compare?days=${metrics?.period.days ?? 30}`} className="text-sm font-semibold text-accent-600 hover:underline">
+              <Link to={`/compare?${metrics?.period.query ?? "days=30"}`} className="text-sm font-semibold text-accent-600 hover:underline">
                 Compare stores side by side →
               </Link>
             </div>

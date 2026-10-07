@@ -52,13 +52,13 @@ export function HomePanel({
   view: HomeView;
   owed: Owed | null;
   inbox: InboxView;
-  period: { from: string; to: string };
+  period: { from: string; to: string; query: string };
 }) {
   return (
     <section className="space-y-6">
       <HomeMetrics view={view} owed={owed} />
       <FxNotice fx={view.fx} />
-      <InboxCards inbox={inbox} from={period.from} to={period.to} />
+      <InboxCards inbox={inbox} from={period.from} to={period.to} period={period.query} />
     </section>
   );
 }
@@ -189,13 +189,13 @@ export function FinancePanel({
   view,
   ageing,
   depth,
-  days,
+  period,
   scope,
 }: {
   view: FinanceView;
   ageing: PayoutAgeing | null;
   depth: FinanceDepth | null;
-  days: number;
+  period: string;
   scope: string;
 }) {
   const p = view.profit;
@@ -295,11 +295,11 @@ export function FinancePanel({
       </div>
       {depth ? (
         <div className="grid gap-4 xl:grid-cols-2">
-          <MoneyBreakdown lines={depth.breakdown} days={days} scope={scope} />
-          <CashTimelineCard cash={depth.cash} days={days} scope={scope} payment={depth.payment} />
+          <MoneyBreakdown lines={depth.breakdown} period={period} scope={scope} />
+          <CashTimelineCard cash={depth.cash} period={period} scope={scope} payment={depth.payment} />
         </div>
       ) : null}
-      {depth?.profitBy ? <ProfitTables data={depth.profitBy} labels={depth.labels} images={depth.images} days={days} scope={scope} /> : null}
+      {depth?.profitBy ? <ProfitTables data={depth.profitBy} labels={depth.labels} images={depth.images} period={period} scope={scope} /> : null}
       {depth ? <CourierDeductions rows={depth.deductions} sources={depth.statementSources} /> : null}
       {ageing ? <PayoutAgeingTable ageing={ageing} /> : null}
     </section>
@@ -366,13 +366,13 @@ function ConfirmationPill({ value }: { value: string }) {
 
 export function OrdersPanel({
   view,
-  days,
+  period,
   scope = "",
   funnel,
   confirmation,
 }: {
   view: OrdersView;
-  days: number;
+  period: string;
   scope?: string;
   funnel: ConfirmationFunnel;
   confirmation: string | null;
@@ -400,7 +400,7 @@ export function OrdersPanel({
             <span className="text-navy-muted">{FILTER_LABEL(view.filter)}.</span>
           </p>
           <Link
-            to={`/orders?days=${days}${scope ? `&${scope}` : ""}`}
+            to={`/orders?${period}${scope ? `&${scope}` : ""}`}
             className="rounded-full bg-mint px-4 py-2 text-sm font-bold text-navy hover:bg-mint-200"
           >
             Show all orders
@@ -408,13 +408,13 @@ export function OrdersPanel({
         </div>
       ) : null}
       {view.filter ? null : (
-        <ConfirmationFunnelView funnel={funnel} days={days} scope={scope} active={confirmation} min={MIN_DECIDED_TO_RATE} />
+        <ConfirmationFunnelView funnel={funnel} period={period} scope={scope} active={confirmation} min={MIN_DECIDED_TO_RATE} />
       )}
       <nav aria-label="Filter by outcome" className="flex flex-wrap gap-2 text-sm font-semibold">
         {[{ outcome: null, count: view.allTotal }, ...view.byOutcome].map((o) => {
           const active = o.outcome === view.outcome;
           // Set, not append: a finding filter and the filter bar can both carry a city.
-          const q = new URLSearchParams(`days=${days}`);
+          const q = new URLSearchParams(period);
           for (const part of [view.filterQuery, scope, confirmation ? `confirmation=${confirmation}` : "", o.outcome ? `outcome=${o.outcome}` : ""]) {
             for (const [k, v] of new URLSearchParams(part)) q.set(k, v);
           }
@@ -494,18 +494,18 @@ export function OrdersPanel({
 export function ShippingPanel({
   view,
   depth,
-  days,
+  period,
   scope,
 }: {
   view: ShippingView;
   depth: ShippingDepth;
-  days: number;
+  period: string;
   scope: { courier: string | null; city: string | null };
 }) {
   // Every link keeps the period and whichever filter is already set (D2):
   // city → its couriers → the orders behind them.
   const link = (path: string, set: { courier?: string; city?: string }) => {
-    const q = new URLSearchParams({ days: String(days) });
+    const q = new URLSearchParams(period);
     const courier = set.courier ?? scope.courier;
     const city = set.city ?? scope.city;
     if (courier) q.set("courier", courier);
@@ -689,7 +689,7 @@ export function CustomersPanel({ view, canSeeMoney = false }: { view: CustomersV
 
 // ── Marketing ───────────────────────────────────────────────────────────────
 
-export function MarketingPanel({ view, days, scope }: { view: MarketingView; days: number; scope: string }) {
+export function MarketingPanel({ view, period, scope }: { view: MarketingView; period: string; scope: string }) {
   return (
     <section className="space-y-4">
       {view.outcomes ? (
@@ -697,7 +697,7 @@ export function MarketingPanel({ view, days, scope }: { view: MarketingView; day
       ) : view.campaigns ? (
         <CampaignTable data={view.campaigns} compared={view.campaignsCompared} />
       ) : null}
-      <ProductMatrix catalog={view.catalog} products={view.products} storeReturnRate={view.storeReturnRate} withAds={view.withAds} days={days} scope={scope} />
+      <ProductMatrix catalog={view.catalog} products={view.products} storeReturnRate={view.storeReturnRate} withAds={view.withAds} period={period} scope={scope} />
     </section>
   );
 }

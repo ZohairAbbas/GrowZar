@@ -83,7 +83,7 @@ export default function Coverage({ loaderData }: Route.ComponentProps) {
               sends, how complete it is, and what that does to the numbers.
             </p>
           </div>
-          <PeriodPicker days={period.days} options={periods} />
+          <PeriodPicker period={period} options={periods} />
         </div>
       </section>
 
