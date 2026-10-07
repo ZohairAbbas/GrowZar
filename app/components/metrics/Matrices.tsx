@@ -37,7 +37,10 @@ export function ProductMatrix({
   withAds,
   days,
   scope,
+  catalog = {},
 }: {
+  /** Titles and images by variant (Financify's catalogue); display only. */
+  catalog?: Record<string, { title: string | null; imageUrl: string | null }>;
   products: ProductPoint[];
   storeReturnRate: number | null;
   withAds: boolean;
@@ -148,7 +151,25 @@ export function ProductMatrix({
           <tbody className="divide-y divide-gray-100">
             {products.slice(0, 25).map((p) => (
               <tr key={p.variantId} className={looksProfitableIsNot(p) && p.plotted ? "bg-coral-50" : undefined}>
-                <td className="max-w-xs truncate py-2 pr-4 font-medium text-gray-900" title={name(p)}>{name(p)}</td>
+                <td className="max-w-xs py-2 pr-4">
+                  <span className="flex items-center gap-2.5">
+                    {catalog[p.variantId]?.imageUrl ? (
+                      <img
+                        src={`${catalog[p.variantId]!.imageUrl}${catalog[p.variantId]!.imageUrl!.includes("?") ? "&" : "?"}width=64`}
+                        alt=""
+                        width={32}
+                        height={32}
+                        loading="lazy"
+                        className="h-8 w-8 flex-shrink-0 rounded-md bg-field object-cover"
+                      />
+                    ) : (
+                      <span className="h-8 w-8 flex-shrink-0 rounded-md bg-field" aria-hidden="true" />
+                    )}
+                    <span className="truncate font-medium text-gray-900" title={catalog[p.variantId]?.title ?? name(p)}>
+                      {catalog[p.variantId]?.title ?? name(p)}
+                    </span>
+                  </span>
+                </td>
                 <td className="py-2 pr-4 text-right tabular-nums">{p.delivered.toLocaleString()}</td>
                 <td className="py-2 pr-4 text-right tabular-nums text-gray-500">{p.decided.toLocaleString()}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{p.decided >= MIN_DECIDED_TO_RATE ? `${p.returnRate.toFixed(1)}%` : ""}</td>

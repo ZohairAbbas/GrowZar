@@ -121,6 +121,15 @@ const FINANCIFY_FEEDS: EntityFeed[] = [
     idFields: ["orderId", "shopifyOrderId", "id"],
     tombstoneKeys: ["deletedIds"],
   },
+  {
+    // One row per variant, for titles and images (2026-10-07). Deleted
+    // products are not reported, so a stored variant can outlive its
+    // product; it is display data and nothing is counted from it.
+    entity: "PRODUCT",
+    path: "/api/v1/products",
+    idFields: ["variantId"],
+    tombstoneKeys: ["deletedIds"],
+  },
 ];
 
 export const APP_FEEDS: Partial<Record<SuiteApp, EntityFeed[]>> = {

@@ -229,6 +229,10 @@ enum SyncEntity {
   /// largest thing Growzar stores, and a JSONB copy of every row would roughly
   /// double its size for nothing.
   SHIPMENT_EVENT
+  /// Financify's product catalogue, one row per variant (G-FIN3 follow-up,
+  /// `/api/v1/products`): titles, SKU, status and image. Display only; the
+  /// variant id stays the product key (rule #30).
+  PRODUCT
 }
 
 enum SyncRunStatus {

@@ -69,7 +69,17 @@ export function MoneyBreakdown({ lines, days, scope }: { lines: FinanceDepth["br
   );
 }
 
-export function CashTimelineCard({ cash, days, scope }: { cash: FinanceDepth["cash"]; days: number; scope: string }) {
+export function CashTimelineCard({
+  cash,
+  days,
+  scope,
+  payment = null,
+}: {
+  cash: FinanceDepth["cash"];
+  days: number;
+  scope: string;
+  payment?: FinanceDepth["payment"];
+}) {
   const q = (extra: string) => `/orders?days=${days}&${extra}${scope ? `&${scope}` : ""}`;
   const to: Record<string, string> = {
     not_dispatched: q("outcome=not_shipped"),
@@ -89,7 +99,12 @@ export function CashTimelineCard({ cash, days, scope }: { cash: FinanceDepth["ca
   return (
     <div className="rounded-2xl bg-white p-5">
       <h2 className="font-display text-lg font-bold text-gray-900">Where the cash is</h2>
-      <p className="mt-1 text-sm text-gray-600">This period&apos;s orders by where their money is today.</p>
+      <p className="mt-1 text-sm text-gray-600">
+        This period&apos;s orders by where their money is today.
+        {payment
+          ? ` ${((100 * payment.cod) / payment.orders).toFixed(1)}% cash on delivery, ${((100 * payment.prepaid) / payment.orders).toFixed(1)}% prepaid${payment.unknown ? `, ${payment.unknown} unknown` : ""} (${payment.orders.toLocaleString()} orders).`
+          : ""}
+      </p>
       <div className="mt-4 flex h-3 w-full gap-[2px] overflow-hidden rounded-sm" aria-hidden="true">
         {cash.stages.map((s) => (
           <span key={s.key} className={tone[s.key] ?? "bg-data-700/40"} style={{ width: `${(100 * s.orders) / total}%` }} />
