@@ -1,4 +1,6 @@
-import type { Retention } from "~/lib/metrics/cohorts";
+import { useState } from "react";
+
+import { MIN_COSTED_REVENUE_SHARE, type Retention } from "~/lib/metrics/cohorts";
 
 /**
  * D3's two views of repeat behaviour: the cohort grid (rows are the month of
@@ -23,23 +25,72 @@ const STEPS = [
   "bg-mint-600 text-white",
 ];
 
-export function CohortGrid({ data, minBuyers }: { data: Retention; minBuyers: number }) {
+type CohortView = "share" | "revenue" | "profit";
+
+/** 12,345 · 845k · 1.23M: short enough for a grid cell; the full figure is in the hover text. */
+function compact(amount: string): string {
+  const n = Number(amount);
+  const a = Math.abs(n);
+  const text = a >= 1e6 ? `${(a / 1e6).toFixed(2)}M` : a >= 1e4 ? `${Math.round(a / 1e3)}k` : Math.round(a).toLocaleString();
+  return `${n < 0 && Math.round(a) !== 0 ? "−" : ""}${text}`;
+}
+const full = (amount: string) => Math.round(Number(amount)).toLocaleString();
+
+export function CohortGrid({
+  data,
+  minBuyers,
+  canSeeMoney = false,
+  initialView = "share",
+}: {
+  data: Retention;
+  minBuyers: number;
+  canSeeMoney?: boolean;
+  initialView?: CohortView;
+}) {
+  const hasMoney = data.currency !== null && data.cohorts.some((c) => c.money);
+  const views: Array<[CohortView, string]> = [
+    ["share", "Came back"],
+    ...(hasMoney ? ([["revenue", "Revenue"]] as Array<[CohortView, string]>) : []),
+    ...(hasMoney && canSeeMoney ? ([["profit", "Gross profit"]] as Array<[CohortView, string]>) : []),
+  ];
+  const [view, setView] = useState<CohortView>(initialView);
   const shares = data.cohorts.flatMap((c) => c.cells.map((x) => x.share ?? 0));
   const top = Math.max(1, ...shares);
   const step = (share: number) => STEPS[Math.min(STEPS.length - 1, Math.floor((share / top) * STEPS.length))]!;
   const columns = Array.from({ length: data.maxOffset }, (_, i) => i + 1);
+  const months = (m: number) => `+${m} ${m === 1 ? "month" : "months"}`;
 
   return (
     <div className="overflow-x-auto rounded-2xl bg-white p-5">
-      <h2 className="font-display text-lg font-bold text-gray-900">Who came back</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-lg font-bold text-gray-900">Who came back</h2>
+        {views.length > 1 ? (
+          <nav aria-label="Show" className="inline-flex rounded-full bg-field p-1 text-sm font-semibold">
+            {views.map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setView(key)}
+                aria-pressed={view === key}
+                className={`rounded-full px-3 py-1 ${view === key ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+        ) : null}
+      </div>
       <p className="mt-1 text-sm text-gray-600">
-        Buyers grouped by the month of their first delivered order; each cell is the share who had another delivered
-        order that many months later.
+        {view === "share"
+          ? "Buyers grouped by the month of their first delivered order; each cell is the share who had another delivered order that many months later."
+          : view === "revenue"
+            ? `Buyers grouped by the month of their first delivered order; each cell is what they paid for delivered orders that month, in ${data.currency}. The first month includes the first order.`
+            : `Buyers grouped by the month of their first delivered order; each cell is delivered revenue less product cost that month, in ${data.currency}. Courier fees and ads are not taken off.`}
         {data.historyFrom ? ` First order means first since ${dayLabel(data.historyFrom)}, when this store's history starts.` : ""}
       </p>
       {data.cohorts.length === 0 ? (
         <p className="mt-4 text-sm text-gray-500">No delivered orders with a buyer yet.</p>
-      ) : (
+      ) : view === "share" ? (
         <table className="mt-4 min-w-full border-separate border-spacing-[2px] text-sm">
           <thead className="text-left text-xs font-semibold text-gray-500">
             <tr>
@@ -47,7 +98,7 @@ export function CohortGrid({ data, minBuyers }: { data: Retention; minBuyers: nu
               <th className="py-2 pr-4 text-right">Buyers</th>
               {columns.map((m) => (
                 <th key={m} className="px-2 py-2 text-center">
-                  +{m} {m === 1 ? "month" : "months"}
+                  {months(m)}
                 </th>
               ))}
             </tr>
@@ -55,10 +106,7 @@ export function CohortGrid({ data, minBuyers }: { data: Retention; minBuyers: nu
           <tbody>
             {data.cohorts.map((c) => (
               <tr key={c.month}>
-                <td className="whitespace-nowrap py-2 pr-4 font-medium text-gray-900">
-                  {monthLabel(c.month)}
-                  {c.partialFirstMonth ? <span className="ml-1 text-xs font-normal text-gray-500">(from {dayLabel(data.historyFrom!).replace(/ \d{4}$/, "")})</span> : null}
-                </td>
+                <CohortName month={c.month} partial={c.partialFirstMonth} historyFrom={data.historyFrom} />
                 <td className="py-2 pr-4 text-right tabular-nums text-gray-700">{c.buyers.toLocaleString()}</td>
                 {columns.map((m) => {
                   const cell = c.cells.find((x) => x.offset === m);
@@ -86,12 +134,93 @@ export function CohortGrid({ data, minBuyers }: { data: Retention; minBuyers: nu
             ))}
           </tbody>
         </table>
+      ) : (
+        <MoneyGrid data={data} view={view} months={months} />
       )}
       <p className="mt-3 text-xs text-gray-500">
-        Delivered orders only. A cohort under {minBuyers} buyers shows its count without a share. A dashed cell is the
-        current month, still filling.
+        {view === "share"
+          ? `Delivered orders only. A cohort under ${minBuyers} buyers shows its count without a share. A dashed cell is the current month, still filling.`
+          : view === "revenue"
+            ? "Delivered orders only. A dashed cell is the current month, still filling."
+            : `Delivered orders with a product cost. A cell where under ${Math.round(100 * MIN_COSTED_REVENUE_SHARE)}% of revenue has a cost says so instead of showing a profit. A dashed cell is the current month, still filling.${
+                data.costedRevenueShare !== null && data.costedRevenueShare < 100 * MIN_COSTED_REVENUE_SHARE
+                  ? ` Only ${data.costedRevenueShare.toFixed(1)}% of this store's delivered revenue has a product cost; costs are entered in Financify.`
+                  : ""
+              }`}
+        {view !== "share" && data.otherCurrencyOrders
+          ? ` ${data.otherCurrencyOrders.toLocaleString()} delivered orders in another currency are left out.`
+          : ""}
       </p>
     </div>
+  );
+}
+
+function CohortName({ month, partial, historyFrom }: { month: string; partial: boolean; historyFrom: string | null }) {
+  return (
+    <td className="whitespace-nowrap py-2 pr-4 font-medium text-gray-900">
+      {monthLabel(month)}
+      {partial && historyFrom ? <span className="ml-1 text-xs font-normal text-gray-500">(from {dayLabel(historyFrom).replace(/ \d{4}$/, "")})</span> : null}
+    </td>
+  );
+}
+
+/** Revenue or gross profit per cohort and month, the first month included, then the cohort's total and per buyer. */
+function MoneyGrid({ data, view, months }: { data: Retention; view: "revenue" | "profit"; months: (m: number) => string }) {
+  const columns = Array.from({ length: data.maxOffset + 1 }, (_, i) => i);
+  const valueOf = (x: { revenue: string; profit: string | null }) => (view === "revenue" ? x.revenue : x.profit);
+  const top = Math.max(1, ...data.cohorts.flatMap((c) => (c.money?.cells ?? []).map((x) => Number(valueOf(x) ?? 0))));
+  const step = (v: number) => STEPS[Math.min(STEPS.length - 1, Math.floor((v / top) * STEPS.length))]!;
+  return (
+    <table className="mt-4 min-w-full border-separate border-spacing-[2px] text-sm">
+      <thead className="text-left text-xs font-semibold text-gray-500">
+        <tr>
+          <th className="py-2 pr-4">First order</th>
+          <th className="py-2 pr-4 text-right">Buyers</th>
+          {columns.map((m) => (
+            <th key={m} className="px-2 py-2 text-center">
+              {m === 0 ? "First month" : months(m)}
+            </th>
+          ))}
+          <th className="px-2 py-2 text-right">Total</th>
+          {view === "revenue" ? <th className="px-2 py-2 text-right">Per buyer</th> : null}
+        </tr>
+      </thead>
+      <tbody>
+        {data.cohorts.map((c) => (
+          <tr key={c.month}>
+            <CohortName month={c.month} partial={c.partialFirstMonth} historyFrom={data.historyFrom} />
+            <td className="py-2 pr-4 text-right tabular-nums text-gray-700">{c.buyers.toLocaleString()}</td>
+            {columns.map((m) => {
+              const cell = c.money?.cells.find((x) => x.offset === m);
+              if (!cell) return <td key={m} />;
+              const v = valueOf(cell);
+              const dashed = cell.partial ? "outline-dashed outline-1 -outline-offset-2 outline-gray-500" : "";
+              if (v === null) {
+                return (
+                  <td key={m} title={`${monthLabel(c.month)} buyers, ${m === 0 ? "first month" : months(m)}: revenue ${full(cell.revenue)}, too little of it has a product cost`} className={`rounded-md bg-field px-2 py-2 text-center text-xs text-gray-500 ${dashed}`}>
+                    costs missing
+                  </td>
+                );
+              }
+              const n = Number(v);
+              return (
+                <td
+                  key={m}
+                  title={`${monthLabel(c.month)} buyers, ${m === 0 ? "first month" : months(m)}: ${full(v)} ${data.currency}`}
+                  className={`rounded-md px-2 py-2 text-center font-semibold tabular-nums ${n < 0 ? "bg-coral-100 text-coral-700" : n === 0 ? "bg-field text-gray-500" : step(n)} ${dashed}`}
+                >
+                  {compact(v)}
+                </td>
+              );
+            })}
+            <td className="px-2 py-2 text-right font-semibold tabular-nums text-gray-900">
+              {c.money ? (valueOf(c.money) === null ? <span className="text-xs font-normal text-gray-500">costs missing</span> : full(valueOf(c.money)!)) : ""}
+            </td>
+            {view === "revenue" ? <td className="px-2 py-2 text-right tabular-nums text-gray-700">{c.money ? full(c.money.perBuyer) : ""}</td> : null}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

@@ -583,7 +583,7 @@ export type CustomersView = {
  * they spell their number. Lifetime figures (rule #20) come from every order
  * in the grain, not just the period's.
  */
-export async function customersView(storeId: string, s: StoreSummary, prev: StoreSummary): Promise<CustomersView> {
+export async function customersView(storeId: string, s: StoreSummary, prev: StoreSummary, canSeeMoney = false): Promise<CustomersView> {
   const inPeriod = new Set(s.rows.map((r) => r.customerId).filter((c): c is string => !!c));
   const inPrev = new Set(prev.rows.map((r) => r.customerId).filter((c): c is string => !!c));
   // Orders up to each period's end, so the previous period's repeat share is
@@ -620,7 +620,7 @@ export async function customersView(storeId: string, s: StoreSummary, prev: Stor
     customers: await prisma.customer.count({ where: { storeId, mergedIntoId: null } }),
     buyersInPeriod: inPeriod.size,
     repeatBuyers: repeat,
-    retention: await storeRetention(storeId, s.period.to, s.scope),
+    retention: await storeRetention(storeId, s.period.to, s.scope, s.store.currency, canSeeMoney),
     compare: {
       buyers: headline(countDelta(inPeriod.size, inPrev.size), weeklyDistinct(s.rows, s.period.from, s.period.to, (o) => o.customerId)),
       repeatShare: headline(
@@ -649,23 +649,43 @@ export async function customersView(storeId: string, s: StoreSummary, prev: Stor
 /**
  * Every delivered order with a buyer, whatever its date: cohorts are built
  * over all of the history Growzar holds, filtered by courier and city like
- * the rest of the section. Two columns per order, one query.
+ * the rest of the section. With the store's currency, each order also
+ * carries its delivered revenue and, when fully costed, its product cost
+ * (in that currency only, rule #4); the cost is left out for a role that
+ * may not see Finance, so no gross profit reaches it.
  */
-export async function storeRetention(storeId: string, asOf: string, scope: Scope): Promise<Retention> {
+export async function storeRetention(
+  storeId: string,
+  asOf: string,
+  scope: Scope,
+  currency: string | null = null,
+  canSeeMoney = false,
+): Promise<Retention> {
   const [orders, merged, first] = await Promise.all([
     prisma.orderGrain.findMany({
       where: { storeId, outcome: "delivered", customerId: { not: null }, localDay: { not: null }, ...scopeWhere(scope) },
-      select: { customerId: true, localDay: true },
+      select: { customerId: true, localDay: true, currency: true, deliveredAmount: true, cogsAmount: true, cogsCurrency: true, cogsComplete: true },
     }),
     prisma.customer.findMany({ where: { storeId, mergedIntoId: { not: null } }, select: { id: true, mergedIntoId: true } }),
     prisma.orderGrain.aggregate({ where: { storeId }, _min: { localDay: true } }),
   ]);
   const into = new Map(merged.map((c) => [c.id, c.mergedIntoId!]));
-  return retention(
-    orders.map((o) => ({ customerId: resolveBuyer(o.customerId!, into), localDay: o.localDay! })),
+  const units = (d: { toFixed(n: number): string } | null) => (d === null ? null : parseAmount(d.toFixed(6)));
+  const r = retention(
+    orders.map((o) => ({
+      customerId: resolveBuyer(o.customerId!, into),
+      localDay: o.localDay!,
+      ...(currency
+        ? {
+            revenue: o.currency === currency ? (units(o.deliveredAmount) ?? 0n) : null,
+            cost: canSeeMoney && o.cogsComplete && o.cogsCurrency === currency ? units(o.cogsAmount) : null,
+          }
+        : {}),
+    })),
     asOf,
     first._min.localDay,
   );
+  return { ...r, currency };
 }
 
 // ── Finance: payout ageing (D4) ────────────────────────────────────────────

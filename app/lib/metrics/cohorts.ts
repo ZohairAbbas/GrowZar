@@ -10,13 +10,43 @@
  * month, which is why the screen states when the history starts.
  */
 
+import { formatAmount } from "./money";
+
 /** Buyers a cohort needs before its cells show a share. */
 export const MIN_COHORT_BUYERS = 20;
 /** Buyers a repeat-curve point needs before it is drawn. */
 export const MIN_ELIGIBLE_BUYERS = 20;
 export const REPEAT_WINDOWS = [7, 14, 30, 45, 60, 90] as const;
 
-export type DeliveredOrder = { customerId: string; localDay: string };
+export type DeliveredOrder = {
+  customerId: string;
+  localDay: string;
+  /** Delivered revenue in the store's currency, millionths; null in another currency. */
+  revenue?: bigint | null;
+  /** Product cost in the store's currency, millionths; null when not fully costed. */
+  cost?: bigint | null;
+};
+
+/** Share of a cell's delivered revenue that must carry a product cost before it shows a gross profit. */
+export const MIN_COSTED_REVENUE_SHARE = 0.9;
+
+/** What a cohort's buyers spent in one month after their first (offset 0 is the first month itself). */
+export type CohortMoneyCell = {
+  offset: number;
+  /** Decimal string, store currency. */
+  revenue: string;
+  /** Revenue less product cost over the costed orders; null under MIN_COSTED_REVENUE_SHARE. */
+  profit: string | null;
+  partial: boolean;
+};
+
+export type CohortMoney = {
+  cells: CohortMoneyCell[];
+  revenue: string;
+  profit: string | null;
+  /** Revenue ÷ the cohort's buyers. */
+  perBuyer: string;
+};
 
 export type CohortCell = {
   /** Months after the cohort's first month, from 1. */
@@ -36,6 +66,8 @@ export type CohortRow = {
   /** The first month is the one history starts in, so it began mid-month. */
   partialFirstMonth: boolean;
   cells: CohortCell[];
+  /** Null when no order carries revenue in the store's currency. */
+  money: CohortMoney | null;
 };
 
 export type RepeatPoint = {
@@ -57,6 +89,12 @@ export type Retention = {
   /** Median days from first to second delivered order, among buyers with one; null under the minimum. */
   medianDaysToSecond: number | null;
   secondOrders: number;
+  /** Delivered orders left out of the money views for being in another currency. */
+  otherCurrencyOrders: number;
+  /** The currency of the money views; null without them. */
+  currency: string | null;
+  /** Percent of all delivered revenue with a product cost; null without revenue. */
+  costedRevenueShare: number | null;
 };
 
 const monthOf = (day: string) => day.slice(0, 7);
@@ -94,6 +132,50 @@ export function retention(orders: readonly DeliveredOrder[], asOf: string, histo
     byCohort.set(first, members);
   }
 
+  // Money per cohort × month offset, offset 0 included.
+  type Sum = { revenue: bigint; costedRevenue: bigint; cost: bigint };
+  const firstMonth = new Map([...days.entries()].map(([id, list]) => [id, monthOf(list[0]!)]));
+  const sums = new Map<string, Map<number, Sum>>();
+  let otherCurrencyOrders = 0;
+  let allRevenue = 0n;
+  let allCosted = 0n;
+  for (const o of orders) {
+    if (o.revenue === undefined) continue;
+    if (o.revenue === null) {
+      otherCurrencyOrders += 1;
+      continue;
+    }
+    const first = firstMonth.get(o.customerId)!;
+    const offset = monthIndex(monthOf(o.localDay)) - monthIndex(first);
+    const row = sums.get(first) ?? new Map<number, Sum>();
+    const sum = row.get(offset) ?? { revenue: 0n, costedRevenue: 0n, cost: 0n };
+    sum.revenue += o.revenue;
+    allRevenue += o.revenue;
+    if (o.cost !== null && o.cost !== undefined) {
+      allCosted += o.revenue;
+      sum.costedRevenue += o.revenue;
+      sum.cost += o.cost;
+    }
+    row.set(offset, sum);
+    sums.set(first, row);
+  }
+  const profitOf = (x: Sum) =>
+    x.revenue > 0n && Number(x.costedRevenue) >= MIN_COSTED_REVENUE_SHARE * Number(x.revenue) ? formatAmount(x.costedRevenue - x.cost) : null;
+  const moneyOf = (month: string, span: number, buyers: number): CohortMoney | null => {
+    const row = sums.get(month);
+    if (!row) return null;
+    const empty: Sum = { revenue: 0n, costedRevenue: 0n, cost: 0n };
+    const total = { ...empty };
+    const cells = Array.from({ length: span + 1 }, (_, offset) => {
+      const x = row.get(offset) ?? empty;
+      total.revenue += x.revenue;
+      total.costedRevenue += x.costedRevenue;
+      total.cost += x.cost;
+      return { offset, revenue: formatAmount(x.revenue), profit: x.revenue ? profitOf(x) : "0.00", partial: offset === span };
+    });
+    return { cells, revenue: formatAmount(total.revenue), profit: profitOf(total), perBuyer: formatAmount(total.revenue / BigInt(Math.max(1, buyers))) };
+  };
+
   let maxOffset = 0;
   const cohorts: CohortRow[] = [...byCohort.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -110,6 +192,7 @@ export function retention(orders: readonly DeliveredOrder[], asOf: string, histo
           const buyers = members.filter((m) => m.has(offset)).length;
           return { offset, buyers, share: thin ? null : pct(buyers, members.length), partial: offset === span };
         }),
+        money: moneyOf(month, span, members.length),
       };
     });
 
@@ -145,5 +228,8 @@ export function retention(orders: readonly DeliveredOrder[], asOf: string, histo
     medianDaysToSecond:
       gaps.length >= MIN_ELIGIBLE_BUYERS ? (gaps.length % 2 ? gaps[mid]! : (gaps[mid - 1]! + gaps[mid]!) / 2) : null,
     secondOrders: gaps.length,
+    otherCurrencyOrders,
+    currency: null,
+    costedRevenueShare: allRevenue > 0n ? Number((1000n * allCosted) / allRevenue) / 10 : null,
   };
 }

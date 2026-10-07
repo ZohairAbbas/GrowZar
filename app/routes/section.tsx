@@ -245,8 +245,11 @@ async function buildMetrics(
         view: compared(shippingView(summary, prev!)),
         depth: await shippingDepth(storeId, summary),
       };
-    case "customers":
-      return { ...base, kind: "customers" as const, view: compared(await customersView(storeId, summary, prev!)) };
+    case "customers": {
+      // Gross profit in the cohorts only for a role that may see Finance.
+      const viewer = await inboxViewer();
+      return { ...base, kind: "customers" as const, view: compared(await customersView(storeId, summary, prev!, viewer.canSeeMoney)), canSeeMoney: viewer.canSeeMoney };
+    }
     case "marketing":
       return { ...base, kind: "marketing" as const, view: await marketingView(storeId, summary) };
     default:
@@ -290,7 +293,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {metrics.kind === "marketing" ? <MarketingPanel view={metrics.view} days={metrics.period.days} scope={scopeQuery(metrics.scope)} /> : null}
           {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} days={metrics.period.days} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} depth={metrics.depth} days={metrics.period.days} scope={metrics.scope} /> : null}
-          {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} /> : null}
+          {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} canSeeMoney={metrics.canSeeMoney} /> : null}
         </div>
       ) : null}
 
