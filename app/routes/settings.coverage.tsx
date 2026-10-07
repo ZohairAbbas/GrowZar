@@ -37,7 +37,7 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     periods: PERIODS,
     report: {
       ...report,
-      apps: report.apps.map((a) => ({ ...a, label: APP_LABELS[a.app] })),
+      apps: report.apps.map((a) => ({ ...a, label: APP_LABELS[a.app], syncedAt: a.syncedAt === undefined ? undefined : (a.syncedAt?.toISOString() ?? null) })),
       items: report.items.map((i) => ({
         ...i,
         appLabel: APP_LABELS[i.app],
@@ -54,6 +54,12 @@ const STATUS = {
 } as const;
 
 const pct = (have: number, of: number) => `${Math.floor((100 * have) / of)}%`;
+
+/** The oldest of the app's feeds, so "synced 3 minutes ago" is true of all of them. */
+function syncedAgo(iso: string) {
+  const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000));
+  return m < 2 ? "just now" : m < 120 ? `${m} minutes ago` : m < 48 * 60 ? `${Math.round(m / 60)} hours ago` : `${Math.round(m / 1440)} days ago`;
+}
 
 export default function Coverage({ loaderData }: Route.ComponentProps) {
   const { store, period, periods, report } = loaderData;
@@ -89,6 +95,7 @@ export default function Coverage({ loaderData }: Route.ComponentProps) {
               <h2 className="font-display text-base font-bold text-gray-900">{app.label}</h2>
               <span className="text-xs font-semibold text-gray-500">
                 {app.state === "connected" ? "Connected" : "Connected · read from the next release"}
+                {app.syncedAt === null ? " · not synced yet" : app.syncedAt ? ` · synced ${syncedAgo(app.syncedAt)}` : ""}
               </span>
             </div>
             <p className="mt-1 text-sm text-gray-600">{app.gives}.</p>

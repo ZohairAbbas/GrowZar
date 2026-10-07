@@ -42,12 +42,19 @@ export type CoverageItem = {
   effect: string;
   /** The sections whose numbers this changes. */
   sections: Section[];
+  /**
+   * The line text for an item that is not a count: a stale feed says when it
+   * last synced. Such items lead the section line.
+   */
+  lineText?: string;
 };
 
 export type AppContribution = {
   app: SuiteApp;
   state: "connected" | "connected_not_read" | "not_connected";
   gives: string;
+  /** The oldest last-successful sync across the app's feeds; null when never. */
+  syncedAt?: Date | null;
 };
 
 export type CoverageReport = {
@@ -78,6 +85,12 @@ export type CoverageInput = {
   otherCosts?: { have: number; of: number };
   /** Orders tied to a campaign by Financify (G-FIN3-1), of orders Financify has a row for. */
   attribution?: { matched: number; of: number; organic: number };
+  /** Each current feed's last successful sync and its run of failures (sync_state). */
+  syncs?: SyncHealth[];
+  /** When ad spend was last fetched. */
+  adSpendFetchedAt?: Date | null;
+  /** "Now", for judging freshness. */
+  asOf?: Date;
   /** Orders whose outcome was withheld as one-sided (`outcome-sources.ts`), and the carriers. */
   withheld?: { orders: number; returned: number; inTransit: number; couriers: string[] };
 };
@@ -184,12 +197,85 @@ function timingItem(rows: readonly RollupOrder[]): CoverageItem | null {
   );
 }
 
+// ── Freshness ───────────────────────────────────────────────────────────────
+
+export type SyncHealth = { app: SuiteApp; entity: string; lastSuccessAt: Date | null; failures: number; error: string | null };
+
+/** A feed cycles every 5 minutes; an hour without success is 12 missed cycles. */
+export const STALE_SYNC_MINUTES = 60;
+/** Failures in a row that count as a feed failing, even if it synced recently. */
+export const FAILING_AFTER = 3;
+/** Ad spend refreshes the trailing days at least daily. */
+export const STALE_AD_SPEND_HOURS = 24;
+
+const FEED_LABEL: Record<string, { phrase: string; sections: Section[] }> = {
+  "COURIERIFY:PARCEL": { phrase: "Courierify parcels", sections: ["home", "orders", "shipping", "finance", "customers"] },
+  "COURIERIFY:SHIPMENT_EVENT": { phrase: "Courierify tracking events", sections: ["shipping"] },
+  "COURIERIFY:SETTLEMENT": { phrase: "Courierify settlements", sections: ["home", "finance"] },
+  "COURIERIFY:CONFIRMATION": { phrase: "Courierify confirmations", sections: ["home", "orders"] },
+  "FINANCIFY:ORDER": { phrase: "Financify orders", sections: ["home", "orders", "shipping", "finance", "customers", "marketing"] },
+  "FINANCIFY:PRODUCT": { phrase: "Financify products", sections: ["marketing"] },
+};
+
+const ago = (from: Date, asOf: Date) => {
+  const m = Math.round((asOf.getTime() - from.getTime()) / 60_000);
+  return m < 120 ? `${m} minutes ago` : m < 48 * 60 ? `${Math.round(m / 60)} hours ago` : `${Math.round(m / 1440)} days ago`;
+};
+
+/** A stale or failing feed, as a coverage item; null when it is fresh. */
+export function freshnessItem(sync: SyncHealth, asOf: Date): CoverageItem | null {
+  const label = FEED_LABEL[`${sync.app}:${sync.entity}`];
+  if (!label) return null;
+  const old = !sync.lastSuccessAt || asOf.getTime() - sync.lastSuccessAt.getTime() > STALE_SYNC_MINUTES * 60_000;
+  const failing = sync.failures >= FAILING_AFTER;
+  if (!old && !failing) return null;
+  const when = sync.lastSuccessAt ? `last synced ${ago(sync.lastSuccessAt, asOf)}` : "never synced";
+  const why = failing ? `; the last ${sync.failures} attempts failed${sync.error ? ` (${sync.error.slice(0, 80)})` : ""}` : "";
+  return {
+    key: `fresh:${sync.app}:${sync.entity}`,
+    app: sync.app,
+    label: `${label.phrase}: ${when}`,
+    phrase: label.phrase.toLowerCase(),
+    have: null,
+    of: null,
+    unit: null,
+    status: old ? "missing" : "partial",
+    gap: `${label.phrase} ${when}${why}`,
+    effect: "every figure from it stops at that time, so recent orders and outcomes are missing",
+    sections: label.sections,
+    lineText: `${label.phrase} ${when}`,
+  };
+}
+
 export function coverageReport(input: CoverageInput): CoverageReport {
   const { rows } = input;
   const has = (app: SuiteApp) => input.connected.includes(app);
   const shipped = rows.filter((r) => SHIPPED.includes(r.outcome));
   const delivered = rows.filter((r) => r.outcome === "delivered");
   const items: Array<CoverageItem | null> = [];
+
+  // Stale feeds first: they decide whether anything below is current.
+  const asOf = input.asOf ?? new Date();
+  for (const sync of input.syncs ?? []) if (has(sync.app)) items.push(freshnessItem(sync, asOf));
+  if (has("FINANCIFY") && input.adSpendFetchedAt !== undefined) {
+    const at = input.adSpendFetchedAt;
+    if (!at || asOf.getTime() - at.getTime() > STALE_AD_SPEND_HOURS * 3_600_000) {
+      items.push({
+        key: "fresh:FINANCIFY:AD_SPEND",
+        app: "FINANCIFY",
+        label: `Ad spend: ${at ? `last fetched ${ago(at, asOf)}` : "never fetched"}`,
+        phrase: "ad spend",
+        have: null,
+        of: null,
+        unit: null,
+        status: "missing",
+        gap: `Ad spend ${at ? `last fetched ${ago(at, asOf)}` : "never fetched"}`,
+        effect: "profit and ROAS leave out spend since then, so they read higher than they are",
+        sections: ["home", "finance", "marketing"],
+        lineText: `ad spend ${at ? `last fetched ${ago(at, asOf)}` : "never fetched"}`,
+      });
+    }
+  }
 
   if (has("COURIERIFY")) {
     items.push(
@@ -461,6 +547,11 @@ export function coverageReport(input: CoverageInput): CoverageReport {
       app,
       state: !has(app) ? "not_connected" : READ_IN_R1.includes(app) ? "connected" : "connected_not_read",
       gives: GIVES[app],
+      syncedAt: (() => {
+        const mine = (input.syncs ?? []).filter((x) => x.app === app);
+        if (!mine.length) return undefined;
+        return mine.some((x) => !x.lastSuccessAt) ? null : new Date(Math.min(...mine.map((x) => x.lastSuccessAt!.getTime())));
+      })(),
     })),
     items: items.filter((i): i is CoverageItem => i !== null),
   };
@@ -479,11 +570,13 @@ export type CoverageLine = {
 export function coverageLine(report: CoverageReport, section: Section): CoverageLine {
   const gaps = report.items
     .filter((i) => i.status !== "complete" && i.sections.includes(section))
-    .sort((a, b) => Number(a.have === null) - Number(b.have === null))
+    // Stale feeds lead, then counted gaps, then whole missing sources.
+    .sort((a, b) => Number(!a.lineText) - Number(!b.lineText) || Number(a.have === null) - Number(b.have === null))
     .map((i) => ({
       key: i.key,
-      text:
-        i.have !== null && i.of !== null
+      text: i.lineText
+        ? i.lineText
+        : i.have !== null && i.of !== null
           ? `${i.phrase} for ${i.have.toLocaleString("en-US")} of ${i.of.toLocaleString("en-US")} ${i.unit}`
           : `${i.phrase} not available`,
     }));

@@ -134,3 +134,33 @@ describe("settlements over time", () => {
     expect(r.items.find((i) => i.key === "settlements")).toMatchObject({ have: 1, of: 2, status: "partial" });
   });
 });
+
+describe("freshness", () => {
+  const asOf = new Date("2026-10-07T12:00:00Z");
+  const at = (minutesAgo: number) => new Date(asOf.getTime() - minutesAgo * 60_000);
+  it("adds nothing for fresh feeds, and leads the section line with a stale one", () => {
+    const fresh = coverageReport(input([order()], { asOf, syncs: [{ app: "COURIERIFY", entity: "PARCEL", lastSuccessAt: at(4), failures: 0, error: null }] }));
+    expect(fresh.items.some((i) => i.key.startsWith("fresh:"))).toBe(false);
+    const stale = coverageReport(
+      input([order(), order({ courierFee: null })], {
+        asOf,
+        syncs: [{ app: "COURIERIFY", entity: "PARCEL", lastSuccessAt: at(190), failures: 5, error: "server_error: HTTP 502" }],
+      }),
+    );
+    const item = stale.items.find((i) => i.key === "fresh:COURIERIFY:PARCEL")!;
+    expect(item.gap).toBe("Courierify parcels last synced 3 hours ago; the last 5 attempts failed (server_error: HTTP 502)");
+    expect(coverageLine(stale, "shipping").gaps[0]!.text).toBe("Courierify parcels last synced 3 hours ago");
+    expect(stale.apps.find((a) => a.app === "COURIERIFY")!.syncedAt).toEqual(at(190));
+  });
+  it("flags a feed failing in a row even when its last success is recent, and stale ad spend", () => {
+    const r = coverageReport(
+      input([order()], {
+        asOf,
+        syncs: [{ app: "FINANCIFY", entity: "ORDER", lastSuccessAt: at(10), failures: 3, error: "timeout" }],
+        adSpendFetchedAt: new Date(asOf.getTime() - 30 * 3_600_000),
+      }),
+    );
+    expect(r.items.find((i) => i.key === "fresh:FINANCIFY:ORDER")).toMatchObject({ status: "partial" });
+    expect(r.items.find((i) => i.key === "fresh:FINANCIFY:AD_SPEND")?.gap).toBe("Ad spend last fetched 30 hours ago");
+  });
+});
