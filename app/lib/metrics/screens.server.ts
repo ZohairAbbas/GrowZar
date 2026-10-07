@@ -33,6 +33,7 @@ import { loadAdSpend } from "./rollups.server";
 import { campaignOutcomes, campaignSpend, storeColumn, type CampaignOutcomes, type CampaignSpend, type CampaignSpendRow, type StoreColumn } from "./campaigns";
 import { loadAttribution, loadCampaignNames } from "./campaigns.server";
 import { loadCatalog, loadPaymentSplit, type CatalogEntry, type PaymentSplit } from "./products.server";
+import { profitTable, type ProfitDimension, type ProfitTable } from "./profit-table";
 import { previousPeriod } from "./compare";
 import { convertDated } from "./fx";
 import { loadFxSource } from "./fx.server";
@@ -829,6 +830,11 @@ export type FinanceDepth = {
   statementSources: Record<string, number>;
   /** COD against prepaid for the period's orders (Financify's rule). */
   payment: PaymentSplit | null;
+  /** Profit by product, city, courier and campaign; each adds up to the headline. */
+  profitBy: Record<ProfitDimension, ProfitTable> | null;
+  /** Display names for profit-table keys (product titles, campaign names), and product images. */
+  labels: Record<string, string>;
+  images: Record<string, string>;
 };
 
 /**
@@ -859,6 +865,7 @@ export async function financeDepth(storeId: string, s: StoreSummary): Promise<Fi
     cash: cashTimeline(s.rows, cur, trackedPayers(statements.map((x) => x.payer)), new Date()),
     deductions: courierDeductions(mine, s.period.from, s.period.to, cur),
     payment,
+    ...(await profitTables(storeId, s)),
     statementSources: inPeriod.reduce<Record<string, number>>((m, x) => ({ ...m, [x.source]: (m[x.source] ?? 0) + 1 }), {}),
   };
 }
@@ -934,4 +941,51 @@ export async function shippingDepth(storeId: string, s: StoreSummary): Promise<S
     returns: s.store.currency ? returnsView(s.rows, parcels, notes, s.store.currency, asOf) : null,
     returnCities: returnsByCity(s.rows),
   };
+}
+
+/**
+ * The four profit tables for a summary, sharing its ad spend exactly as the
+ * headline subtracted it (`profit.parts.adSpend`, spend + fees, or none).
+ */
+async function profitTables(
+  storeId: string,
+  s: StoreSummary,
+): Promise<Pick<FinanceDepth, "profitBy" | "labels" | "images">> {
+  const cur = s.store.currency;
+  if (!cur || !s.profit) return { profitBy: null, labels: {}, images: {} };
+  const ads = s.profit.parts.adSpend !== null ? parseAmount(s.profit.parts.adSpend)! : null;
+  const units = (m: Money) => (m.currency === cur ? parseAmount(m.amount)! : 0n);
+  const [adData, campaignRows, attribution, names] = await Promise.all([
+    ads !== null ? loadAdSpend(storeId, s.period.from, s.period.to) : Promise.resolve(null),
+    ads !== null ? loadCampaignRows(storeId, s.period.from, s.period.to) : Promise.resolve([]),
+    loadAttribution(storeId, s.rows.map((o) => o.orderId)),
+    loadCampaignNames(storeId),
+  ]);
+  const adByVariant = new Map([...(adData?.byVariant ?? new Map<string, Money[]>())].map(([k, list]) => [k, list.reduce((a, m) => a + units(m), 0n)]));
+  const adByCampaign = new Map<string, bigint>();
+  for (const r of campaignRows) adByCampaign.set(r.key, (adByCampaign.get(r.key) ?? 0n) + units(r.spend) + units(r.fees));
+  const input = {
+    rows: s.rows,
+    currency: cur,
+    ads,
+    adByVariant,
+    adUnattributed: (adData?.unattributed ?? []).reduce((a, m) => a + units(m), 0n),
+    adByCampaign,
+    campaignOf: new Map([...attribution].map(([id, a]) => [id, a.campaignKey])),
+  };
+  const profitBy = Object.fromEntries(
+    (["product", "city", "courier", "campaign"] as const).map((d) => [d, profitTable(d, input)]),
+  ) as Record<ProfitDimension, ProfitTable>;
+
+  // Names: catalogue titles (else the order line's title) and campaign names.
+  const variants = profitBy.product.rows.filter((r) => r.kind === "row").map((r) => r.key);
+  const catalog = await loadCatalog(storeId, variants);
+  const labels: Record<string, string> = {};
+  for (const o of s.rows) for (const l of o.lines) if (l.variantId && l.title && !labels[l.variantId]) labels[l.variantId] = l.variantTitle && l.variantTitle !== "Default Title" ? `${l.title} — ${l.variantTitle}` : l.title;
+  for (const [k, c] of catalog) if (c.title) labels[k] = c.title;
+  for (const [k, n] of names) if (n.name) labels[k] = n.name;
+  labels.none = "Not tied to a campaign";
+  const images: Record<string, string> = {};
+  for (const [k, c] of catalog) if (c.imageUrl) images[k] = c.imageUrl;
+  return { profitBy, labels, images };
 }

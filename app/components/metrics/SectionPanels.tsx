@@ -27,6 +27,7 @@ import { InboxCards } from "./FindingCards";
 import { scopeLabel } from "./FilterBar";
 import { CohortGrid, RepeatCurve } from "./Retention";
 import { CashTimelineCard, CourierDeductions, MoneyBreakdown } from "./FinanceDepth";
+import { ProfitTables } from "./ProfitTables";
 import { CourierPerformanceTable, OutcomesChart, ReturnsCard } from "./ShippingDepth";
 import { CampaignOutcomesTable, CampaignTable, CityCourierTable, ConfirmationFunnelView, PayoutAgeingTable, ProductMatrix } from "./Matrices";
 import type { ConfirmationFunnel, PayoutAgeing } from "~/lib/metrics/matrices";
@@ -320,6 +321,7 @@ export function FinancePanel({
           <CashTimelineCard cash={depth.cash} days={days} scope={scope} payment={depth.payment} />
         </div>
       ) : null}
+      {depth?.profitBy ? <ProfitTables data={depth.profitBy} labels={depth.labels} images={depth.images} days={days} scope={scope} /> : null}
       {depth ? <CourierDeductions rows={depth.deductions} sources={depth.statementSources} /> : null}
       {ageing ? <PayoutAgeingTable ageing={ageing} /> : null}
     </section>
