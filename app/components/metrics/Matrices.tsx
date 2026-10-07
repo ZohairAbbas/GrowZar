@@ -63,12 +63,21 @@ export function ProductMatrix({
   const tick = hi - lo > 80 ? 20 : 10;
   const yTicks = Array.from({ length: Math.floor((hi - lo) / tick) + 1 }, (_, i) => Math.ceil(lo / tick) * tick + i * tick).filter((t) => t <= hi);
   const flagged = plotted.filter(looksProfitableIsNot);
-  // Direct labels for the flagged few, skipping any that would collide with one already placed.
-  const labels: Array<{ p: ProductPoint; x: number; y: number }> = [];
+  // Direct labels for the flagged few. Each is a box (about 5.5px a
+  // character at 10px); a box that would overlap one already placed steps
+  // down until it is clear.
+  const labels: Array<{ p: ProductPoint; x: number; y: number; left: boolean }> = [];
+  const boxes: Array<{ x0: number; x1: number; y0: number; y1: number }> = [];
   for (const p of flagged.slice(0, 4)) {
-    const at = { x: x(p.delivered), y: y(p.marginPct!) };
-    const clash = labels.some((l) => Math.abs(l.y - at.y) < 14 && Math.abs(l.x - at.x) < 150);
-    labels.push({ p, x: at.x, y: clash ? at.y + 16 : at.y });
+    const px = x(p.delivered);
+    const left = px > w - 180;
+    const width = Math.min(28, name(p).length) * 5.5;
+    const x0 = left ? px - 10 - width : px + 10;
+    let ly = y(p.marginPct!);
+    const hits = (yy: number) => boxes.some((b) => x0 < b.x1 && x0 + width > b.x0 && yy - 9 < b.y1 && yy + 4 > b.y0);
+    for (let i = 0; i < 6 && hits(ly); i++) ly += 14;
+    boxes.push({ x0, x1: x0 + width, y0: ly - 9, y1: ly + 4 });
+    labels.push({ p, x: px, y: ly, left });
   }
   const link = (p: ProductPoint) => `/orders?days=${days}&variant=${p.variantId}${scope ? `&${scope}` : ""}`;
 
@@ -112,8 +121,7 @@ export function ProductMatrix({
               </Link>
             );
           })}
-          {labels.map(({ p, x: lx, y: ly }) => {
-            const left = lx > w - 180;
+          {labels.map(({ p, x: lx, y: ly, left }) => {
             return (
               <text key={`l-${p.variantId}`} x={left ? lx - 10 : lx + 10} y={ly + 4} textAnchor={left ? "end" : "start"} className="fill-gray-900 text-[10px] font-semibold">
                 {name(p).slice(0, 28)}
