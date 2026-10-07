@@ -32,6 +32,7 @@ import {
 import { loadAdSpend } from "./rollups.server";
 import { campaignOutcomes, campaignSpend, storeColumn, type CampaignOutcomes, type CampaignSpend, type CampaignSpendRow, type StoreColumn } from "./campaigns";
 import { loadAttribution, loadCampaignNames } from "./campaigns.server";
+import { loadCourierNotes, loadParcelFacts } from "./returns.server";
 import { loadCatalog, loadPaymentSplit, type CatalogEntry, type PaymentSplit } from "./products.server";
 import { profitTable, type ProfitDimension, type ProfitTable } from "./profit-table";
 import { previousPeriod } from "./compare";
@@ -55,7 +56,7 @@ import {
   type DeductionRow,
   type ExpectedProfit,
 } from "./cash";
-import { readStatement, type Statement } from "./settlements";
+import { loadStatements } from "./settlements.server";
 import { loadSettledHistory } from "./summaries.server";
 import {
   courierPerformance,
@@ -844,17 +845,11 @@ export type FinanceDepth = {
 export async function financeDepth(storeId: string, s: StoreSummary): Promise<FinanceDepth | null> {
   const cur = s.store.currency;
   if (!cur) return null;
-  const [history, settlementRows, payment] = await Promise.all([
+  const [history, statements, payment] = await Promise.all([
     loadSettledHistory(storeId, s.period.to),
-    prisma.rawRecord.findMany({
-      where: { storeId, app: "COURIERIFY", entity: "SETTLEMENT", deletedAt: null },
-      select: { payload: true },
-    }),
+    loadStatements(storeId),
     loadPaymentSplit(storeId, s.rows.map((o) => o.orderId)),
   ]);
-  const statements = settlementRows
-    .map((r) => readStatement((r.payload ?? {}) as Record<string, unknown>))
-    .filter((x): x is Statement => x !== null);
   // Ads count in the breakdown only when profit subtracts them (every day fetched).
   const ads = s.adSpend && s.adSpend.daysFetched === s.adSpend.daysInPeriod ? { spend: s.adSpend.spend, fees: s.adSpend.fees } : null;
   const mine = s.scope.courier ? statements.filter((x) => x.payer === s.scope.courier) : statements;
@@ -893,47 +888,7 @@ const moneyOf = (v: unknown): Money | null => {
  */
 export async function shippingDepth(storeId: string, s: StoreSummary): Promise<ShippingDepth> {
   const ids = s.rows.filter((o) => o.parcelCount > 0).map((o) => o.orderId);
-  const [parcelRows, noteRows] = ids.length
-    ? await Promise.all([
-        prisma.$queryRaw<Array<{ orderId: string; courier: string | null; outcome: string | null; received: string | null; returnedAt: string | null; deliveryFee: unknown; reversalFee: unknown }>>`
-          SELECT payload->>'orderId' AS "orderId", lower(payload->>'courier') AS courier, payload->>'outcome' AS outcome,
-                 payload->>'returnReceived' AS received, payload->>'returnedAt' AS "returnedAt",
-                 payload->'deliveryFee' AS "deliveryFee", payload->'reversalFee' AS "reversalFee"
-          FROM raw_records
-          WHERE "storeId" = ${storeId} AND app = 'COURIERIFY' AND entity = 'PARCEL' AND "deletedAt" IS NULL
-            AND payload->>'orderId' = ANY(${ids})`,
-        prisma.$queryRaw<Array<{ orderId: string; status: string; raw: string; at: Date }>>`
-          SELECT r.payload->>'orderId' AS "orderId", e.status, e.raw, COALESCE(e."courierEventAt", e."observedAt") AS at
-          FROM shipment_events e
-          JOIN raw_records r ON r."storeId" = e."storeId" AND r.app = 'COURIERIFY' AND r.entity = 'PARCEL' AND r."externalId" = e."shipmentId"
-          WHERE e."storeId" = ${storeId} AND e.status IN ('returned', 'attempted') AND e.raw IS NOT NULL
-            -- A 3PL's Shopify fulfilment event (Orio's "FAILURE") is its mark, not a
-            -- courier's attempt or reason (rule #9, G-CFY3-1).
-            AND e.source <> 'shopify_fulfillment_event'
-            AND r.payload->>'orderId' = ANY(${ids})`,
-      ])
-    : [[], []];
-  const parcels: ParcelFacts[] = parcelRows
-    .filter((p) => p.orderId)
-    .map((p) => {
-      const fees = [moneyOf(p.deliveryFee), moneyOf(p.reversalFee)].filter((m): m is Money => m !== null);
-      return {
-        orderId: p.orderId,
-        courier: p.courier,
-        outcome: p.outcome ?? "unknown",
-        returnReceived: p.received === "true",
-        returnedAt: p.returnedAt ? new Date(p.returnedAt) : null,
-        fee: fees.length
-          ? { amount: formatAmount(fees.reduce((a, m) => a + parseAmount(m.amount)!, 0n)), currency: fees[0]!.currency }
-          : null,
-      };
-    });
-  const notes: CourierNote[] = noteRows.map((n) => ({
-    orderId: n.orderId,
-    kind: n.status === "attempted" ? "attempted" : "returned",
-    raw: n.raw,
-    at: new Date(n.at),
-  }));
+  const [parcels, notes] = await Promise.all([loadParcelFacts(storeId, ids), loadCourierNotes(storeId, ids)]);
   const asOf = new Date();
   return {
     outcomes: outcomesByDay(s.rows, s.period.from, s.period.to),

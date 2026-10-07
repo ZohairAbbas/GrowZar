@@ -17,6 +17,9 @@ import type {
   MissingFeesFinding,
   VariantReturnsFinding,
   VariantRate,
+  StuckFinding,
+  NotReceivedFinding,
+  DeductionsFinding,
 } from "~/lib/metrics/findings";
 import type { InboxItem, InboxView } from "~/lib/insights/inbox.server";
 import { DISMISS_REASONS } from "~/lib/insights/actions";
@@ -39,6 +42,9 @@ const AREAS: Record<Finding["kind"], { label: string; Icon: typeof Wallet; tint:
   disagreements: { label: "Data check", Icon: Database, tint: "bg-field text-gray-600" },
   missing_fees: { label: "Data check", Icon: Database, tint: "bg-field text-gray-600" },
   courierify_stopped: { label: "Data check", Icon: Database, tint: "bg-field text-gray-600" },
+  stuck_parcels: { label: "Shipping", Icon: Truck, tint: "bg-data-100 text-data-700" },
+  returns_not_received: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
+  courier_deductions: { label: "Money owed", Icon: Wallet, tint: "bg-coral-100 text-coral-700" },
 };
 
 function AreaTag() {
@@ -308,6 +314,80 @@ function CourierifyStoppedCard({ f, days, id, canManage }: { f: CourierifyStoppe
         Delivery status for the rest comes from Financify alone. For them Growzar has no courier delivery times, no city
         and no courier fees, so comparisons by city or courier and any profit after courier fees stop at that date.
       </p>
+    </Card>
+  );
+}
+
+function StuckCard({ f, days, id, canManage }: { f: StuckFinding } & CardProps) {
+  return (
+    <Card
+      id={id}
+      canManage={canManage}
+      title={`${n(f.booked + f.inTransit)} parcels have not moved for days`}
+      link={{ to: `/orders?days=${days}&stuck=1`, label: `See the ${n(f.booked + f.inTransit)} orders` }}
+    >
+      <p>
+        {f.booked ? <>{n(f.booked)} were booked 3 or more days ago and the courier has not picked them up. </> : null}
+        {f.inTransit ? <>{n(f.inTransit)} have been in transit for 7 or more days with no update from the courier. </> : null}
+        {f.placed ? <>Together they hold <strong>{money(f.placed)}</strong> of orders. </> : null}
+        The oldest has not moved for {n(f.oldestDays)} days.
+      </p>
+      <ul className="space-y-0.5 text-xs text-gray-600">
+        {f.byCourier.slice(0, 4).map((c) => (
+          <li key={c.courier}>
+            {payerName(c.courier)}: {n(c.orders)}
+          </li>
+        ))}
+      </ul>
+      <Leaves items={["Only parcels booked through Courierify: the status time is Courierify's own, so a parcel booked elsewhere cannot be judged."]} />
+    </Card>
+  );
+}
+
+function NotReceivedCard({ f, days, id, canManage }: { f: NotReceivedFinding } & CardProps) {
+  return (
+    <Card id={id} canManage={canManage} title={`${n(f.older)} returns not confirmed back after 14 days`} link={{ to: `/shipping?days=${days}`, label: "See returns on Shipping" }}>
+      <p>
+        {n(f.orders)} returned orders in this period are not marked received in Courierify, {n(f.older)} of them returned more than 14
+        days ago
+        {f.productCost ? <>, holding <strong>{money(f.productCost)}</strong> of product at cost</> : null}.
+      </p>
+      <ul className="space-y-0.5 text-xs text-gray-600">
+        {f.byCourier.slice(0, 4).map((c) => (
+          <li key={c.courier}>
+            {payerName(c.courier)}: {n(c.orders)} not confirmed back
+          </li>
+        ))}
+      </ul>
+      <Leaves
+        items={[
+          "Received is the merchant's own mark in Courierify. A return that arrived but was never marked counts here too.",
+          "Only returns booked through Courierify can be checked.",
+        ]}
+      />
+    </Card>
+  );
+}
+
+function DeductionsCard({ f, days, id, canManage }: { f: DeductionsFinding } & CardProps) {
+  return (
+    <Card
+      id={id}
+      canManage={canManage}
+      title={`${payerName(f.payer)} kept COD its statement does not explain`}
+      link={{ to: `/finance?days=${days}`, label: "See courier deductions on Finance" }}
+    >
+      <p>
+        On {n(f.statements)} statement{f.statements === 1 ? "" : "s"} dated in this period, {payerName(f.payer)} collected{" "}
+        <strong>{money(f.cod)}</strong> and paid <strong>{money(f.netPaid)}</strong>. Of what it kept,{" "}
+        <strong>{money(f.unitemized)}</strong> ({pct(f.unitemizedShare)} of COD) is not itemized as a fee, tax or other deduction.
+      </p>
+      <Leaves
+        items={[
+          "Itemized: COD fee, delivery fees, return fees, withholding tax, other deductions and carry-forward, as Courierify records the statement.",
+          ...(f.keptShare !== null ? [`In all the courier kept ${pct(f.keptShare)} of the COD.`] : []),
+        ]}
+      />
     </Card>
   );
 }
@@ -638,6 +718,12 @@ function FullCard({ item, days, canManage }: { item: InboxItem; days: number; ca
         return <ProductLossCard f={f} {...props} />;
       case "city_returns":
         return <CityReturnsCard f={f} {...props} />;
+      case "stuck_parcels":
+        return <StuckCard f={f} {...props} />;
+      case "returns_not_received":
+        return <NotReceivedCard f={f} {...props} />;
+      case "courier_deductions":
+        return <DeductionsCard f={f} {...props} />;
     }
   })();
   return <Area.Provider value={f.kind}>{card}</Area.Provider>;
@@ -767,6 +853,35 @@ function summaryOf(f: Finding, days: number): Summary {
         why: "Growzar takes the courier's answer, through Courierify.",
         affects: `${n(f.total)} orders`,
         link: { to: `/orders?days=${days}&disagree=1`, label: "See orders" },
+      };
+    case "stuck_parcels":
+      return {
+        headline: `${n(f.booked + f.inTransit)} parcels have not moved for days`,
+        figure: f.placed ? figure(f.placed) : n(f.booked + f.inTransit),
+        note: f.placed
+          ? `in ${n(f.booked + f.inTransit)} orders: ${n(f.booked)} booked and never picked up, ${n(f.inTransit)} in transit with no update`
+          : `${n(f.booked)} booked and never picked up, ${n(f.inTransit)} in transit with no update`,
+        next: f.booked ? "Ask the courier to pick up the booked parcels, or cancel the ones that will not ship." : "Ask the courier where the parcels in transit are.",
+        affects: `${n(f.booked + f.inTransit)} orders`,
+        link: { to: `/orders?days=${days}&stuck=1`, label: "See orders" },
+      };
+    case "returns_not_received":
+      return {
+        headline: `${n(f.older)} returns not confirmed back after 14 days`,
+        figure: f.productCost ? figure(f.productCost) : n(f.orders),
+        note: f.productCost ? `of product in ${n(f.orders)} returned orders not marked received in Courierify` : "returned orders not marked received in Courierify",
+        next: "Check them against the courier's return slip, and mark the ones that arrived as received in Courierify.",
+        affects: `${n(f.orders)} returned orders`,
+        link: { to: `/shipping?days=${days}`, label: "See returns" },
+      };
+    case "courier_deductions":
+      return {
+        headline: `${payerName(f.payer)} kept COD its statement does not explain`,
+        figure: `−${figure(f.unitemized)}`,
+        note: `${pct(f.unitemizedShare)} of the ${figure(f.cod)} COD it collected, on ${n(f.statements)} statement${f.statements === 1 ? "" : "s"}`,
+        next: `Ask ${payerName(f.payer)} for a breakdown of the deduction.`,
+        affects: `${n(f.statements)} statement${f.statements === 1 ? "" : "s"}`,
+        link: { to: `/finance?days=${days}`, label: "See deductions" },
       };
     case "courierify_stopped":
       return {

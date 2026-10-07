@@ -25,6 +25,9 @@ import {
   productLossFindings,
   cityReturnsFindings,
   variantReturnsFinding,
+  stuckFinding,
+  notReceivedFinding,
+  deductionFindings,
   type Finding,
   type FindingsInput,
   type Skip,
@@ -42,7 +45,10 @@ export type DetectorId =
   | "unconfirmed_returns"
   | "courier_for_city"
   | "product_loss"
-  | "city_returns";
+  | "city_returns"
+  | "stuck_parcels"
+  | "returns_not_received"
+  | "courier_deductions";
 
 export type Insight = {
   detector: DetectorId;
@@ -221,6 +227,39 @@ export const DETECTORS: readonly Detector[] = [
       );
     },
   },
+  {
+    id: "stuck_parcels",
+    needs: ["COURIERIFY"],
+    label: "Parcels with no courier update for days",
+    preview: "Parcels booked and never picked up, or in transit with no update",
+    run(input) {
+      const f = stuckFinding(input);
+      if (isSkip(f)) return f;
+      return [insight("stuck_parcels", "store", f, { group: "specific", ordersAffected: f.booked + f.inTransit }, !!f.placed)];
+    },
+  },
+  {
+    id: "returns_not_received",
+    needs: ["COURIERIFY"],
+    label: "Returns not confirmed back in your hands",
+    preview: "Returned parcels whose goods you have not confirmed received",
+    run(input) {
+      const f = notReceivedFinding(input);
+      if (isSkip(f)) return f;
+      return [insight("returns_not_received", "store", f, { group: "specific", ordersAffected: f.older }, !!f.productCost)];
+    },
+  },
+  {
+    id: "courier_deductions",
+    needs: ["COURIERIFY"],
+    label: "Courier statements that keep COD without saying why",
+    preview: "What couriers deduct from your COD that their statements do not itemize",
+    run(input) {
+      const list = deductionFindings(input);
+      if (!Array.isArray(list)) return list;
+      return list.map((f) => insight("courier_deductions", f.payer, f, { group: "specific", ordersAffected: 0 }, true));
+    },
+  },
 ];
 
 export function runDetectors(input: FindingsInput, connected: ReadonlySet<App>): DetectorOutcome[] {
@@ -260,6 +299,8 @@ export function withoutMoney(insights: readonly Insight[]): Insight[] {
     // Estimates go; the card, in orders, stays.
     if (f.kind === "unconfirmed_returns") return [{ ...i, revealsMoney: false, finding: { ...f, cost: null } }];
     if (f.kind === "missing_fees") return [{ ...i, revealsMoney: false, finding: { ...f, estimate: null } }];
+    if (f.kind === "stuck_parcels") return [{ ...i, revealsMoney: false, finding: { ...f, placed: null } }];
+    if (f.kind === "returns_not_received") return [{ ...i, revealsMoney: false, finding: { ...f, productCost: null, value: null } }];
     if (f.kind === "variant_returns") {
       return [{ ...i, revealsMoney: false, finding: { ...f, flagged: f.flagged.map((v) => ({ ...v, cost: null })) } }];
     }
@@ -289,6 +330,12 @@ export function evidenceOf(i: Insight): Record<string, number | string> {
       return { ceiling: f.ceiling.amount, per30Days: f.per30Days.amount, returnRate: f.returnRate };
     case "city_returns":
       return { returnRate: f.returnRate, rest: f.rest.returnRate, decided: f.decided };
+    case "stuck_parcels":
+      return { booked: f.booked, inTransit: f.inTransit, oldestDays: f.oldestDays };
+    case "returns_not_received":
+      return { orders: f.orders, older: f.older };
+    case "courier_deductions":
+      return { unitemized: f.unitemized.amount, share: f.unitemizedShare, statements: f.statements };
     case "courier_for_city":
       return { best: `${f.best.courier}/${f.best.via}`, bestRate: f.best.rate, worst: `${f.worse[0]!.courier}/${f.worse[0]!.via}`, gap: f.worse[0]!.gapPoints };
   }
