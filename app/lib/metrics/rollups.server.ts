@@ -2,7 +2,7 @@ import type { OrderGrain as OrderGrainRow, Prisma } from "@prisma/client";
 
 import { prisma } from "../db.server";
 import { formatAmount, parseAmount, sumByCurrency, type Money } from "./money";
-import type { RollupOrder } from "./rollups";
+import type { OtherCosts, RollupOrder } from "./rollups";
 
 /**
  * Read the stored order grain and ad spend for roll-ups (G-GZR2-3). Screens,
@@ -62,7 +62,44 @@ export async function loadOrders(storeId: string, from: string, to: string): Pro
   const rows = await prisma.orderGrain.findMany({
     where: { storeId, localDay: { gte: from, lte: to } },
   });
-  return rows.map(toRollupOrder);
+  const costs = await loadOtherCosts(storeId, rows.map((r) => r.orderId));
+  return rows.map((r) => {
+    const o = toRollupOrder(r);
+    const c = costs.get(r.orderId);
+    return c === undefined ? o : { ...o, otherCosts: c };
+  });
+}
+
+/**
+ * Financify's other costs (G-FIN3-2) for the given orders, from the order
+ * rows Growzar stores, summed per kind. An order whose stored row predates
+ * the field is absent from the map.
+ */
+async function loadOtherCosts(storeId: string, orderIds: readonly string[]): Promise<Map<string, OtherCosts>> {
+  if (!orderIds.length) return new Map();
+  const rows = await prisma.$queryRaw<Array<{ orderId: string; costs: Record<string, unknown> | null }>>`
+    SELECT "externalId" AS "orderId", payload->'otherCosts' AS costs
+    FROM raw_records
+    WHERE "storeId" = ${storeId} AND app = 'FINANCIFY' AND entity = 'ORDER' AND "deletedAt" IS NULL
+      AND payload ? 'otherCosts' AND "externalId" = ANY(${[...orderIds]})`;
+  const one = (v: unknown): Money | null => {
+    if (!v || typeof v !== "object") return null;
+    const m = v as Record<string, unknown>;
+    return typeof m.amount === "string" && typeof m.currency === "string" ? { amount: m.amount, currency: m.currency } : null;
+  };
+  const list = (v: unknown): Money | null => {
+    if (!Array.isArray(v)) return null;
+    const all = v.map((x) => one((x as Record<string, unknown>)?.amount)).filter((m): m is Money => m !== null);
+    return all.length ? sumByCurrency(all)[0] ?? null : null;
+  };
+  return new Map(
+    rows
+      .filter((r) => r.costs && typeof r.costs === "object")
+      .map((r) => [
+        r.orderId,
+        { payment: one(r.costs!.paymentFee), shipping: one(r.costs!.shippingCost), taxes: one(r.costs!.taxes), custom: list(r.costs!.custom) },
+      ]),
+  );
 }
 
 /**

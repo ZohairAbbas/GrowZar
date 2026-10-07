@@ -279,6 +279,7 @@ export function FinancePanel({
               Delivered revenue {formatAmount(p.parts.deliveredRevenue)} − product cost {formatAmount(p.parts.cogsDelivered)} −
               courier fees {formatAmount(p.parts.courierFees)} − ads{" "}
               {p.parts.adSpend !== null ? formatAmount(p.parts.adSpend) : "not subtracted"}
+              {p.parts.otherCosts ? ` − other costs ${formatAmount(p.parts.otherCosts.total)}` : ""}
               {view.roas !== null ? ` · ROAS ${view.roas.toFixed(2)} (delivered revenue ÷ ad spend)` : ""}
             </p>
             {depth?.expected && depth.expected.withCourier.orders ? (

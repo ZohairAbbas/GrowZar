@@ -40,6 +40,21 @@ export type RollupOrder = Pick<
 > & {
   /** Discounts on the order (Financify), in the order's currency; for the money breakdown. */
   discounts?: Money | null;
+  /**
+   * Financify's other costs for the order (G-FIN3-2), by its own rules, in the
+   * shop's currency. Undefined when the stored row predates the field.
+   */
+  otherCosts?: OtherCosts | null;
+};
+
+/** Costs beyond product, courier and ads, per order, as Financify's rules charge them. */
+export type OtherCosts = {
+  payment: Money | null;
+  /** Financify's shipping rules (a flat estimate where it has no courier charge). */
+  shipping: Money | null;
+  taxes: Money | null;
+  /** Merchant-defined rules: withholding tax, packaging, … */
+  custom: Money | null;
 };
 
 const OPEN: Outcome[] = ["in_transit", "booked", "not_shipped"];
@@ -82,6 +97,12 @@ export type Bucket = {
   courierFees: Money[];
   shippedOrders: number;
   shippedOrdersWithoutFee: number;
+  /**
+   * Financify's other costs over the bucket's orders. Its shipping estimate
+   * counts only where Courierify recorded no courier fee: the actual charge
+   * replaces the estimate, never adds to it.
+   */
+  otherCosts: { payment: Money[]; shipping: Money[]; taxes: Money[]; custom: Money[]; orders: number };
 };
 
 function emptyBucket(key: string): Bucket {
@@ -101,6 +122,7 @@ function emptyBucket(key: string): Bucket {
     courierFees: [],
     shippedOrders: 0,
     shippedOrdersWithoutFee: 0,
+    otherCosts: { payment: [], shipping: [], taxes: [], custom: [], orders: 0 },
   };
 }
 
@@ -151,6 +173,14 @@ export function bucketOf(key: string, list: readonly RollupOrder[]): Bucket {
   b.courierFees = sumByCurrency(shipped.map((o) => o.courierFee));
   b.shippedOrders = shipped.length;
   b.shippedOrdersWithoutFee = shipped.filter((o) => !o.courierFee).length;
+  const costed = list.filter((o) => o.otherCosts);
+  b.otherCosts = {
+    payment: sumByCurrency(costed.map((o) => o.otherCosts!.payment)),
+    shipping: sumByCurrency(costed.filter((o) => !o.courierFee).map((o) => o.otherCosts!.shipping)),
+    taxes: sumByCurrency(costed.map((o) => o.otherCosts!.taxes)),
+    custom: sumByCurrency(costed.map((o) => o.otherCosts!.custom)),
+    orders: costed.length,
+  };
   return b;
 }
 
@@ -195,14 +225,21 @@ export const byVariant = (o: RollupOrder) =>
 // ── Profit after returns ────────────────────────────────────────────────────
 
 /**
- * Profit after returns, courier fees, COGS and ad spend, in one currency.
+ * Profit after returns, courier fees, COGS, ad spend and other costs, in one
+ * currency.
  *
  *   delivered revenue − COGS of delivered orders − courier fees of shipped
- *   orders − ad spend
+ *   orders − ad spend − other costs
  *
- * **Not Financify's "net profit"** (rule #15): Financify's figure depends on
- * five per-store settings. This one has a single fixed definition, and says
- * so. Only the named currency is counted; orders in any other currency are
+ * Other costs are Financify's per-order charges (G-FIN3-2): payment fees,
+ * taxes, the merchant's custom rules, and its shipping estimate on orders
+ * Courierify recorded no courier fee for. Courierify's actual charge always
+ * replaces the estimate, so a parcel is never charged twice.
+ *
+ * Financify's net profit follows its per-store settings (rule #15), and it
+ * counts a courier fee only when its own Courierify integration is on; this
+ * figure counts the actual fee wherever Courierify has one. The definition
+ * is fixed and the same for every store. Only the named currency is counted; orders in any other currency are
  * listed as excluded rather than converted (G-GZR2-4 does conversion).
  *
  * `complete` is false whenever something that should be subtracted is not
@@ -219,6 +256,8 @@ export type Profit = {
     cogsDelivered: string;
     courierFees: string;
     adSpend: string | null;
+    /** Financify's other costs; null when no order carries them. */
+    otherCosts: { payment: string; shipping: string; taxes: string; custom: string; total: string } | null;
   };
 };
 
@@ -232,6 +271,15 @@ export function profitAfterReturns(
   const cogs = pick(b.cogsDelivered);
   const fees = pick(b.courierFees);
   const ads = adSpend ? pick(adSpend) : null;
+  const oc = b.otherCosts.orders
+    ? {
+        payment: pick(b.otherCosts.payment),
+        shipping: pick(b.otherCosts.shipping),
+        taxes: pick(b.otherCosts.taxes),
+        custom: pick(b.otherCosts.custom),
+      }
+    : null;
+  const other = oc ? oc.payment + oc.shipping + oc.taxes + oc.custom : 0n;
 
   const missing: string[] = [];
   if (b.deliveryRate.stillOpen) missing.push(`${b.deliveryRate.stillOpen} order(s) still open`);
@@ -244,7 +292,7 @@ export function profitAfterReturns(
   if (adSpend?.some((m) => m.currency !== currency)) missing.push("ad spend in another currency excluded");
 
   return {
-    amount: formatAmount(revenue - cogs - fees - (ads ?? 0n)),
+    amount: formatAmount(revenue - cogs - fees - (ads ?? 0n) - other),
     currency,
     complete: missing.length === 0,
     missing,
@@ -253,6 +301,15 @@ export function profitAfterReturns(
       cogsDelivered: formatAmount(cogs),
       courierFees: formatAmount(fees),
       adSpend: ads === null ? null : formatAmount(ads),
+      otherCosts: oc
+        ? {
+            payment: formatAmount(oc.payment),
+            shipping: formatAmount(oc.shipping),
+            taxes: formatAmount(oc.taxes),
+            custom: formatAmount(oc.custom),
+            total: formatAmount(other),
+          }
+        : null,
     },
   };
 }
