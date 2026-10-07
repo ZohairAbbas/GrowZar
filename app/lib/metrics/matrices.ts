@@ -315,17 +315,37 @@ export const confirmationGroup = (c: string | null) => (c === null ? "not_sent" 
 
 export type ConfirmationFunnel = {
   steps: Array<{ key: string; label: string; orders: number }>;
-  states: Array<{
-    state: string;
-    label: string;
-    orders: number;
-    shipped: number;
-    decided: number;
-    returned: number;
-    /** returned ÷ decided, percent; null under the minimum. */
-    returnRate: number | null;
-  }>;
+  states: ConfirmationRow[];
+  /** Every order placed in the period, in the same shape as a state. */
+  total: ConfirmationRow;
 };
+
+export type ConfirmationRow = {
+  state: string;
+  label: string;
+  orders: number;
+  shipped: number;
+  delivered: number;
+  decided: number;
+  returned: number;
+  /** returned ÷ decided, percent; null under the minimum. */
+  returnRate: number | null;
+};
+
+function confirmationRow(state: string, label: string, list: readonly RollupOrder[]): ConfirmationRow {
+  const decided = list.filter((o) => DECIDED.includes(o.outcome));
+  const returned = decided.filter((o) => o.outcome === "returned").length;
+  return {
+    state,
+    label,
+    orders: list.length,
+    shipped: list.filter((o) => SHIPPED.includes(o.outcome)).length,
+    delivered: decided.length - returned,
+    decided: decided.length,
+    returned,
+    returnRate: decided.length >= MIN_DECIDED_TO_RATE ? pct(returned, decided.length) : null,
+  };
+}
 
 /**
  * Placed → sent for confirmation → confirmed → shipped → delivered →
@@ -350,19 +370,7 @@ export function confirmationFunnel(rows: readonly RollupOrder[]): ConfirmationFu
     ],
     states: Object.keys(CONFIRMATION_LABELS)
       .filter((state) => groups.has(state))
-      .map((state) => {
-        const list = groups.get(state)!;
-        const decided = list.filter((o) => DECIDED.includes(o.outcome));
-        const returned = decided.filter((o) => o.outcome === "returned").length;
-        return {
-          state,
-          label: CONFIRMATION_LABELS[state]!,
-          orders: list.length,
-          shipped: list.filter((o) => SHIPPED.includes(o.outcome)).length,
-          decided: decided.length,
-          returned,
-          returnRate: decided.length >= MIN_DECIDED_TO_RATE ? pct(returned, decided.length) : null,
-        };
-      }),
+      .map((state) => confirmationRow(state, CONFIRMATION_LABELS[state]!, groups.get(state)!)),
+    total: confirmationRow("all", "All orders", rows),
   };
 }
