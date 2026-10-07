@@ -3,6 +3,7 @@ import { coverageReport, type CoverageReport } from "./coverage";
 import { readPayout, type Payout } from "./settlements";
 import type { StoreSummary } from "./summaries.server";
 import { loadAttribution } from "./campaigns.server";
+import { feedsFor } from "../sync/entities";
 
 /**
  * Load what `coverageReport` counts over, for one store's period (D1). The
@@ -12,7 +13,7 @@ import { loadAttribution } from "./campaigns.server";
 export async function storeCoverage(s: StoreSummary): Promise<CoverageReport> {
   const storeId = s.store.id;
   const buyerIds = [...new Set(s.rows.map((r) => r.customerId).filter((c): c is string => !!c))];
-  const [connections, settlementRows, named, owing, attribution] = await Promise.all([
+  const [connections, settlementRows, named, owing, attribution, syncRows, adFetched] = await Promise.all([
     prisma.appConnection.findMany({ where: { storeId, status: "CONNECTED" }, select: { app: true } }),
     prisma.rawRecord.findMany({
       where: { storeId, app: "COURIERIFY", entity: "SETTLEMENT", deletedAt: null },
@@ -26,7 +27,14 @@ export async function storeCoverage(s: StoreSummary): Promise<CoverageReport> {
       where: { storeId, outcome: "delivered", parcelCount: { gt: 0 }, uncollectedAmount: { gt: 0 }, courier: { not: null } },
     }),
     loadAttribution(storeId, s.rows.map((r) => r.orderId)),
+    prisma.syncState.findMany({
+      where: { storeId },
+      select: { app: true, entity: true, lastSuccessAt: true, consecutiveFailures: true, lastError: true },
+    }),
+    prisma.adSpend.aggregate({ where: { storeId }, _max: { fetchedAt: true } }),
   ]);
+  // Only feeds that exist today: a dropped feed's old failure is not a gap.
+  const current = new Set(connections.flatMap((c) => feedsFor(c.app).map((f) => `${c.app}:${f.entity}`)));
   const tied = [...attribution.values()];
   return coverageReport({
     period: s.period,
@@ -40,6 +48,11 @@ export async function storeCoverage(s: StoreSummary): Promise<CoverageReport> {
     buyers: { total: buyerIds.length, named },
     unconvertedOrders: s.fx?.unconverted.reduce((n, u) => n + u.orders, 0) ?? 0,
     withheld: s.withheld,
+    syncs: syncRows
+      .filter((r) => current.has(`${r.app}:${r.entity}`))
+      .map((r) => ({ app: r.app, entity: r.entity, lastSuccessAt: r.lastSuccessAt, failures: r.consecutiveFailures, error: r.lastError })),
+    adSpendFetchedAt: adFetched._max.fetchedAt ?? null,
+    asOf: new Date(),
     otherCosts: s.rows.length ? { have: s.rows.filter((r) => r.otherCosts).length, of: s.rows.length } : undefined,
     attribution: tied.length
       ? {
