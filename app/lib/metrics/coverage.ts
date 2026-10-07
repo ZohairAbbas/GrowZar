@@ -74,6 +74,8 @@ export type CoverageInput = {
   buyers: { total: number; named: number };
   /** Orders in another currency with no rate for their day. */
   unconvertedOrders: number;
+  /** Orders carrying Financify's other costs (G-FIN3-2), of the period's orders. */
+  otherCosts?: { have: number; of: number };
   /** Orders tied to a campaign by Financify (G-FIN3-1), of orders Financify has a row for. */
   attribution?: { matched: number; of: number; organic: number };
   /** Orders whose outcome was withheld as one-sided (`outcome-sources.ts`), and the carriers. */
@@ -270,6 +272,24 @@ export function coverageReport(input: CoverageInput): CoverageReport {
         (n) => `${plural(n, "delivered order")} with a line that has no cost in Financify`,
       ),
     );
+    if (input.otherCosts) {
+      items.push(
+        counted(
+          {
+            key: "other_costs",
+            app: "FINANCIFY",
+            label: "Other costs",
+            phrase: "other costs",
+            unit: "orders",
+            effect: "profit subtracts payment fees, taxes, your Financify cost rules and its shipping estimate only on orders that carry them",
+            sections: ["home", "finance"],
+          },
+          input.otherCosts.have,
+          input.otherCosts.of,
+          (n) => `${plural(n, "order")} without Financify's other costs yet`,
+        ),
+      );
+    }
     if (input.adSpend) {
       items.push(
         counted(

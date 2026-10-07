@@ -132,3 +132,20 @@ describe("what couriers deducted", () => {
     expect(gap.unitemized).toEqual(pkr("1200.00"));
   });
 });
+
+describe("other costs in the breakdown", () => {
+  it("charges Financify's shipping estimate only where Courierify recorded no fee, and still ends on the profit", () => {
+    const oc = { payment: pkr("10.00"), shipping: pkr("300.00"), taxes: null, custom: pkr("20.00") };
+    const rows = [order({ otherCosts: oc }), order({ courierFee: null, otherCosts: oc }), order()];
+    const profit = profitAfterReturns(bucketOf("s", rows), "PKR", null);
+    const lines = moneyBreakdown(rows, "PKR", profit, null);
+    expect(amount(lines, "payment")).toBe("-20.00");
+    expect(amount(lines, "shipping")).toBe("-300.00");
+    expect(amount(lines, "custom")).toBe("-40.00");
+    expect(lines.some((l) => l.key === "taxes")).toBe(false);
+    // 3000 delivered − 1200 cost − 400 fees − 360 other costs.
+    expect(profit.amount).toBe("1040.00");
+    expect(amount(lines, "profit")).toBe("1040.00");
+    expect(profit.parts.otherCosts).toMatchObject({ total: "360.00", shipping: "300.00" });
+  });
+});

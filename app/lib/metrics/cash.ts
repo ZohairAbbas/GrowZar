@@ -112,6 +112,21 @@ export function moneyBreakdown(
   if (ads) {
     lines.push(line("ads", "Ad spend", -pickAds(ads.spend)), line("adFees", "Ad tax & platform fees", -pickAds(ads.fees)));
   }
+  // Financify's other costs, as `bucketOf` counts them: its shipping estimate
+  // only where Courierify recorded no courier fee.
+  const costed = inCur.filter((o) => o.otherCosts);
+  if (costed.length) {
+    const oc = (pick: (c: NonNullable<RollupOrder["otherCosts"]>) => Money | null, list = costed) => sum(list, (o) => pick(o.otherCosts!), currency);
+    const shippingEstimate = oc((c) => c.shipping, costed.filter((o) => !o.courierFee));
+    for (const [key, label, u] of [
+      ["payment", "Payment fees", oc((c) => c.payment)],
+      ["shipping", "Shipping estimate, no courier fee recorded", shippingEstimate],
+      ["taxes", "Taxes", oc((c) => c.taxes)],
+      ["custom", "Other costs (your Financify rules)", oc((c) => c.custom)],
+    ] as const) {
+      if (u !== 0n) lines.push(line(key, label, -u));
+    }
+  }
   // The headline's own figure, so the two can never drift apart.
   if (profit && profit.currency === currency) {
     lines.push(line("profit", "Profit after returns", parseAmount(profit.amount)!, { subtotal: true }));

@@ -43,7 +43,7 @@ describe("store column", () => {
     const col = storeColumn({
       storeId: "s", name: "Shop", currency: "PKR", base: "PKR", period: { from: "2026-09-01", to: "2026-09-30" },
       orders, previousOrders: 10, placed: null, deliveredRevenue: null,
-      profit: { amount: "1.00", currency: "AED", complete: true, missing: [], parts: { deliveredRevenue: "0", cogsDelivered: "0", courierFees: "0", adSpend: null } },
+      profit: { amount: "1.00", currency: "AED", complete: true, missing: [], parts: { deliveredRevenue: "0", cogsDelivered: "0", courierFees: "0", adSpend: null, otherCosts: null } },
       adSpend: null, roas: null, courierify: { shippedOrders: 20, withParcel: 15 },
     });
     expect(col).toMatchObject({ deliveryRate: 90, returnRate: 10, decided: 20, courierifyShare: 75 });

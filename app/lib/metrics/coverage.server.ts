@@ -40,6 +40,7 @@ export async function storeCoverage(s: StoreSummary): Promise<CoverageReport> {
     buyers: { total: buyerIds.length, named },
     unconvertedOrders: s.fx?.unconverted.reduce((n, u) => n + u.orders, 0) ?? 0,
     withheld: s.withheld,
+    otherCosts: s.rows.length ? { have: s.rows.filter((r) => r.otherCosts).length, of: s.rows.length } : undefined,
     attribution: tied.length
       ? {
           matched: tied.filter((a) => a.campaignKey).length,
