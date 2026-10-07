@@ -8,7 +8,7 @@ import { formatAmount, parseAmount, sumByCurrency, type Money } from "./money";
 import { compareSettings, type SettingsComparison, type StoreSettings } from "./profit-settings";
 import { bucketOf, byCity, byCourier, profitAfterReturns, roas, rollup, type Bucket, type Profit, type RollupOrder } from "./rollups";
 import { inScope, isScoped, NO_SCOPE, type Scope } from "./scope";
-import { ONE_SIDED_HISTORY_DAYS, oneSidedSlices, withholdOneSided } from "./outcome-sources";
+import { ONE_SIDED_HISTORY_DAYS, STALE_OPEN_DAYS, oneSidedSlices, withholdOneSided } from "./outcome-sources";
 import { loadAdSpend, loadOrders } from "./rollups.server";
 import { loadFxSource } from "./fx.server";
 import { convertOrder, fxReport, type FxReport } from "./fx-orders";
@@ -112,20 +112,34 @@ function daysBetween(from: string, to: string): number {
  * not flicker with the period picked.
  */
 async function financifyOnlyHistory(storeId: string, to: string) {
-  const since = new Date(Date.parse(`${to}T00:00:00Z`) - (ONE_SIDED_HISTORY_DAYS - 1) * 86_400_000).toISOString().slice(0, 10);
-  const groups = await prisma.orderGrain.groupBy({
-    by: ["courier", "outcome"],
-    where: { storeId, parcelCount: 0, outcome: { in: ["delivered", "returned"] }, localDay: { gte: since, lte: to } },
-    _count: { _all: true },
-  });
-  const by = new Map<string, { courier: string; delivered: number; returned: number }>();
+  const day = (offset: number) => new Date(Date.parse(`${to}T00:00:00Z`) - offset * 86_400_000).toISOString().slice(0, 10);
+  const since = day(ONE_SIDED_HISTORY_DAYS - 1);
+  const [groups, stale] = await Promise.all([
+    prisma.orderGrain.groupBy({
+      by: ["courier", "outcome"],
+      where: { storeId, parcelCount: 0, outcome: { in: ["delivered", "returned"] }, localDay: { gte: since, lte: to } },
+      _count: { _all: true },
+    }),
+    // Shipped, old enough to have an outcome, and still without one.
+    prisma.orderGrain.groupBy({
+      by: ["courier"],
+      where: { storeId, parcelCount: 0, outcome: "in_transit", localDay: { gte: since, lt: day(STALE_OPEN_DAYS) } },
+      _count: { _all: true },
+    }),
+  ]);
+  const by = new Map<string, { courier: string; delivered: number; returned: number; staleOpen: number }>();
+  const entry = (c: string | null) => {
+    const courier = c ?? "unknown";
+    const e = by.get(courier) ?? { courier, delivered: 0, returned: 0, staleOpen: 0 };
+    by.set(courier, e);
+    return e;
+  };
   for (const g of groups) {
-    const courier = g.courier ?? "unknown";
-    const e = by.get(courier) ?? { courier, delivered: 0, returned: 0 };
+    const e = entry(g.courier);
     if (g.outcome === "delivered") e.delivered += g._count._all;
     else e.returned += g._count._all;
-    by.set(courier, e);
   }
+  for (const g of stale) entry(g.courier).staleOpen += g._count._all;
   return [...by.values()];
 }
 
