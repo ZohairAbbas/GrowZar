@@ -2,14 +2,14 @@
  * Campaign spend and store-versus-store comparison (Phase 4b, D5). Pure.
  *
  * Campaigns: Financify reports spend per campaign (`method: "measured"`,
- * ad-platform days). It does not say which campaign an order came from, so
- * orders, delivered revenue and return rate per campaign are not computed;
- * the coverage panel says so once. What is here is spend, fees, how long each
- * campaign ran, and how its spend moved against the previous period.
+ * ad-platform days) and, since G-FIN3-1, which campaign each order came from
+ * (`attribution.campaignKey`). Spend, fees and how long each campaign ran come
+ * from the first; orders, outcomes, ROAS on delivered revenue and return rate
+ * per campaign from the second (`campaignOutcomes`).
  */
 import { countDelta, moneyDelta, MIN_DECIDED_TO_RATE, type Delta } from "./compare";
 import { formatAmount, parseAmount, type Money } from "./money";
-import type { Bucket, Profit } from "./rollups";
+import type { Bucket, Profit, RollupOrder } from "./rollups";
 import type { Conversion } from "./fx";
 
 export type CampaignSpendRow = {
@@ -163,5 +163,137 @@ export function storeColumn(input: {
       ? Math.round((1000 * input.courierify.withParcel) / input.courierify.shippedOrders) / 10
       : null,
     ordersChange: countDelta(input.orders.orders, input.previousOrders),
+  };
+}
+
+// ── Campaign outcomes (Phase 4c, step 3) ───────────────────────────────────
+
+/** Financify's order → campaign link (G-FIN3-1), as Growzar stores it. */
+export type OrderAttribution = {
+  campaignKey: string | null;
+  platform: string | null;
+  /** utm_id | mapping | utm_only | none | affiliate; null when Financify has no record yet. */
+  method: string | null;
+};
+
+export type CampaignOutcome = {
+  key: string;
+  platform: string;
+  name: string;
+  /** Spend in the period (measured), null when the campaign spent nothing in it. */
+  spend: Money | null;
+  orders: number;
+  delivered: number;
+  returned: number;
+  stillOpen: number;
+  /**
+   * Orders whose outcome no app will learn (withheld as one-sided, e.g.
+   * shipped with a courier booked outside Shopify and Courierify).
+   */
+  notTrackable: number;
+  decided: number;
+  deliveredRevenue: Money;
+  /** returned ÷ decided, percent; null under MIN_DECIDED_TO_RATE. */
+  returnRate: number | null;
+  /**
+   * Delivered revenue ÷ (spend + fees); null without spend, or when more
+   * than MAX_UNTRACKABLE_SHARE of the campaign's orders cannot be tracked —
+   * their deliveries would never be counted, so the figure would read as
+   * failure where it is only blindness.
+   */
+  roas: number | null;
+  /** (spend + fees) ÷ delivered orders; null without either. */
+  costPerDelivered: Money | null;
+  /** How the orders were tied: by the campaign id in the UTM, or by name/mapping. */
+  byId: number;
+  byName: number;
+};
+
+export type CampaignOutcomes = {
+  campaigns: CampaignOutcome[];
+  /** Orders in the period with no campaign, by why. */
+  unattributed: { untracked: number; affiliate: number; noRecord: number };
+  /** Orders tied to a campaign, of orders Financify knows. */
+  matched: number;
+  of: number;
+  storeReturnRate: number | null;
+};
+
+/**
+ * What each campaign's orders did. Orders are the period's (store-local
+ * days), tied by Financify's `campaignKey`; outcomes are Growzar's own, so a
+ * campaign's returns are counted the way every other return is, one-sided
+ * sources withheld. Spend is the period's measured spend plus platform fees,
+ * so ROAS here and the store's ROAS use the same basis. A campaign with
+ * orders but no spend in the period still appears, named from its whole
+ * history (`names`).
+ */
+/** A campaign's ROAS is withheld above this share of orders whose outcome cannot be known. */
+export const MAX_UNTRACKABLE_SHARE = 0.2;
+
+export function campaignOutcomes(
+  rows: readonly RollupOrder[],
+  attribution: ReadonlyMap<string, OrderAttribution>,
+  spend: CampaignSpend | null,
+  names: ReadonlyMap<string, { name: string | null; platform: string | null }>,
+  currency: string,
+): CampaignOutcomes {
+  const mine = rows.filter((o) => (o.placed?.currency ?? currency) === currency && attribution.has(o.orderId));
+  const by = new Map<string, RollupOrder[]>();
+  const unattributed = { untracked: 0, affiliate: 0, noRecord: 0 };
+  for (const o of mine) {
+    const a = attribution.get(o.orderId)!;
+    if (a.campaignKey) by.set(a.campaignKey, [...(by.get(a.campaignKey) ?? []), o]);
+    else if (a.method === "affiliate") unattributed.affiliate += 1;
+    else if (a.method === null) unattributed.noRecord += 1;
+    else unattributed.untracked += 1;
+  }
+  const spendBy = new Map((spend?.campaigns ?? []).map((c) => [c.key, c]));
+  const keys = new Set([...by.keys(), ...spendBy.keys()]);
+  const u = (m: Money | null | undefined) => (m && m.currency === currency ? parseAmount(m.amount)! : 0n);
+  const decidedAll = mine.filter((o) => o.outcome === "delivered" || o.outcome === "returned");
+  const returnedAll = decidedAll.filter((o) => o.outcome === "returned").length;
+
+  const campaigns = [...keys].map((key): CampaignOutcome => {
+    const list = by.get(key) ?? [];
+    const s = spendBy.get(key);
+    const delivered = list.filter((o) => o.outcome === "delivered");
+    const returned = list.filter((o) => o.outcome === "returned").length;
+    const decided = delivered.length + returned;
+    const revenue = delivered.reduce((a, o) => a + u(o.delivered), 0n);
+    const cost = s ? u(s.spend) + u(s.fees) : 0n;
+    const notTrackable = list.filter((o) => o.outcome === "unknown").length;
+    const live = list.filter((o) => o.outcome !== "order_cancelled" && o.outcome !== "shipment_cancelled").length;
+    const blind = live > 0 && notTrackable > MAX_UNTRACKABLE_SHARE * live;
+    const named = names.get(key);
+    return {
+      key,
+      platform: s?.platform ?? named?.platform ?? key.split(":")[0] ?? "unknown",
+      name: s?.name ?? named?.name ?? key,
+      spend: s ? s.spend : null,
+      orders: list.length,
+      delivered: delivered.length,
+      returned,
+      stillOpen: list.filter((o) => ["in_transit", "booked", "not_shipped"].includes(o.outcome)).length,
+      notTrackable,
+      decided,
+      deliveredRevenue: { amount: formatAmount(revenue), currency },
+      returnRate: decided >= MIN_DECIDED_TO_RATE ? Math.round((1000 * returned) / decided) / 10 : null,
+      roas: cost > 0n && !blind ? Number((revenue * 100n) / cost) / 100 : null,
+      // Half-up to the cent (amounts are millionths).
+      costPerDelivered:
+        cost > 0n && delivered.length && !blind
+          ? { amount: formatAmount(((cost / BigInt(delivered.length) + 5_000n) / 10_000n) * 10_000n), currency }
+          : null,
+      byId: list.filter((o) => attribution.get(o.orderId)!.method === "utm_id").length,
+      byName: list.filter((o) => attribution.get(o.orderId)!.method === "mapping").length,
+    };
+  });
+  return {
+    campaigns: campaigns.sort((a, b) => u(b.spend) > u(a.spend) ? 1 : u(b.spend) < u(a.spend) ? -1 : b.orders - a.orders),
+    unattributed,
+    matched: mine.filter((o) => attribution.get(o.orderId)!.campaignKey).length,
+    of: mine.length,
+    storeReturnRate: decidedAll.length >= MIN_DECIDED_TO_RATE ? Math.round((1000 * returnedAll) / decidedAll.length) / 10 : null,
   };
 }
