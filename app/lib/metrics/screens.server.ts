@@ -30,7 +30,8 @@ import {
   type ProductPoint,
 } from "./matrices";
 import { loadAdSpend } from "./rollups.server";
-import { campaignSpend, storeColumn, type CampaignSpend, type CampaignSpendRow, type StoreColumn } from "./campaigns";
+import { campaignOutcomes, campaignSpend, storeColumn, type CampaignOutcomes, type CampaignSpend, type CampaignSpendRow, type StoreColumn } from "./campaigns";
+import { loadAttribution, loadCampaignNames } from "./campaigns.server";
 import { previousPeriod } from "./compare";
 import { convertDated } from "./fx";
 import { loadFxSource } from "./fx.server";
@@ -703,11 +704,13 @@ export type MarketingView = {
   campaigns: CampaignSpend | null;
   /** Whether the previous period's ad spend is fetched in full, so campaign changes mean something. */
   campaignsCompared: boolean;
+  /** What each campaign's orders did (G-FIN3-1); null without currency. */
+  outcomes: CampaignOutcomes | null;
 };
 
 export async function marketingView(storeId: string, s: StoreSummary): Promise<MarketingView> {
   const cur = s.store.currency;
-  if (!cur) return { currency: null, products: [], storeReturnRate: null, withAds: false, adDays: null, campaigns: null, campaignsCompared: false };
+  if (!cur) return { currency: null, products: [], storeReturnRate: null, withAds: false, adDays: null, campaigns: null, campaignsCompared: false, outcomes: null };
   const ads = s.adSpend && s.adSpend.daysFetched === s.adSpend.daysInPeriod ? await loadAdSpend(storeId, s.period.from, s.period.to) : null;
   const e = productEconomics(s.rows, cur, ads ? Object.fromEntries(ads.byVariant) : null);
   const before = previousPeriod(s.period.from, s.period.to);
@@ -720,9 +723,12 @@ export async function marketingView(storeId: string, s: StoreSummary): Promise<M
     : [[], [], 0];
   const prevLength = s.adSpend?.daysInPeriod ?? 0;
   const campaignsCompared = prevLength > 0 && prevDays === prevLength;
+  const campaigns = s.adSpend ? campaignSpend(now, campaignsCompared ? prev : [], cur) : null;
+  const [attribution, names] = await Promise.all([loadAttribution(storeId, s.rows.map((o) => o.orderId)), loadCampaignNames(storeId)]);
   return {
-    campaigns: s.adSpend ? campaignSpend(now, campaignsCompared ? prev : [], cur) : null,
+    campaigns,
     campaignsCompared,
+    outcomes: attribution.size ? campaignOutcomes(s.rows, attribution, campaigns, names, cur) : null,
     currency: cur,
     products: e.products,
     storeReturnRate: e.storeReturnRate,

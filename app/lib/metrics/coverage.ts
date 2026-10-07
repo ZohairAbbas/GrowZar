@@ -74,6 +74,8 @@ export type CoverageInput = {
   buyers: { total: number; named: number };
   /** Orders in another currency with no rate for their day. */
   unconvertedOrders: number;
+  /** Orders tied to a campaign by Financify (G-FIN3-1), of orders Financify has a row for. */
+  attribution?: { matched: number; of: number; organic: number };
   /** Orders whose outcome was withheld as one-sided (`outcome-sources.ts`), and the carriers. */
   withheld?: { orders: number; returned: number; inTransit: number; couriers: string[] };
 };
@@ -325,19 +327,38 @@ export function coverageReport(input: CoverageInput): CoverageReport {
       });
     }
     // Order-level attribution is what per-campaign orders and returns need.
-    items.push({
-      key: "campaign_attribution",
-      app: "FINANCIFY",
-      label: "Orders per campaign",
-      phrase: "orders per campaign",
-      have: null,
-      of: null,
-      unit: null,
-      status: "missing",
-      gap: "Financify sends spend per campaign, but not which campaign each order came from",
-      effect: "campaigns show spend and fees; orders, delivered revenue, ROAS and return rate per campaign need that link",
-      sections: ["marketing"],
-    });
+    if (input.attribution && input.attribution.of > 0) {
+      const at = input.attribution;
+      const item = counted(
+        {
+          key: "campaign_attribution",
+          app: "FINANCIFY",
+          label: "Orders tied to a campaign",
+          phrase: "orders tied to a campaign",
+          unit: "orders",
+          effect: "campaign orders, ROAS on delivered revenue and return rates count only orders Financify tied to a campaign",
+          sections: ["marketing"],
+        },
+        at.matched,
+        at.of,
+        (n) => `${plural(n, "order")} not tied to a campaign${at.organic ? `, ${at.organic.toLocaleString("en-US")} of them carrying no paid campaign (organic or direct traffic)` : ""}`,
+      );
+      if (item) items.push(item);
+    } else {
+      items.push({
+        key: "campaign_attribution",
+        app: "FINANCIFY",
+        label: "Orders per campaign",
+        phrase: "orders per campaign",
+        have: null,
+        of: null,
+        unit: null,
+        status: "missing",
+        gap: "Financify has not sent which campaign each order came from yet",
+        effect: "campaigns show spend and fees only",
+        sections: ["marketing"],
+      });
+    }
     items.push({
       key: "bank_receipts",
       app: "FINANCIFY",

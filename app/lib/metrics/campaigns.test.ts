@@ -51,3 +51,42 @@ describe("store column", () => {
     expect(col.profit?.inBase).toBe(false);
   });
 });
+
+describe("campaign outcomes", () => {
+  it("counts each campaign's orders by Growzar's outcomes, with ROAS on delivered revenue", async () => {
+    const { campaignOutcomes } = await import("./campaigns");
+    const o = (outcome: RollupOrder["outcome"], id: string) =>
+      ({ orderId: id, outcome, currency: "PKR", placed: pkr("1000.00"), delivered: outcome === "delivered" ? pkr("1000.00") : null, lines: [] }) as unknown as RollupOrder;
+    const rows = [
+      ...Array.from({ length: 15 }, (_, i) => o("delivered", `a${i}`)),
+      ...Array.from({ length: 5 }, (_, i) => o("returned", `r${i}`)),
+      o("in_transit", "t1"),
+      o("delivered", "late"), // a campaign that spent nothing this period
+      o("delivered", "org"),
+      o("delivered", "none"),
+    ];
+    const attr = new Map<string, { campaignKey: string | null; platform: string | null; method: string | null }>([
+      ...rows.slice(0, 21).map((r) => [r.orderId, { campaignKey: "facebook:1", platform: "facebook", method: "utm_id" }] as const),
+      ["late", { campaignKey: "facebook:9", platform: "facebook", method: "mapping" }],
+      ["org", { campaignKey: null, platform: null, method: "utm_only" }],
+      ["none", { campaignKey: null, platform: null, method: null }],
+    ]);
+    const spend = campaignSpend([row("2026-09-10", "facebook:1", "5000.00"), row("2026-09-10", "tiktok:2", "300.00")], [], "PKR");
+    const out = campaignOutcomes(rows, attr, spend, new Map([["facebook:9", { name: "Old campaign", platform: "facebook" }]]), "PKR");
+    const fb = out.campaigns.find((c) => c.key === "facebook:1")!;
+    expect(fb).toMatchObject({ orders: 21, delivered: 15, returned: 5, stillOpen: 1, decided: 20, returnRate: 25, byId: 21 });
+    // 15,000 delivered ÷ (5,000 spend + 5 fees).
+    expect(fb.roas).toBe(2.99);
+    expect(fb.costPerDelivered).toEqual(pkr("333.67"));
+    expect(out.campaigns.find((c) => c.key === "facebook:9")).toMatchObject({ name: "Old campaign", spend: null, roas: null, orders: 1, returnRate: null });
+    expect(out.campaigns.find((c) => c.key === "tiktok:2")).toMatchObject({ orders: 0, roas: 0 });
+    expect(out.unattributed).toEqual({ untracked: 1, affiliate: 0, noRecord: 1 });
+    expect([out.matched, out.of]).toEqual([22, 24]);
+
+    // A campaign whose orders mostly cannot be tracked shows no ROAS, not 0.
+    const blind = [o("delivered", "b1"), ...Array.from({ length: 4 }, (_, i) => o("unknown", `bu${i}`))];
+    const blindAttr = new Map(blind.map((r) => [r.orderId, { campaignKey: "facebook:7", platform: "facebook", method: "utm_id" }] as const));
+    const b = campaignOutcomes(blind, blindAttr, campaignSpend([row("2026-09-10", "facebook:7", "900.00")], [], "PKR"), new Map(), "PKR").campaigns[0]!;
+    expect(b).toMatchObject({ orders: 5, delivered: 1, notTrackable: 4, roas: null, costPerDelivered: null });
+  });
+});

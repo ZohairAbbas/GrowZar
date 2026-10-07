@@ -1,7 +1,7 @@
 import { Link } from "react-router";
 import { ArrowRight } from "lucide-react";
 
-import type { CampaignSpend } from "~/lib/metrics/campaigns";
+import type { CampaignOutcomes, CampaignSpend } from "~/lib/metrics/campaigns";
 import { MIN_COSTED_LINE_SHARE, type CityCourierMatrix, type ConfirmationFunnel, type PayoutAgeing, type ProductPoint } from "~/lib/metrics/matrices";
 import { MIN_DECIDED_TO_RATE } from "~/lib/metrics/compare";
 import { Change, formatAmount } from "./Metrics";
@@ -469,6 +469,107 @@ export function CampaignTable({ data, compared }: { data: CampaignSpend; compare
         {data.campaigns.length > 20 ? (
           <p className="mt-2 text-xs text-gray-500">Top 20 of {data.campaigns.length.toLocaleString()} campaigns by spend.</p>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ── Campaign outcomes (Phase 4c, step 3) ───────────────────────────────────
+
+/**
+ * Spend beside what each campaign's orders did. Return rate is the column no
+ * other app in the suite can show: a campaign can read well on ROAS and send
+ * back half its parcels. A rate is drawn only from 20 decided orders; a row
+ * returning 10+ points above the store is marked.
+ */
+export function CampaignOutcomesTable({ data, spend }: { data: CampaignOutcomes; spend: CampaignSpend | null }) {
+  const amount = (a: string) => formatAmount(a).replace(/\.\d+$/, "");
+  const store = data.storeReturnRate;
+  const high = (r: number | null) => r !== null && store !== null && r - store >= 10;
+  const shown = data.campaigns.filter((c) => c.orders > 0 || c.spend);
+  const flagged = shown.filter((c) => high(c.returnRate));
+  const untied = data.unattributed.untracked + data.unattributed.affiliate + data.unattributed.noRecord;
+  return (
+    <div className="rounded-2xl bg-white p-5">
+      <h2 className="font-display text-lg font-bold text-gray-900">What each campaign brought back</h2>
+      <p className="mt-1 text-sm text-gray-600">
+        {spend ? `${amount(spend.total.amount)} ${spend.currency} across ${spend.campaigns.length} campaigns, plus ${amount(spend.fees.amount)} in platform fees. ` : ""}
+        Orders are tied to campaigns by Financify ({data.matched.toLocaleString()} of {data.of.toLocaleString()} this period); outcomes
+        are Growzar&apos;s. ROAS is delivered revenue ÷ spend and fees.
+        {flagged.length
+          ? ` ${flagged.length} ${flagged.length === 1 ? "campaign returns" : "campaigns return"} 10+ points more than the store's ${store!.toFixed(1)}%.`
+          : ""}
+      </p>
+      {spend ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {spend.platforms.map((p) => (
+            <span key={p.platform} className="rounded-full bg-field px-3 py-1.5 text-sm">
+              <span className="font-semibold text-gray-900">{platformName(p.platform)}</span>{" "}
+              <span className="tabular-nums text-gray-700">
+                {amount(p.spend.amount)} · {p.share.toFixed(1)}%
+              </span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className="mt-4 overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
+            <tr>
+              <th className="py-2 pr-4">Campaign</th>
+              <th className="py-2 pr-4 text-right">Spend</th>
+              <th className="py-2 pr-4 text-right">Orders</th>
+              <th className="py-2 pr-4 text-right">Delivered</th>
+              <th className="py-2 pr-4 text-right">Returned</th>
+              <th className="py-2 pr-4 text-right">Delivered revenue</th>
+              <th className="py-2 pr-4 text-right">ROAS</th>
+              <th className="py-2 text-right">Cost per delivered</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {shown.slice(0, 25).map((c) => (
+              <tr key={c.key} className={high(c.returnRate) ? "bg-coral-50" : undefined}>
+                <td className="max-w-xs py-2 pr-4">
+                  <span className="block truncate font-medium text-gray-900" title={c.name}>{c.name}</span>
+                  <span className="text-xs text-gray-500">
+                    {platformName(c.platform)}
+                    {c.byName && !c.byId ? " · tied by name" : ""}
+                  </span>
+                </td>
+                <td className="py-2 pr-4 text-right tabular-nums">{c.spend ? amount(c.spend.amount) : <span className="text-xs text-gray-500">none this period</span>}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">
+                  {c.orders || ""}
+                  {c.stillOpen ? <span className="block text-xs text-gray-500">{c.stillOpen} open</span> : null}
+                  {c.notTrackable ? <span className="block text-xs text-gray-500">{c.notTrackable} not trackable</span> : null}
+                </td>
+                <td className="py-2 pr-4 text-right tabular-nums">{c.delivered || ""}</td>
+                <td className={`py-2 pr-4 text-right tabular-nums ${high(c.returnRate) ? "font-semibold text-coral-700" : ""}`}>
+                  {c.returnRate !== null ? `${c.returnRate.toFixed(1)}%` : c.returned ? c.returned : ""}
+                  {c.decided ? <span className="block text-xs font-normal text-gray-500">{c.returned} of {c.decided}</span> : null}
+                </td>
+                <td className="py-2 pr-4 text-right tabular-nums">{c.delivered ? amount(c.deliveredRevenue.amount) : ""}</td>
+                <td className="py-2 pr-4 text-right font-semibold tabular-nums">
+                  {c.roas !== null ? c.roas.toFixed(2) : c.spend && c.notTrackable ? <span className="text-xs font-normal text-gray-500">can&apos;t tell</span> : ""}
+                </td>
+                <td className="py-2 text-right tabular-nums">{c.costPerDelivered ? amount(c.costPerDelivered.amount) : ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="mt-2 text-xs text-gray-500">
+          {shown.length > 25 ? `Top 25 of ${shown.length} campaigns by spend. ` : ""}
+          {untied
+            ? `${untied.toLocaleString()} orders this period are tied to no campaign (${[
+                data.unattributed.untracked ? `${data.unattributed.untracked} organic, direct or untagged` : "",
+                data.unattributed.affiliate ? `${data.unattributed.affiliate} affiliate` : "",
+                data.unattributed.noRecord ? `${data.unattributed.noRecord} with no record yet` : "",
+              ]
+                .filter(Boolean)
+                .join(", ")}). `
+            : ""}
+          Return rates need 20 decided orders; recent campaigns read low on ROAS until their orders deliver. &ldquo;Can&apos;t
+          tell&rdquo;: over 20% of the campaign&apos;s orders went with a courier no app tracks, so its deliveries are never counted.
+        </p>
       </div>
     </div>
   );

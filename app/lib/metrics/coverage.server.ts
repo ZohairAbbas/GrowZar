@@ -2,6 +2,7 @@ import { prisma } from "../db.server";
 import { coverageReport, type CoverageReport } from "./coverage";
 import { readPayout, type Payout } from "./settlements";
 import type { StoreSummary } from "./summaries.server";
+import { loadAttribution } from "./campaigns.server";
 
 /**
  * Load what `coverageReport` counts over, for one store's period (D1). The
@@ -11,7 +12,7 @@ import type { StoreSummary } from "./summaries.server";
 export async function storeCoverage(s: StoreSummary): Promise<CoverageReport> {
   const storeId = s.store.id;
   const buyerIds = [...new Set(s.rows.map((r) => r.customerId).filter((c): c is string => !!c))];
-  const [connections, settlementRows, named, owing] = await Promise.all([
+  const [connections, settlementRows, named, owing, attribution] = await Promise.all([
     prisma.appConnection.findMany({ where: { storeId, status: "CONNECTED" }, select: { app: true } }),
     prisma.rawRecord.findMany({
       where: { storeId, app: "COURIERIFY", entity: "SETTLEMENT", deletedAt: null },
@@ -24,7 +25,9 @@ export async function storeCoverage(s: StoreSummary): Promise<CoverageReport> {
       by: ["courier"],
       where: { storeId, outcome: "delivered", parcelCount: { gt: 0 }, uncollectedAmount: { gt: 0 }, courier: { not: null } },
     }),
+    loadAttribution(storeId, s.rows.map((r) => r.orderId)),
   ]);
+  const tied = [...attribution.values()];
   return coverageReport({
     period: s.period,
     rows: s.rows,
@@ -37,5 +40,12 @@ export async function storeCoverage(s: StoreSummary): Promise<CoverageReport> {
     buyers: { total: buyerIds.length, named },
     unconvertedOrders: s.fx?.unconverted.reduce((n, u) => n + u.orders, 0) ?? 0,
     withheld: s.withheld,
+    attribution: tied.length
+      ? {
+          matched: tied.filter((a) => a.campaignKey).length,
+          of: tied.length,
+          organic: tied.filter((a) => !a.campaignKey && a.method === "utm_only").length,
+        }
+      : undefined,
   });
 }
