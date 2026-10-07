@@ -380,59 +380,71 @@ export function ConfirmationFunnelView({
   active: string | null;
   min: number;
 }) {
-  const top = Math.max(1, funnel.steps[0]!.orders);
+  const total = funnel.total;
+  const top = Math.max(1, total.orders);
+  const step = (key: string) => funnel.steps.find((s) => s.key === key)?.orders ?? 0;
+  const base = `/orders?days=${days}${scope ? `&${scope}` : ""}`;
   return (
-    <div className="grid gap-3 lg:grid-cols-2">
-      <div className="rounded-2xl bg-white p-5">
-        <h2 className="font-display text-lg font-bold text-gray-900">From order to outcome</h2>
-        <ol className="mt-4 space-y-2">
-          {funnel.steps.map((s) => (
-            <li key={s.key} className="grid grid-cols-[10rem_1fr_4rem] items-center gap-3 text-sm">
-              <span className="text-gray-700">{s.label}</span>
-              <span className="h-3 rounded-sm bg-field">
-                <span
-                  className={`block h-3 rounded-sm ${s.key === "returned" ? "bg-coral" : s.key === "delivered" ? "bg-mint-600" : "bg-data-700"}`}
-                  style={{ width: `${(100 * s.orders) / top}%` }}
-                />
-              </span>
-              <span className="text-right font-semibold tabular-nums text-gray-900">{s.orders.toLocaleString()}</span>
-            </li>
-          ))}
-        </ol>
-        <p className="mt-3 text-xs text-gray-500">Orders placed in the period, by how far each got. Shipped includes orders never confirmed.</p>
-      </div>
-      <div className="overflow-x-auto rounded-2xl bg-white p-5">
-        <h2 className="font-display text-lg font-bold text-gray-900">Returns by confirmation</h2>
-        <table className="mt-3 min-w-full text-sm">
-          <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
-            <tr>
-              <th className="py-2 pr-4">Confirmation</th>
-              <th className="py-2 pr-4 text-right">Orders</th>
-              <th className="py-2 pr-4 text-right">Shipped</th>
-              <th className="py-2 pr-4 text-right">Decided</th>
-              <th className="py-2 text-right">Returned</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {funnel.states.map((s) => (
-              <tr key={s.state} className={active === s.state ? "bg-mint-50" : undefined}>
-                <td className="py-2 pr-4 font-medium text-gray-900">
-                  <Link to={`/orders?days=${days}&confirmation=${s.state}${scope ? `&${scope}` : ""}`} preventScrollReset className="hover:underline">
-                    {s.label}
-                  </Link>
+    <div className="overflow-x-auto rounded-2xl bg-white p-5">
+      <h2 className="font-display text-lg font-bold text-gray-900">From order to outcome, by confirmation</h2>
+      <p className="mt-1 text-sm text-gray-600">
+        {total.orders.toLocaleString()} orders placed in this period; {step("attempted").toLocaleString()} sent for confirmation,{" "}
+        {step("confirmed").toLocaleString()} confirmed. Pick a row for its orders.
+      </p>
+      <table className="mt-4 min-w-full text-sm">
+        <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
+          <tr>
+            <th className="py-2 pr-4">Confirmation</th>
+            <th className="py-2 pr-4">Orders</th>
+            <th className="py-2 pr-4 text-right">Shipped</th>
+            <th className="py-2 pr-4 text-right">Delivered</th>
+            <th className="py-2 pr-4 text-right">Returned</th>
+            <th className="py-2 text-right">Return rate</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {[total, ...funnel.states].map((s) => {
+            const all = s.state === "all";
+            const picked = all ? active === null : active === s.state;
+            return (
+              <tr key={s.state} className={`${picked && active !== null ? "bg-mint-50" : ""} ${all ? "font-semibold" : ""}`}>
+                <td className="whitespace-nowrap py-2 pr-4 text-gray-900">
+                  {picked ? (
+                    s.label
+                  ) : (
+                    <Link to={all ? base : `${base}&confirmation=${s.state}`} preventScrollReset className={all ? "hover:underline" : "font-medium hover:underline"}>
+                      {s.label}
+                    </Link>
+                  )}
                 </td>
-                <td className="py-2 pr-4 text-right tabular-nums">{s.orders.toLocaleString()}</td>
+                <td className="py-2 pr-4">
+                  <span className="grid grid-cols-[3.5rem_1fr] items-center gap-2">
+                    <span className="text-right tabular-nums text-gray-900">{s.orders.toLocaleString()}</span>
+                    <span className="h-2 min-w-16 rounded-sm bg-field">
+                      <span className={`block h-2 rounded-sm ${all ? "bg-navy" : "bg-data-700"}`} style={{ width: `${(100 * s.orders) / top}%` }} />
+                    </span>
+                  </span>
+                </td>
                 <td className="py-2 pr-4 text-right tabular-nums">{s.shipped.toLocaleString()}</td>
-                <td className="py-2 pr-4 text-right tabular-nums text-gray-500">{s.decided.toLocaleString()}</td>
-                <td className="py-2 text-right font-semibold tabular-nums text-gray-900">
-                  {s.returnRate === null ? <span className="font-normal text-gray-500">{s.returned}</span> : `${s.returnRate.toFixed(1)}%`}
+                <td className="py-2 pr-4 text-right tabular-nums">{s.delivered.toLocaleString()}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{s.returned.toLocaleString()}</td>
+                <td className="py-2 text-right tabular-nums text-gray-900">
+                  {s.returnRate === null ? (
+                    <span className="font-normal text-gray-500">{s.decided ? `${s.decided} decided` : "—"}</span>
+                  ) : (
+                    <span className="font-semibold">{s.returnRate.toFixed(1)}%</span>
+                  )}
                 </td>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className="mt-3 text-xs text-gray-500">Return rate is returned ÷ decided; under {min} decided orders the count is shown instead.</p>
-      </div>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="mt-3 text-xs text-gray-500">
+        Shipped is every order handed to a courier, confirmed or not, including those still in transit. Delivered and returned
+        leave out orders whose outcome can&apos;t be tracked (see coverage), so they can be lower than the outcome filters below.
+        Return rate is returned ÷ (delivered + returned); under {min} of those it is left out.
+      </p>
     </div>
   );
 }

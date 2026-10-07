@@ -106,5 +106,7 @@ describe("confirmation funnel", () => {
     expect(confirmed).toMatchObject({ orders: 22, decided: 22, returned: 4, returnRate: 18.2 });
     expect(f.states.find((s) => s.state === "declined")).toMatchObject({ decided: 10, returnRate: null });
     expect(f.states.find((s) => s.state === "not_sent")).toMatchObject({ orders: 3, shipped: 0 });
+    expect(f.total).toMatchObject({ state: "all", orders: 36, shipped: 33, delivered: 19, decided: 33, returned: 14, returnRate: 42.4 });
+    expect(confirmed.delivered).toBe(18);
   });
 });
