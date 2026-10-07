@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { ageOf, cityCourierMatrix, confirmationFunnel, payoutAgeing, productEconomics } from "./matrices";
+import { ageOf, channelCourierMatrix, channelOf, cityCourierMatrix, confirmationFunnel, payoutAgeing, productEconomics } from "./matrices";
+import type { OrderAttribution } from "./campaigns";
 import type { RollupOrder } from "./rollups";
 
 // Made-up numbers throughout; nothing here comes from a real store.
@@ -75,6 +76,29 @@ describe("city × courier", () => {
     expect(m.cities[0]!.cells.leopards).toMatchObject({ orders: 2 });
     expect(m.moreCities).toEqual({ cities: 1, orders: 4 });
     expect(m.couriers).toEqual(["leopards"]);
+  });
+});
+
+describe("channel × courier", () => {
+  it("rows each channel, rates each courier in it, and needs some attribution", () => {
+    const meta = times(20, () => order());
+    const tiktok = [...times(5, () => order()), ...times(5, () => returned()), order({ courier: null })];
+    const organic = times(3, () => order({ courier: "tcs" }));
+    const rows = [...meta, ...tiktok, ...organic, order()];
+    const tie = (list: RollupOrder[], a: OrderAttribution) => list.map((o): [string, OrderAttribution] => [o.orderId, a]);
+    const attribution = new Map([
+      ...tie(meta, { campaignKey: "facebook:1", platform: "facebook", method: "utm_id" }),
+      ...tie(tiktok, { campaignKey: "tiktok:9", platform: "tiktok", method: "utm_id" }),
+      ...tie(organic, { campaignKey: null, platform: null, method: "utm_only" }),
+    ]);
+    const m = channelCourierMatrix(rows, attribution)!;
+    expect(m.channels.map((c) => [c.channel, c.orders])).toEqual([["facebook", 20], ["tiktok", 11], ["none", 3], ["unknown", 1]]);
+    expect(m.couriers).toEqual(["leopards", "tcs"]);
+    expect(m.channels[0]!.cells.leopards).toEqual({ orders: 20, decided: 20, delivered: 20, rate: 100 });
+    expect(m.channels[1]!.all).toMatchObject({ orders: 11, decided: 11, rate: null });
+    expect(m.channels[1]!.cells.leopards).toMatchObject({ orders: 10, decided: 10 });
+    expect(channelOf({ campaignKey: null, platform: null, method: "affiliate" })).toBe("affiliate");
+    expect(channelCourierMatrix(rows, new Map())).toBeNull();
   });
 });
 

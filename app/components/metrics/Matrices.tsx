@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { ArrowRight } from "lucide-react";
 
 import type { CampaignOutcomes, CampaignSpend } from "~/lib/metrics/campaigns";
-import { MIN_COSTED_LINE_SHARE, type CityCourierMatrix, type ConfirmationFunnel, type PayoutAgeing, type ProductPoint } from "~/lib/metrics/matrices";
+import { MIN_COSTED_LINE_SHARE, type ChannelCourierMatrix, type CityCourierMatrix, type ConfirmationFunnel, type MatrixCell, type PayoutAgeing, type ProductPoint } from "~/lib/metrics/matrices";
 import { MIN_DECIDED_TO_RATE } from "~/lib/metrics/compare";
 import type { DeliveryRate } from "~/lib/metrics/rollups";
 import { Change, DeliveryRateText, formatAmount } from "./Metrics";
@@ -376,6 +376,85 @@ export function CityDeliveryTable({
       <p className="mt-3 border-t border-gray-100 pt-3 text-xs text-gray-500">
         {cityCount.toLocaleString()} {cityCount === 1 ? "city" : "cities"}, by order date. Rates need {min} decided orders
         {byCourier ? ", in a cell as in a row" : ""}; smaller cities are added up in one row. Cities use Courierify&apos;s mapping.
+      </p>
+    </div>
+  );
+}
+
+// ── Channel × courier ──────────────────────────────────────────────────────
+
+const CHANNEL: Record<string, string> = {
+  none: "No campaign",
+  affiliate: "Affiliate",
+  unknown: "Not known to Financify",
+};
+const channelName = (c: string) => CHANNEL[c] ?? platformName(c);
+
+export function ChannelCourierTable({ matrix, min }: { matrix: ChannelCourierMatrix; min: number }) {
+  const rates = matrix.channels.flatMap((c) => Object.values(c.cells).map((x) => x.rate)).filter((r): r is number => r !== null);
+  // Nothing to compare without at least two rated cells.
+  if (rates.length < 2 || !matrix.couriers.length) return null;
+  const mid = [...rates].sort((a, b) => a - b)[Math.floor(rates.length / 2)]!;
+  const step = (r: number) => RATE_STEPS[r - mid <= -10 ? 0 : r - mid <= -3 ? 1 : r - mid < 3 ? 2 : r - mid < 10 ? 3 : 4];
+  const couriers = matrix.couriers.filter((c) => matrix.channels.some((ch) => ch.cells[c]!.orders > 0));
+  const rate = (cell: MatrixCell) =>
+    cell.rate === null ? (
+      <span className="text-xs text-gray-500">{cell.decided} decided</span>
+    ) : (
+      <>
+        <span className="block font-semibold tabular-nums text-gray-900">{cell.rate.toFixed(1)}%</span>
+        <span className="block text-[11px] tabular-nums text-gray-600">{cell.decided} decided</span>
+      </>
+    );
+  return (
+    <div className="rounded-2xl bg-white p-5">
+      <h2 className="font-display text-lg font-bold text-gray-900">Delivery rate by channel and courier</h2>
+      <p className="mt-1 text-sm text-gray-600">
+        Where each order came from, as Financify ties it to an ad platform, against the courier that carried it. Coral
+        cells deliver worse than the typical cell ({mid.toFixed(1)}%), mint better.
+      </p>
+      <div className="mt-4 overflow-x-auto">
+        <table className="min-w-full border-separate border-spacing-[2px] text-sm">
+          <thead className="text-left text-xs font-semibold text-gray-500">
+            <tr>
+              <th className="py-2 pr-4">Channel</th>
+              <th className="py-2 pr-4 text-right">Orders</th>
+              <th className="px-2 py-2 text-center">All couriers</th>
+              {couriers.map((c) => (
+                <th key={c} className="px-2 py-2 text-center">
+                  {scopeLabel(c)}
+                  {c.startsWith("financify:") ? <span className="block font-normal text-gray-400">named by Financify</span> : null}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {matrix.channels.map((row) => (
+              <tr key={row.channel}>
+                <td className="whitespace-nowrap py-2 pr-4 font-medium text-gray-900">{channelName(row.channel)}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{row.orders.toLocaleString()}</td>
+                <td className="rounded-md bg-field px-2 py-2 text-center">{rate(row.all)}</td>
+                {couriers.map((c) => {
+                  const cell = row.cells[c]!;
+                  if (!cell.orders) return <td key={c} />;
+                  return (
+                    <td
+                      key={c}
+                      title={`${channelName(row.channel)} · ${scopeLabel(c)}: ${cell.delivered} delivered of ${cell.decided} decided, ${cell.orders} orders`}
+                      className={`rounded-md px-2 py-2 text-center ${cell.rate === null ? "bg-field" : step(cell.rate)}`}
+                    >
+                      {rate(cell)}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-xs text-gray-500">
+        By order date. A cell needs {min} decided orders for a rate. No campaign means organic, direct or untagged; a
+        channel that is worse with every courier is the channel, not the courier.
       </p>
     </div>
   );

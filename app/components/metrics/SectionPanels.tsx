@@ -29,7 +29,7 @@ import { CohortGrid, RepeatCurve } from "./Retention";
 import { CashTimelineCard, CourierDeductions, MoneyBreakdown } from "./FinanceDepth";
 import { ProfitTables } from "./ProfitTables";
 import { CourierPerformanceTable, OutcomesChart, ReturnsCard } from "./ShippingDepth";
-import { CampaignOutcomesTable, CampaignTable, CityDeliveryTable, ConfirmationFunnelView, PayoutAgeingTable, ProductMatrix } from "./Matrices";
+import { CampaignOutcomesTable, CampaignTable, ChannelCourierTable, CityDeliveryTable, ConfirmationFunnelView, PayoutAgeingTable, ProductMatrix } from "./Matrices";
 import type { ConfirmationFunnel, PayoutAgeing } from "~/lib/metrics/matrices";
 import { MIN_DECIDED_TO_RATE } from "~/lib/metrics/compare";
 import { MIN_COHORT_BUYERS, MIN_ELIGIBLE_BUYERS } from "~/lib/metrics/cohorts";
@@ -626,6 +626,7 @@ export function ShippingPanel({
         picked={(key) => picked("city", key)}
         link={link}
       />
+      {depth.channels ? <ChannelCourierTable matrix={depth.channels} min={view.minDecided} /> : null}
     </section>
   );
 }
