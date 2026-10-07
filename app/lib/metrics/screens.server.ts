@@ -21,7 +21,9 @@ import {
 import { scopeWhere, type Scope } from "./scope";
 import { resolveBuyer, retention, type Retention } from "./cohorts";
 import {
+  channelCourierMatrix,
   cityCourierMatrix,
+  type ChannelCourierMatrix,
   payoutAgeing,
   productEconomics,
   statusesOf,
@@ -874,6 +876,8 @@ export type ShippingDepth = {
   performance: CourierPerformance[];
   returns: ReturnsView | null;
   returnCities: ReturnType<typeof returnsByCity>;
+  /** Null when Financify has tied no order in the period to a channel. */
+  channels: ChannelCourierMatrix | null;
 };
 
 const moneyOf = (v: unknown): Money | null => {
@@ -890,13 +894,18 @@ const moneyOf = (v: unknown): Money | null => {
  */
 export async function shippingDepth(storeId: string, s: StoreSummary): Promise<ShippingDepth> {
   const ids = s.rows.filter((o) => o.parcelCount > 0).map((o) => o.orderId);
-  const [parcels, notes] = await Promise.all([loadParcelFacts(storeId, ids), loadCourierNotes(storeId, ids)]);
+  const [parcels, notes, attribution] = await Promise.all([
+    loadParcelFacts(storeId, ids),
+    loadCourierNotes(storeId, ids),
+    loadAttribution(storeId, s.rows.map((o) => o.orderId)),
+  ]);
   const asOf = new Date();
   return {
     outcomes: outcomesByDay(s.rows, s.period.from, s.period.to),
     performance: courierPerformance(s.rows, notes, asOf),
     returns: s.store.currency ? returnsView(s.rows, parcels, notes, s.store.currency, asOf) : null,
     returnCities: returnsByCity(s.rows),
+    channels: channelCourierMatrix(s.rows, attribution),
   };
 }
 

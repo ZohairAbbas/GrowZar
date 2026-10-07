@@ -7,6 +7,7 @@
 import { MIN_DECIDED_TO_RATE } from "./compare";
 import { formatAmount, parseAmount, type Money } from "./money";
 import { byCity, type RollupOrder } from "./rollups";
+import type { OrderAttribution } from "./campaigns";
 
 const DECIDED = ["delivered", "returned"];
 const SHIPPED = ["delivered", "returned", "partially_delivered", "in_transit"];
@@ -177,6 +178,56 @@ export function cityCourierMatrix(rows: readonly RollupOrder[], cityKeys?: reado
       cities: rest.length,
       orders: rest.reduce((n, [, c]) => n + c, 0),
     },
+  };
+}
+
+// ── Channel × courier ──────────────────────────────────────────────────────
+
+/**
+ * The channel an order came from: the ad platform Financify tied it to,
+ * "affiliate", "none" (no campaign: organic, direct or untagged) or
+ * "unknown" (Financify has no attribution record for it yet).
+ */
+export const channelOf = (a: OrderAttribution | undefined): string =>
+  !a || a.method === null ? "unknown" : a.platform ? a.platform : a.method === "affiliate" ? "affiliate" : "none";
+
+export type ChannelCourierMatrix = {
+  couriers: string[];
+  channels: Array<{ channel: string; orders: number; all: MatrixCell; cells: Record<string, MatrixCell> }>;
+};
+
+function rateOf(list: readonly RollupOrder[]): MatrixCell {
+  const delivered = list.filter((o) => o.outcome === "delivered").length;
+  const decided = list.filter((o) => DECIDED.includes(o.outcome)).length;
+  return { orders: list.length, decided, delivered, rate: decided >= MIN_DECIDED_TO_RATE ? pct(delivered, decided) : null };
+}
+
+/**
+ * Delivery rate by channel and courier: does a courier deliver one
+ * channel's buyers worse than another's? Every channel is a row, busiest
+ * first; `all` is the channel over every order, with a courier or not.
+ * Null without any attribution, since every row would be "unknown".
+ */
+export function channelCourierMatrix(rows: readonly RollupOrder[], attribution: ReadonlyMap<string, OrderAttribution>): ChannelCourierMatrix | null {
+  if (!rows.some((o) => attribution.has(o.orderId))) return null;
+  const by = new Map<string, RollupOrder[]>();
+  for (const o of rows) {
+    const c = channelOf(attribution.get(o.orderId));
+    by.set(c, [...(by.get(c) ?? []), o]);
+  }
+  const perCourier = new Map<string, number>();
+  for (const o of rows) if (o.courier) perCourier.set(o.courier, (perCourier.get(o.courier) ?? 0) + 1);
+  const couriers = [...perCourier.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([c]) => c);
+  return {
+    couriers,
+    channels: [...by.entries()]
+      .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+      .map(([channel, list]) => ({
+        channel,
+        orders: list.length,
+        all: rateOf(list),
+        cells: Object.fromEntries(couriers.map((c) => [c, rateOf(list.filter((o) => o.courier === c))])),
+      })),
   };
 }
 
