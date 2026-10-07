@@ -525,6 +525,7 @@ function timingReason(t: Extract<ReturnType<typeof courierTiming>[number], { ver
 export function shippingView(s: StoreSummary, prev: StoreSummary): ShippingView {
   const timing = new Map(courierTiming(s.rows).map((t) => [t.courier, t]));
   const cities = rollup(s.rows, byCity);
+  const cityRows = folded(cities, s.rows);
   return {
     deliveryRate: s.orders.deliveryRate,
     returnedValue: s.orders.returnedValue,
@@ -541,9 +542,10 @@ export function shippingView(s: StoreSummary, prev: StoreSummary): ShippingView 
             : timingReason(t),
       };
     }),
-    cities: folded(cities, s.rows),
+    cities: cityRows,
     cityCount: cities.length,
-    matrix: cityCourierMatrix(s.rows),
+    // The same rows as the city table, so its "by courier" view lists the same cities.
+    matrix: cityCourierMatrix(s.rows, cityRows.filter((r) => r.folded === undefined).map((r) => r.key)),
     coverage: coverage(s),
     minDecided: MIN_DECIDED_TO_RATE,
     compare: {

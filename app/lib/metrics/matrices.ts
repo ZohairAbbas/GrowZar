@@ -6,7 +6,7 @@
  */
 import { MIN_DECIDED_TO_RATE } from "./compare";
 import { formatAmount, parseAmount, type Money } from "./money";
-import type { RollupOrder } from "./rollups";
+import { byCity, type RollupOrder } from "./rollups";
 
 const DECIDED = ["delivered", "returned"];
 const SHIPPED = ["delivered", "returned", "partially_delivered", "in_transit"];
@@ -139,20 +139,26 @@ export type CityCourierMatrix = {
 };
 
 /**
- * Delivery rate by city and courier, over orders that have both (only a
- * courier booking names one). A cell under MIN_DECIDED_TO_RATE decided
- * orders keeps its counts and has no rate.
+ * Delivery rate by city and courier, over orders that have a courier (only a
+ * courier booking names one). Rows are `cityKeys` when given — the city
+ * table's own rows, so both views list the same cities — else the
+ * `maxCities` busiest. A cell under MIN_DECIDED_TO_RATE decided orders keeps
+ * its counts and has no rate.
  */
-export function cityCourierMatrix(rows: readonly RollupOrder[], maxCities = 12): CityCourierMatrix {
-  const withBoth = rows.filter((o) => o.courier && o.city);
+export function cityCourierMatrix(rows: readonly RollupOrder[], cityKeys?: readonly string[], maxCities = 12): CityCourierMatrix {
+  const cityOf = (o: RollupOrder) => byCity(o)[0]!;
+  const withCourier = rows.filter((o) => o.courier && (cityKeys ? true : o.city));
   const count = (key: (o: RollupOrder) => string) => {
     const m = new Map<string, number>();
-    for (const o of withBoth) m.set(key(o), (m.get(key(o)) ?? 0) + 1);
+    for (const o of withCourier) m.set(key(o), (m.get(key(o)) ?? 0) + 1);
     return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   };
-  const couriers = count((o) => o.courier!).map(([c]) => c);
-  const cityCounts = count((o) => o.city!);
-  const shown = cityCounts.slice(0, maxCities);
+  const cityCounts = count(cityOf);
+  const shown = cityKeys ? cityKeys.map((k) => [k, cityCounts.find(([c]) => c === k)?.[1] ?? 0] as const) : cityCounts.slice(0, maxCities);
+  const keys = new Set(shown.map(([c]) => c));
+  // Only couriers with an order in a row shown: an empty column says nothing.
+  const couriers = count((o) => (keys.has(cityOf(o)) ? o.courier! : "")).map(([c]) => c).filter(Boolean);
+  const rest = cityCounts.filter(([c]) => !keys.has(c));
   return {
     couriers,
     cities: shown.map(([city, orders]) => ({
@@ -160,7 +166,7 @@ export function cityCourierMatrix(rows: readonly RollupOrder[], maxCities = 12):
       orders,
       cells: Object.fromEntries(
         couriers.map((courier) => {
-          const mine = withBoth.filter((o) => o.city === city && o.courier === courier);
+          const mine = withCourier.filter((o) => cityOf(o) === city && o.courier === courier);
           const delivered = mine.filter((o) => o.outcome === "delivered").length;
           const decided = mine.filter((o) => DECIDED.includes(o.outcome)).length;
           return [courier, { orders: mine.length, decided, delivered, rate: decided >= MIN_DECIDED_TO_RATE ? pct(delivered, decided) : null }];
@@ -168,8 +174,8 @@ export function cityCourierMatrix(rows: readonly RollupOrder[], maxCities = 12):
       ),
     })),
     moreCities: {
-      cities: cityCounts.length - shown.length,
-      orders: cityCounts.slice(maxCities).reduce((n, [, c]) => n + c, 0),
+      cities: rest.length,
+      orders: rest.reduce((n, [, c]) => n + c, 0),
     },
   };
 }

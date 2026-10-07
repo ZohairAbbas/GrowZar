@@ -1,10 +1,12 @@
+import { useState } from "react";
 import { Link } from "react-router";
 import { ArrowRight } from "lucide-react";
 
 import type { CampaignOutcomes, CampaignSpend } from "~/lib/metrics/campaigns";
 import { MIN_COSTED_LINE_SHARE, type CityCourierMatrix, type ConfirmationFunnel, type PayoutAgeing, type ProductPoint } from "~/lib/metrics/matrices";
 import { MIN_DECIDED_TO_RATE } from "~/lib/metrics/compare";
-import { Change, formatAmount } from "./Metrics";
+import type { DeliveryRate } from "~/lib/metrics/rollups";
+import { Change, DeliveryRateText, formatAmount } from "./Metrics";
 import { scopeLabel } from "./FilterBar";
 
 /**
@@ -216,66 +218,164 @@ export function ProductMatrix({
 
 const RATE_STEPS = ["bg-coral-200", "bg-coral-100", "bg-gray-100", "bg-mint-100", "bg-mint-200"];
 
-export function CityCourierTable({ matrix, days, min }: { matrix: CityCourierMatrix; days: number; min: number }) {
+/** A city row of the shipping view, already named for display. */
+export type CityRow = {
+  key: string;
+  name: string;
+  other: boolean;
+  orders: number;
+  deliveryRate: DeliveryRate;
+};
+
+/**
+ * Delivery rate by city: every courier together, or one column per courier.
+ * Both views list the same rows, so switching never moves a city.
+ */
+export function CityDeliveryTable({
+  rows,
+  matrix,
+  cityCount,
+  min,
+  courier,
+  picked,
+  link,
+  initialView = "all",
+}: {
+  rows: CityRow[];
+  matrix: CityCourierMatrix;
+  cityCount: number;
+  min: number;
+  /** The courier the page is filtered to, if any. */
+  courier: string | null;
+  picked: (key: string) => boolean;
+  link: (path: string, set: { courier?: string; city?: string }) => string;
+  initialView?: "all" | "courier";
+}) {
+  const [view, setView] = useState(initialView);
+  const byCourier = view === "courier" && matrix.couriers.length > 0;
   const rates = matrix.cities.flatMap((c) => Object.values(c.cells).map((x) => x.rate)).filter((r): r is number => r !== null);
-  if (!matrix.couriers.length) return null;
   const mid = rates.length ? [...rates].sort((a, b) => a - b)[Math.floor(rates.length / 2)]! : 0;
   // Diverging around the median cell: coral below, mint above, grey near it.
   const step = (r: number) => RATE_STEPS[r - mid <= -10 ? 0 : r - mid <= -3 ? 1 : r - mid < 3 ? 2 : r - mid < 10 ? 3 : 4];
+  const cells = new Map(matrix.cities.map((c) => [c.city, c.cells]));
+  const decided = (r: CityRow) => r.deliveryRate.delivered + r.deliveryRate.returned;
+  const rate = (r: CityRow) =>
+    decided(r) >= min ? <DeliveryRateText rate={r.deliveryRate} /> : <span className="text-gray-500">{r.deliveryRate.stillOpen.toLocaleString()} still in transit</span>;
+
   return (
-    <div className="overflow-x-auto rounded-2xl bg-white p-5">
-      <h2 className="font-display text-lg font-bold text-gray-900">Delivery rate by city and courier</h2>
-      <p className="mt-1 text-sm text-gray-600">
-        Orders with a courier and a city, by order date. Coral cells deliver worse than the typical cell ({mid.toFixed(1)}%),
-        mint better. Pick a cell for its orders.
-      </p>
-      <table className="mt-4 min-w-full border-separate border-spacing-[2px] text-sm">
-        <thead className="text-left text-xs font-semibold text-gray-500">
-          <tr>
-            <th className="py-2 pr-4">City</th>
-            {matrix.couriers.map((c) => (
-              <th key={c} className="px-2 py-2 text-center">
-                {scopeLabel(c)}
-                {c.startsWith("financify:") ? <span className="block font-normal text-gray-400">named by Financify</span> : null}
-              </th>
+    <div className="rounded-2xl bg-white p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-lg font-bold text-gray-900">
+          Delivery rate by city{courier ? ` for ${scopeLabel(courier)}` : ""}
+        </h2>
+        {matrix.couriers.length > 1 ? (
+          <nav aria-label="Show couriers" className="inline-flex rounded-full bg-field p-1 text-sm font-semibold">
+            {(
+              [
+                ["all", "All couriers"],
+                ["courier", "By courier"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setView(key)}
+                aria-pressed={view === key}
+                className={`rounded-full px-3 py-1 ${view === key ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
+              >
+                {label}
+              </button>
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          {matrix.cities.map((row) => (
-            <tr key={row.city}>
-              <td className="whitespace-nowrap py-2 pr-4 font-medium text-gray-900">
-                {row.city} <span className="text-xs font-normal text-gray-500">{row.orders.toLocaleString()}</span>
-              </td>
-              {matrix.couriers.map((c) => {
-                const cell = row.cells[c]!;
-                if (!cell.orders) return <td key={c} />;
-                const to = `/orders?days=${days}&city=${encodeURIComponent(row.city)}&courier=${encodeURIComponent(c)}`;
-                const title = `${row.city} · ${scopeLabel(c)}: ${cell.delivered} delivered of ${cell.decided} decided, ${cell.orders} orders`;
-                return (
-                  <td key={c} className={`rounded-md text-center ${cell.rate === null ? "bg-field" : step(cell.rate)}`}>
-                    <Link to={to} title={title} className="block px-2 py-2 hover:underline">
-                      {cell.rate === null ? (
-                        <span className="text-xs text-gray-500">{cell.decided} decided</span>
-                      ) : (
-                        <>
-                          <span className="block font-semibold tabular-nums text-gray-900">{cell.rate.toFixed(1)}%</span>
-                          <span className="block text-[11px] tabular-nums text-gray-600">{cell.decided} decided</span>
-                        </>
-                      )}
-                    </Link>
-                  </td>
-                );
-              })}
+          </nav>
+        ) : null}
+      </div>
+      <p className="mt-1 text-sm text-gray-600">
+        {byCourier
+          ? `Each courier's delivery rate in each city. Coral cells deliver worse than the typical cell (${mid.toFixed(1)}%), mint better. Pick a cell for its orders.`
+          : "Every courier together. Pick a city to see its couriers."}
+      </p>
+      <div className="mt-4 overflow-x-auto">
+        <table className={`min-w-full text-sm ${byCourier ? "border-separate border-spacing-[2px]" : ""}`}>
+          <thead className={`text-left text-xs font-semibold text-gray-500 ${byCourier ? "" : "border-b border-gray-100"}`}>
+            <tr>
+              <th className="py-2 pr-4">City</th>
+              <th className="py-2 pr-4 text-right">Orders</th>
+              {byCourier ? (
+                <>
+                  <th className="py-2 pr-4">All couriers</th>
+                  {matrix.couriers.map((c) => (
+                    <th key={c} className="px-2 py-2 text-center">
+                      {scopeLabel(c)}
+                      {c.startsWith("financify:") ? <span className="block font-normal text-gray-400">named by Financify</span> : null}
+                    </th>
+                  ))}
+                </>
+              ) : (
+                <>
+                  <th className="py-2 pr-4 text-right">Decided</th>
+                  <th className="py-2 pr-4">Delivery</th>
+                  <th className="py-2"><span className="sr-only">Orders</span></th>
+                </>
+              )}
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="mt-3 text-xs text-gray-500">
-        A cell needs {min} decided orders for a rate.
-        {matrix.moreCities.cities
-          ? ` ${matrix.moreCities.cities.toLocaleString()} smaller cities (${matrix.moreCities.orders.toLocaleString()} orders) are in the city table above.`
-          : ""}
+          </thead>
+          <tbody className={byCourier ? undefined : "divide-y divide-gray-100"}>
+            {rows.map((r) => (
+              <tr key={r.key} className={picked(r.key) ? "bg-mint-50" : undefined}>
+                <td className="whitespace-nowrap py-2 pr-4 font-medium text-gray-900">
+                  {r.other || picked(r.key) ? (
+                    <span className={r.other ? "font-normal text-gray-500" : undefined}>{r.name}</span>
+                  ) : (
+                    <Link to={link("/shipping", { city: r.key })} preventScrollReset className="hover:underline">
+                      {r.name}
+                    </Link>
+                  )}
+                </td>
+                <td className="py-2 pr-4 text-right tabular-nums">{r.orders.toLocaleString()}</td>
+                {byCourier ? (
+                  <>
+                    <td className="whitespace-nowrap py-2 pr-4">{rate(r)}</td>
+                    {matrix.couriers.map((c) => {
+                      const cell = cells.get(r.key)?.[c];
+                      if (r.other || !cell?.orders) return <td key={c} />;
+                      const title = `${r.name} · ${scopeLabel(c)}: ${cell.delivered} delivered of ${cell.decided} decided, ${cell.orders} orders`;
+                      return (
+                        <td key={c} className={`rounded-md text-center ${cell.rate === null ? "bg-field" : step(cell.rate)}`}>
+                          <Link to={link("/orders", { city: r.key, courier: c })} title={title} className="block px-2 py-2 hover:underline">
+                            {cell.rate === null ? (
+                              <span className="text-xs text-gray-500">{cell.decided} decided</span>
+                            ) : (
+                              <>
+                                <span className="block font-semibold tabular-nums text-gray-900">{cell.rate.toFixed(1)}%</span>
+                                <span className="block text-[11px] tabular-nums text-gray-600">{cell.decided} decided</span>
+                              </>
+                            )}
+                          </Link>
+                        </td>
+                      );
+                    })}
+                  </>
+                ) : (
+                  <>
+                    <td className="py-2 pr-4 text-right tabular-nums text-gray-500">{decided(r).toLocaleString()}</td>
+                    <td className="py-2 pr-4">{rate(r)}</td>
+                    <td className="py-2 text-right">
+                      {r.other ? null : (
+                        <Link to={link("/orders", { city: r.key })} className="inline-flex items-center gap-1 text-xs font-semibold text-accent-600 hover:underline">
+                          Orders <ArrowRight className="h-3 w-3" />
+                        </Link>
+                      )}
+                    </td>
+                  </>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 border-t border-gray-100 pt-3 text-xs text-gray-500">
+        {cityCount.toLocaleString()} {cityCount === 1 ? "city" : "cities"}, by order date. Rates need {min} decided orders
+        {byCourier ? ", in a cell as in a row" : ""}; smaller cities are added up in one row. Cities use Courierify&apos;s mapping.
       </p>
     </div>
   );

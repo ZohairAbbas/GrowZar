@@ -29,7 +29,7 @@ import { CohortGrid, RepeatCurve } from "./Retention";
 import { CashTimelineCard, CourierDeductions, MoneyBreakdown } from "./FinanceDepth";
 import { ProfitTables } from "./ProfitTables";
 import { CourierPerformanceTable, OutcomesChart, ReturnsCard } from "./ShippingDepth";
-import { CampaignOutcomesTable, CampaignTable, CityCourierTable, ConfirmationFunnelView, PayoutAgeingTable, ProductMatrix } from "./Matrices";
+import { CampaignOutcomesTable, CampaignTable, CityDeliveryTable, ConfirmationFunnelView, PayoutAgeingTable, ProductMatrix } from "./Matrices";
 import type { ConfirmationFunnel, PayoutAgeing } from "~/lib/metrics/matrices";
 import { MIN_DECIDED_TO_RATE } from "~/lib/metrics/compare";
 import { MIN_COHORT_BUYERS, MIN_ELIGIBLE_BUYERS } from "~/lib/metrics/cohorts";
@@ -617,8 +617,15 @@ export function ShippingPanel({
       <CourierPerformanceTable rows={depth.performance} />
       {depth.returns && depth.returns.returned ? <ReturnsCard returns={depth.returns} cities={depth.returnCities} /> : null}
       {table("courier", couriers)}
-      {table("city", rows(view.cities, "city"))}
-      <CityCourierTable matrix={view.matrix} days={days} min={view.minDecided} />
+      <CityDeliveryTable
+        rows={rows(view.cities, "city")}
+        matrix={view.matrix}
+        cityCount={view.cityCount}
+        min={view.minDecided}
+        courier={scope.courier}
+        picked={(key) => picked("city", key)}
+        link={link}
+      />
     </section>
   );
 }
