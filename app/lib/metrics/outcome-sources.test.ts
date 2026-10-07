@@ -33,6 +33,16 @@ describe("one-sided outcome sources", () => {
     ).toEqual(["unknown"]);
   });
 
+  it("also finds a carrier that never reports anything at all", () => {
+    expect(
+      oneSidedSlices([
+        { courier: "financify:parcel2go.com", delivered: 0, returned: 0, staleOpen: 46 },
+        { courier: "financify:quiet", delivered: 0, returned: 0, staleOpen: 3 },
+        { courier: "financify:trax", delivered: 111, returned: 20, staleOpen: 11 },
+      ]),
+    ).toEqual(["financify:parcel2go.com"]);
+  });
+
   it("withholds the slice's shipped outcomes so they leave every rate, and keeps Courierify's", () => {
     const rows = [
       ...times(9, () => order()),
@@ -65,7 +75,7 @@ describe("one-sided outcome sources", () => {
       withheld: { orders: 5, returned: 4, inTransit: 1, couriers: ["unknown"] },
     });
     expect(r.items.find((i) => i.key === "one_sided_outcomes")?.gap).toBe(
-      "Financify reports returns but never deliveries for orders with no carrier (none in the last 90 days), so 5 orders this period (4 returned, 1 dispatched) have no outcome counted",
+      "orders shipped with a courier booked outside Shopify and Courierify carry no tracking, so no app ever learns whether they arrived; book them through Courierify, or add the tracking number to the Shopify fulfilment. 5 orders this period (1 dispatched, 4 reported returned) have no outcome counted",
     );
     expect(r.items.find((i) => i.key === "courierify_booking")).toMatchObject({ have: 10, of: 15 });
   });

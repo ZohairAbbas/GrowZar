@@ -1,5 +1,5 @@
 /**
- * Outcome sources that can only say one thing, and couriers whose payouts
+ * Outcome sources that can only say one thing (or nothing), and couriers whose payouts
  * Growzar cannot see. Pure.
  *
  * One-sided outcomes: for parcels Courierify did not book, the outcome comes
@@ -20,22 +20,35 @@ import { byCourier, type RollupOrder } from "./rollups";
 
 /** Returns a slice needs, with no delivery, before it is treated as one-sided. */
 export const MIN_RETURNS_FOR_ONE_SIDED = 5;
+/**
+ * Or: shipped orders this many days old still with no outcome, and no
+ * delivery at all. A source that never reports anything is one-sided too —
+ * Financify confirmed (2026-10-07) that parcels booked with a courier outside
+ * Shopify and Courierify are never tracked by any app.
+ */
+export const STALE_OPEN_DAYS = 14;
+export const MIN_STALE_OPEN_FOR_ONE_SIDED = 10;
 /** Days of history the check reads. */
 export const ONE_SIDED_HISTORY_DAYS = 90;
 
-/** Financify-decided orders (no Courierify parcel) per carrier key, over the history window. */
-export type SliceHistory = Array<{ courier: string; delivered: number; returned: number }>;
+/**
+ * Financify-decided orders (no Courierify parcel) per carrier key, over the
+ * history window: delivered, returned, and shipped orders older than
+ * STALE_OPEN_DAYS still in transit.
+ */
+export type SliceHistory = Array<{ courier: string; delivered: number; returned: number; staleOpen?: number }>;
 
 export function oneSidedSlices(history: SliceHistory): string[] {
-  const by = new Map<string, { delivered: number; returned: number }>();
+  const by = new Map<string, { delivered: number; returned: number; staleOpen: number }>();
   for (const h of history) {
-    const e = by.get(h.courier) ?? { delivered: 0, returned: 0 };
+    const e = by.get(h.courier) ?? { delivered: 0, returned: 0, staleOpen: 0 };
     e.delivered += h.delivered;
     e.returned += h.returned;
+    e.staleOpen += h.staleOpen ?? 0;
     by.set(h.courier, e);
   }
   return [...by.entries()]
-    .filter(([, e]) => e.delivered === 0 && e.returned >= MIN_RETURNS_FOR_ONE_SIDED)
+    .filter(([, e]) => e.delivered === 0 && (e.returned >= MIN_RETURNS_FOR_ONE_SIDED || e.staleOpen >= MIN_STALE_OPEN_FOR_ONE_SIDED))
     .map(([k]) => k)
     .sort();
 }

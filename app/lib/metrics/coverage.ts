@@ -303,7 +303,13 @@ export function coverageReport(input: CoverageInput): CoverageReport {
     }
     if (input.withheld?.orders) {
       const w = input.withheld;
-      const names = w.couriers.map((c) => (c === "unknown" ? "orders with no carrier" : c.replace(/^financify:/, ""))).join(", ");
+      const named = w.couriers.filter((c) => c !== "unknown").map((c) => c.replace(/^financify:/, ""));
+      const parts = [
+        ...(w.couriers.includes("unknown")
+          ? ["orders shipped with a courier booked outside Shopify and Courierify carry no tracking, so no app ever learns whether they arrived; book them through Courierify, or add the tracking number to the Shopify fulfilment"]
+          : []),
+        ...(named.length ? [`Financify has not reported a single delivery for ${named.join(", ")} in 90 days`] : []),
+      ];
       items.push({
         key: "one_sided_outcomes",
         app: "FINANCIFY",
@@ -313,7 +319,7 @@ export function coverageReport(input: CoverageInput): CoverageReport {
         of: null,
         unit: null,
         status: "missing",
-        gap: `Financify reports returns but never deliveries for ${names} (none in the last 90 days), so ${plural(w.orders, "order")} this period (${w.returned} returned, ${w.inTransit} dispatched) have no outcome counted`,
+        gap: `${parts.join("; ")}. ${plural(w.orders, "order")} this period (${w.inTransit} dispatched, ${w.returned} reported returned) have no outcome counted`,
         effect: "those orders count in orders placed but in no delivery rate, return rate or delivered count, which would otherwise read lower than it is",
         sections: ["home", "orders", "shipping", "finance", "customers", "marketing"],
       });
