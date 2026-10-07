@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import type { ShippingDepth } from "~/lib/metrics/screens.server";
 import { MIN_ATTEMPT_REPORTING } from "~/lib/metrics/returns";
 import { STUCK_DAYS } from "~/lib/metrics/cash";
@@ -134,26 +136,82 @@ export function CourierPerformanceTable({ rows }: { rows: ShippingDepth["perform
   );
 }
 
-function Reasons({ title, rows, total }: { title: string; rows: Array<{ reason: string; orders: number; couriers: string[] }>; total: number }) {
-  if (!rows.length) return null;
-  const top = Math.max(1, ...rows.map((r) => r.orders));
+type Bar = { key: string; label: string; hint?: string; value: number; note: string };
+
+/** One list of bars, a label, its count and what the count is out of. */
+function Bars({ rows, footnote }: { rows: Bar[]; footnote: string }) {
+  const top = Math.max(1, ...rows.map((r) => r.value));
   return (
-    <div>
-      <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-      <ul className="mt-2 space-y-1.5">
+    <>
+      <ul className="mt-3 max-w-3xl space-y-2">
         {rows.slice(0, 8).map((r) => (
-          <li key={r.reason} className="grid grid-cols-[minmax(0,12rem)_1fr_3rem] items-center gap-3 text-sm">
-            <span className="truncate text-gray-700" title={`${r.reason} — ${r.couriers.map(scopeLabel).join(", ")}`}>
-              {r.reason}
+          <li key={r.key} className="grid grid-cols-[minmax(0,1fr)_4rem_auto] items-center gap-3 text-sm sm:grid-cols-[minmax(0,14rem)_1fr_11rem] sm:gap-4">
+            <span className="truncate text-gray-800" title={r.hint}>
+              {r.label}
             </span>
-            <span className="h-2 rounded-sm bg-field">
-              <span className="block h-2 rounded-sm bg-coral" style={{ width: `${(100 * r.orders) / top}%` }} />
+            <span className="h-2.5 rounded-sm bg-field">
+              <span className="block h-2.5 rounded-sm bg-coral" style={{ width: `${(100 * r.value) / top}%` }} />
             </span>
-            <span className="text-right tabular-nums text-gray-900">{r.orders}</span>
+            <span className="text-right tabular-nums">
+              <span className="font-semibold text-gray-900">{r.value.toLocaleString()}</span>{" "}
+              {r.note ? <span className="text-gray-500">· {r.note}</span> : null}
+            </span>
           </li>
         ))}
       </ul>
-      <p className="mt-1 text-xs text-gray-500">{total.toLocaleString()} orders in all.</p>
+      <p className="mt-2 text-xs text-gray-500">{footnote}</p>
+    </>
+  );
+}
+
+const share = (n: number, total: number) => (total ? `${((100 * n) / total).toFixed(0)}%` : "");
+
+/** Why parcels came back, why attempts failed, and where: one at a time. */
+function WhyReturns({ returns: r, cities, withReason }: { returns: NonNullable<ShippingDepth["returns"]>; cities: ShippingDepth["returnCities"]; withReason: number }) {
+  const attempts = r.attemptReasons.reduce((n, x) => n + x.orders, 0);
+  const tabs = [
+    {
+      key: "returned",
+      label: "Why they came back",
+      rows: r.returnReasons.map((x) => ({ key: x.reason, label: x.reason, hint: x.couriers.map(scopeLabel).join(", "), value: x.orders, note: share(x.orders, withReason) })),
+      footnote: `In the courier's words, on ${withReason.toLocaleString()} returned orders that gave a reason.`,
+    },
+    {
+      key: "attempts",
+      label: "Why deliveries failed",
+      rows: r.attemptReasons.map((x) => ({ key: x.reason, label: x.reason, hint: x.couriers.map(scopeLabel).join(", "), value: x.orders, note: share(x.orders, attempts) })),
+      footnote: "Reasons couriers gave for failed delivery attempts, whether the order was delivered in the end or not.",
+    },
+    {
+      key: "cities",
+      label: "Cities with the most returns",
+      rows: cities.map((x) => ({ key: x.city, label: scopeLabel(x.city), value: x.returned, note: `${x.rate.toFixed(1)}% of ${x.decided} decided` })),
+      footnote: "Returned orders per city, and the share of the city's decided orders that came back.",
+    },
+  ].filter((t) => t.rows.length);
+  const [tab, setTab] = useState(tabs[0]?.key);
+  const shown = tabs.find((t) => t.key === tab) ?? tabs[0];
+  if (!shown) return null;
+  return (
+    <div className="mt-6 border-t border-gray-100 pt-5">
+      {tabs.length === 1 ? (
+        <h3 className="text-sm font-semibold text-gray-900">{shown.label}</h3>
+      ) : (
+        <nav aria-label="Returns by" className="inline-flex rounded-full bg-field p-1 text-sm font-semibold">
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              aria-pressed={shown.key === t.key}
+              className={`rounded-full px-3 py-1 ${shown.key === t.key ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+      )}
+      <Bars rows={shown.rows} footnote={shown.footnote} />
     </div>
   );
 }
@@ -231,26 +289,7 @@ export function ReturnsCard({ returns, cities }: { returns: NonNullable<Shipping
         </p>
       </div>
 
-      <div className="mt-5 grid gap-6 lg:grid-cols-3">
-        <Reasons title="Why parcels came back, in the courier's words" rows={r.returnReasons} total={withReason} />
-        <Reasons title="Why delivery attempts failed" rows={r.attemptReasons} total={r.attemptReasons.reduce((n, x) => n + x.orders, 0)} />
-        {cities.length ? (
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900">Cities with the most returns</h3>
-            <table className="mt-2 w-full text-sm">
-              <tbody>
-                {cities.map((x) => (
-                  <tr key={x.city}>
-                    <td className="py-1 pr-3 text-gray-700">{scopeLabel(x.city)}</td>
-                    <td className="py-1 pr-3 text-right tabular-nums">{x.returned}</td>
-                    <td className="py-1 text-right tabular-nums text-gray-500">{x.rate.toFixed(1)}% of {x.decided}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-      </div>
+      <WhyReturns returns={r} cities={cities} withReason={withReason} />
     </div>
   );
 }
