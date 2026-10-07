@@ -59,28 +59,6 @@ export function HomePanel({
       <HomeMetrics view={view} owed={owed} />
       <FxNotice fx={view.fx} />
       <InboxCards inbox={inbox} from={period.from} to={period.to} />
-      <div className="space-y-3">
-        <div className="rounded-2xl bg-white p-5">
-          <h2 className="font-display text-lg font-bold text-gray-900">Order journey</h2>
-          <ol className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-            {view.funnel.map((step, i) => (
-              <li key={step.label} className="rounded-xl bg-field p-3">
-                <p className="text-xs font-semibold text-gray-500">
-                  {i + 1}. {step.label}
-                </p>
-                <p className="mt-1 font-display text-2xl font-bold tabular-nums text-gray-900">
-                  {step.count === null ? "—" : step.count.toLocaleString()}
-                </p>
-                {step.note ? <p className="mt-0.5 text-xs text-gray-500">{step.note}</p> : null}
-              </li>
-            ))}
-          </ol>
-          <p className="mt-4 text-sm">
-            <DeliveryRateText rate={view.deliveryRate} />
-            <span className="text-gray-500"> — delivered ÷ (delivered + returned), by order, grouped by order date</span>
-          </p>
-        </div>
-      </div>
     </section>
   );
 }
