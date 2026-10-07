@@ -7,7 +7,8 @@ import { localDayOf } from "../metrics/order-grain";
 import { periodFrom } from "../metrics/screens.server";
 import { storeSummary, type StoreSummary } from "../metrics/summaries.server";
 import { toRollupOrder } from "../metrics/rollups.server";
-import { loadPayerHistories } from "../metrics/settlements.server";
+import { loadPayerHistories, loadStatements } from "../metrics/settlements.server";
+import { loadParcelFacts } from "../metrics/returns.server";
 import { loadAdSpend } from "../metrics/rollups.server";
 import { loadReturnCost } from "../metrics/return-cost.server";
 import {
@@ -42,7 +43,8 @@ export async function detectorInput(
   s: StoreSummary,
   now = new Date(),
 ): Promise<{ input: FindingsInput; connected: Set<App> }> {
-  const [connections, lastParcel, payers, awaiting, perProduct, returnCost] = await Promise.all([
+  const viaCourierify = s.rows.filter((o) => o.parcelCount > 0).map((o) => o.orderId);
+  const [connections, lastParcel, payers, awaiting, perProduct, returnCost, parcels, statements] = await Promise.all([
     prisma.appConnection.findMany({
       where: { storeId: s.store.id, status: "CONNECTED", app: { in: ["COURIERIFY", "FINANCIFY"] } },
       select: { app: true },
@@ -61,6 +63,9 @@ export async function detectorInput(
     loadAdSpend(s.store.id, s.period.from, s.period.to),
     // What a return costs in courier charges, measured on every returned parcel on record.
     loadReturnCost(s.store.id, s.store.currency),
+    // Phase 4c on Home: returns not confirmed back, and statements' deductions.
+    loadParcelFacts(s.store.id, viaCourierify),
+    loadStatements(s.store.id),
   ]);
   const connected = new Set(connections.map((c) => c.app as App));
   const ads = s.adSpend;
@@ -82,6 +87,9 @@ export async function detectorInput(
       adByVariant: complete ? Object.fromEntries(perProduct.byVariant) : undefined,
       periodDays: s.adSpend?.daysInPeriod,
       returnCost,
+      parcels,
+      statements,
+      period: s.period,
     },
   };
 }

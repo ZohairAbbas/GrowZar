@@ -15,7 +15,9 @@
  *    detector's backtest passes (PLAN.md §3, the money rule).
  */
 import { AGE_BUCKETS, ageOf, type AgeFilter } from "./matrices";
-import { isStuck } from "./cash";
+import { courierDeductions, isStuck, STUCK_DAYS } from "./cash";
+import { returnsView, type ParcelFacts } from "./returns";
+import type { Statement } from "./settlements";
 import { formatAmount, isPositive, parseAmount, sumByCurrency, type Money } from "./money";
 import type { Outcome } from "./order-grain";
 import { productLines, type Bucket, type Profit, type RollupOrder } from "./rollups";
@@ -291,7 +293,42 @@ export type UnconfirmedFinding = {
   filter: OrderFilter;
 };
 
-export type Finding = ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding;
+/** Courierify parcels with no status change for days (Phase 4c, A3 on Home). */
+export type StuckFinding = {
+  kind: "stuck_parcels";
+  booked: number;
+  inTransit: number;
+  placed: Money | null;
+  byCourier: Array<{ courier: string; orders: number }>;
+  oldestDays: number;
+};
+
+/** Returns the merchant has not confirmed back in Courierify (Phase 4c, A5 on Home). */
+export type NotReceivedFinding = {
+  kind: "returns_not_received";
+  orders: number;
+  /** Of them, returned more than 14 days ago: long enough to have arrived. */
+  older: number;
+  productCost: Money | null;
+  value: Money | null;
+  byCourier: Array<{ courier: string; orders: number }>;
+};
+
+/** A courier statement that keeps COD without itemizing why (Phase 4c, A4 on Home). */
+export type DeductionsFinding = {
+  kind: "courier_deductions";
+  payer: string;
+  statements: number;
+  cod: Money;
+  netPaid: Money;
+  unitemized: Money;
+  /** unitemized ÷ COD, percent. */
+  unitemizedShare: number;
+  /** (COD − net paid) ÷ COD, percent. */
+  keptShare: number | null;
+};
+
+export type Finding = ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding | StuckFinding | NotReceivedFinding | DeductionsFinding;
 
 /**
  * Why a finding is absent (G-GZR3-3). "Not enough data" and "checked, nothing
@@ -333,6 +370,12 @@ export type FindingsInput = {
    */
   adByVariant?: Record<string, Money[]>;
   periodDays?: number;
+  /** Courierify parcel facts for the rows (return received, fees): returns not confirmed back. */
+  parcels?: ParcelFacts[];
+  /** Courierify settlement statements, every date: unexplained deductions. */
+  statements?: Statement[];
+  /** The period's local days, for statements dated in it. */
+  period?: { from: string; to: string };
   /** The store's measured courier charge on a return (return-cost.ts); null when not enough is known. */
   returnCost?: ReturnCost | null;
 };
@@ -910,6 +953,83 @@ export function cashHeldFindings(input: FindingsInput): CashHeldFinding[] | Skip
   return out.sort((a, b) => b.orders - a.orders || a.payer.localeCompare(b.payer));
 }
 
+// ── Phase 4c on Home: stuck parcels, returns not back, unexplained deductions ─
+
+/** Stuck parcels a card needs: below this it is noise, not a pattern. */
+export const MIN_STUCK_PARCELS = 5;
+/** Returns over 14 days old and not confirmed back that a card needs. */
+export const MIN_RETURNS_NOT_BACK = 5;
+/** Unitemized deductions worth a card: this share of COD, and at least this much. */
+export const MIN_UNITEMIZED_SHARE = 2;
+export const MIN_UNITEMIZED_AMOUNT = 1_000n * 1_000_000n;
+
+/** Courierify parcels booked 3+ days, or in transit 7+ days, with no status change (as Finance's cash card). */
+export function stuckFinding(input: FindingsInput): StuckFinding | Skip {
+  const asOf = input.asOf ?? new Date();
+  if (!input.rows.some((o) => o.parcelCount > 0)) return notEnough("no order in this period went through Courierify");
+  const stuck = input.rows.filter((o) => isStuck(o, asOf));
+  if (stuck.length < MIN_STUCK_PARCELS) {
+    return nothing(`${stuck.length} parcel(s) without a status change for ${STUCK_DAYS.booked}+ days booked or ${STUCK_DAYS.in_transit}+ in transit; a card needs ${MIN_STUCK_PARCELS}`);
+  }
+  const by = new Map<string, number>();
+  for (const o of stuck) by.set(o.courier ?? "unknown", (by.get(o.courier ?? "unknown") ?? 0) + 1);
+  const cur = input.currency;
+  return {
+    kind: "stuck_parcels",
+    booked: stuck.filter((o) => o.outcome === "booked").length,
+    inTransit: stuck.filter((o) => o.outcome === "in_transit").length,
+    placed: cur ? pick(sumByCurrency(stuck.map((o) => o.placed)), cur) : null,
+    byCourier: [...by.entries()].map(([courier, orders]) => ({ courier, orders })).sort((a, b) => b.orders - a.orders),
+    oldestDays: Math.floor(Math.max(...stuck.map((o) => (asOf.getTime() - o.outcomeTiming!.at.getTime()) / 86_400_000))),
+  };
+}
+
+/** Courierify-booked returns the merchant has not confirmed back, as Shipping's returns card counts them. */
+export function notReceivedFinding(input: FindingsInput): NotReceivedFinding | Skip {
+  if (!input.currency) return notEnough("the store's currency has not been reported");
+  if (!input.parcels) return notEnough("Courierify parcel facts were not loaded");
+  const asOf = input.asOf ?? new Date();
+  const v = returnsView(input.rows, input.parcels, [], input.currency, asOf);
+  if (!v.courierifyReturns) return notEnough("no return in this period went through Courierify");
+  if (v.notReceived.olderThan14Days < MIN_RETURNS_NOT_BACK) {
+    return nothing(`${v.notReceived.olderThan14Days} return(s) over 14 days old not confirmed back; a card needs ${MIN_RETURNS_NOT_BACK}`);
+  }
+  return {
+    kind: "returns_not_received",
+    orders: v.notReceived.orders,
+    older: v.notReceived.olderThan14Days,
+    productCost: v.notReceived.productCost,
+    value: v.notReceived.value,
+    byCourier: v.byCourier.filter((c) => c.notReceived).map((c) => ({ courier: c.courier, orders: c.notReceived })),
+  };
+}
+
+/** Couriers whose statements in the period keep COD without itemizing it, as Finance's deductions table shows. */
+export function deductionFindings(input: FindingsInput): DeductionsFinding[] | Skip {
+  if (!input.currency) return notEnough("the store's currency has not been reported");
+  if (!input.statements || !input.period) return notEnough("no courier statements were loaded");
+  const rows = courierDeductions(input.statements, input.period.from, input.period.to, input.currency);
+  if (!rows.length) return notEnough("no courier statement is dated in this period");
+  const out = rows
+    .map((r): DeductionsFinding => {
+      const cod = parseAmount(r.cod.amount)!;
+      const un = parseAmount(r.unitemized.amount)!;
+      return {
+        kind: "courier_deductions",
+        payer: r.payer,
+        statements: r.statements,
+        cod: r.cod,
+        netPaid: r.netPaid,
+        unitemized: r.unitemized,
+        unitemizedShare: cod > 0n ? Number((un * 1000n) / cod) / 10 : 0,
+        keptShare: r.keptShare,
+      };
+    })
+    .filter((f) => f.unitemizedShare >= MIN_UNITEMIZED_SHARE && parseAmount(f.unitemized.amount)! >= MIN_UNITEMIZED_AMOUNT);
+  if (!out.length) return nothing(`every statement in the period itemizes what it deducts (to within ${MIN_UNITEMIZED_SHARE}% of COD)`);
+  return out.sort((a, b) => (parseAmount(b.unitemized.amount)! > parseAmount(a.unitemized.amount)! ? 1 : -1));
+}
+
 /** Every finding that passes its gate. Ranking lives in app/lib/insights. */
 export function findings(input: FindingsInput): Finding[] {
   const single: Array<Finding | Skip> = [
@@ -919,6 +1039,8 @@ export function findings(input: FindingsInput): Finding[] {
     courierifyStoppedFinding(input),
     missingFeesFinding(input),
     unconfirmedFinding(input),
+    stuckFinding(input),
+    notReceivedFinding(input),
   ];
   const many = (l: Finding[] | Skip): Finding[] => (Array.isArray(l) ? l : []);
   const lists = [
@@ -926,6 +1048,7 @@ export function findings(input: FindingsInput): Finding[] {
     ...many(courierCityFindings(input)),
     ...many(productLossFindings(input)),
     ...many(cityReturnsFindings(input)),
+    ...many(deductionFindings(input)),
   ];
   return [...single.filter((f): f is Finding => !isSkip(f)), ...lists];
 }
