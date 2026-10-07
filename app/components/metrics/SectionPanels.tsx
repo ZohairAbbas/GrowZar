@@ -317,7 +317,7 @@ export function FinancePanel({
       {depth ? (
         <div className="grid gap-4 xl:grid-cols-2">
           <MoneyBreakdown lines={depth.breakdown} days={days} scope={scope} />
-          <CashTimelineCard cash={depth.cash} days={days} scope={scope} />
+          <CashTimelineCard cash={depth.cash} days={days} scope={scope} payment={depth.payment} />
         </div>
       ) : null}
       {depth ? <CourierDeductions rows={depth.deductions} sources={depth.statementSources} /> : null}
@@ -709,7 +709,7 @@ export function MarketingPanel({ view, days, scope }: { view: MarketingView; day
       ) : view.campaigns ? (
         <CampaignTable data={view.campaigns} compared={view.campaignsCompared} />
       ) : null}
-      <ProductMatrix products={view.products} storeReturnRate={view.storeReturnRate} withAds={view.withAds} days={days} scope={scope} />
+      <ProductMatrix catalog={view.catalog} products={view.products} storeReturnRate={view.storeReturnRate} withAds={view.withAds} days={days} scope={scope} />
     </section>
   );
 }

@@ -32,6 +32,7 @@ import {
 import { loadAdSpend } from "./rollups.server";
 import { campaignOutcomes, campaignSpend, storeColumn, type CampaignOutcomes, type CampaignSpend, type CampaignSpendRow, type StoreColumn } from "./campaigns";
 import { loadAttribution, loadCampaignNames } from "./campaigns.server";
+import { loadCatalog, loadPaymentSplit, type CatalogEntry, type PaymentSplit } from "./products.server";
 import { previousPeriod } from "./compare";
 import { convertDated } from "./fx";
 import { loadFxSource } from "./fx.server";
@@ -706,11 +707,13 @@ export type MarketingView = {
   campaignsCompared: boolean;
   /** What each campaign's orders did (G-FIN3-1); null without currency. */
   outcomes: CampaignOutcomes | null;
+  /** Titles and images by variant, from Financify's catalogue. */
+  catalog: Record<string, CatalogEntry>;
 };
 
 export async function marketingView(storeId: string, s: StoreSummary): Promise<MarketingView> {
   const cur = s.store.currency;
-  if (!cur) return { currency: null, products: [], storeReturnRate: null, withAds: false, adDays: null, campaigns: null, campaignsCompared: false, outcomes: null };
+  if (!cur) return { currency: null, products: [], storeReturnRate: null, withAds: false, adDays: null, campaigns: null, campaignsCompared: false, outcomes: null, catalog: {} };
   const ads = s.adSpend && s.adSpend.daysFetched === s.adSpend.daysInPeriod ? await loadAdSpend(storeId, s.period.from, s.period.to) : null;
   const e = productEconomics(s.rows, cur, ads ? Object.fromEntries(ads.byVariant) : null);
   const before = previousPeriod(s.period.from, s.period.to);
@@ -724,11 +727,16 @@ export async function marketingView(storeId: string, s: StoreSummary): Promise<M
   const prevLength = s.adSpend?.daysInPeriod ?? 0;
   const campaignsCompared = prevLength > 0 && prevDays === prevLength;
   const campaigns = s.adSpend ? campaignSpend(now, campaignsCompared ? prev : [], cur) : null;
-  const [attribution, names] = await Promise.all([loadAttribution(storeId, s.rows.map((o) => o.orderId)), loadCampaignNames(storeId)]);
+  const [attribution, names, catalog] = await Promise.all([
+    loadAttribution(storeId, s.rows.map((o) => o.orderId)),
+    loadCampaignNames(storeId),
+    loadCatalog(storeId, e.products.slice(0, 25).map((p) => p.variantId)),
+  ]);
   return {
     campaigns,
     campaignsCompared,
     outcomes: attribution.size ? campaignOutcomes(s.rows, attribution, campaigns, names, cur) : null,
+    catalog: Object.fromEntries(catalog),
     currency: cur,
     products: e.products,
     storeReturnRate: e.storeReturnRate,
@@ -819,6 +827,8 @@ export type FinanceDepth = {
   deductions: DeductionRow[];
   /** Statements the period's deductions are drawn from, counted by source. */
   statementSources: Record<string, number>;
+  /** COD against prepaid for the period's orders (Financify's rule). */
+  payment: PaymentSplit | null;
 };
 
 /**
@@ -828,12 +838,13 @@ export type FinanceDepth = {
 export async function financeDepth(storeId: string, s: StoreSummary): Promise<FinanceDepth | null> {
   const cur = s.store.currency;
   if (!cur) return null;
-  const [history, settlementRows] = await Promise.all([
+  const [history, settlementRows, payment] = await Promise.all([
     loadSettledHistory(storeId, s.period.to),
     prisma.rawRecord.findMany({
       where: { storeId, app: "COURIERIFY", entity: "SETTLEMENT", deletedAt: null },
       select: { payload: true },
     }),
+    loadPaymentSplit(storeId, s.rows.map((o) => o.orderId)),
   ]);
   const statements = settlementRows
     .map((r) => readStatement((r.payload ?? {}) as Record<string, unknown>))
@@ -847,6 +858,7 @@ export async function financeDepth(storeId: string, s: StoreSummary): Promise<Fi
     expected: s.profit ? expectedProfit(s.rows, s.profit, deliveryOdds(history)) : null,
     cash: cashTimeline(s.rows, cur, trackedPayers(statements.map((x) => x.payer)), new Date()),
     deductions: courierDeductions(mine, s.period.from, s.period.to, cur),
+    payment,
     statementSources: inPeriod.reduce<Record<string, number>>((m, x) => ({ ...m, [x.source]: (m[x.source] ?? 0) + 1 }), {}),
   };
 }
