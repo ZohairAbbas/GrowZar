@@ -51,3 +51,34 @@ describe("reportsPurge", () => {
     for (const page of [{ shopPurged: false }, { shopPurged: "true" }, {}, null, undefined]) expect(reportsPurge(page)).toBe(false);
   });
 });
+
+const retainify = feedsFor("RETAINIFY");
+const rfeed = (entity: string) => retainify.find((f) => f.entity === entity) as EntityFeed;
+
+describe("Retainify feeds", () => {
+  it("lists its six feeds, both consent feeds behind consent:read", () => {
+    expect(retainify.map((f) => [f.entity, f.capability])).toEqual([
+      ["MESSAGE", "messages:read"],
+      ["JOURNEY", "journeys:read"],
+      ["ENROLLMENT", "enrollments:read"],
+      ["CHECKOUT", "checkouts:read"],
+      ["CONSENT", "consent:read"],
+      ["CONSENT_EVENT", "consent:read"],
+    ]);
+  });
+
+  it("keys checkouts by token and consent by contact", () => {
+    expect(extractId({ checkoutToken: "tok_1", checkoutId: "7001" }, rfeed("CHECKOUT"))).toBe("tok_1");
+    expect(extractId({ contactId: "c1" }, rfeed("CONSENT"))).toBe("c1");
+    expect(extractId({ id: "whatsapp:j1" }, rfeed("MESSAGE"))).toBe("whatsapp:j1");
+  });
+
+  it("matches consent-history tombstones on the contact, not the event id", () => {
+    expect(rfeed("CONSENT_EVENT").tombstoneMatchField).toBe("contactId");
+    expect(extractTombstones({ deletedContactIds: ["c1"], deletedContactIdsTruncated: false }, rfeed("CONSENT_EVENT"))).toEqual({
+      ids: ["c1"],
+      truncated: false,
+    });
+    expect(retainify.filter((f) => f.tombstoneMatchField).map((f) => f.entity)).toEqual(["CONSENT_EVENT"]);
+  });
+});

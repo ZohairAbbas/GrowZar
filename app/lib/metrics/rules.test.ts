@@ -122,6 +122,15 @@ const allFeeds: EntityFeed[] = Object.values(APP_FEEDS).flat() as EntityFeed[];
 const feedText = allFeeds.map((f) => `${f.entity} ${f.path}`).join(" ").toLowerCase();
 const grainKeys = Object.keys(grain()).join(" ").toLowerCase();
 
+/** The apps whose feeds match a pattern: a deferred rule's data may be synced, but only from its owner. */
+function appsSyncing(pattern: RegExp): Set<string> {
+  return new Set(
+    Object.entries(APP_FEEDS).flatMap(([app, feeds]) =>
+      (feeds ?? []).filter((f) => pattern.test(`${f.entity} ${f.path}`.toLowerCase())).map(() => app),
+    ),
+  );
+}
+
 /** A deferred rule's guard: no feed and no grain field for its data exists yet. */
 function expectNotSynced(pattern: RegExp) {
   expect(feedText).not.toMatch(pattern);
@@ -289,11 +298,7 @@ describe("rule #17: cash collected — 'paid by courier' now; 'received in bank'
 
 describe("rule #18: suppliers and purchase orders — Inventorify owns them; not shown until the Inventory section", () => {
   it("reads purchasing only from Inventorify, and keeps it out of the order grain", () => {
-    const purchasing = Object.entries(APP_FEEDS).flatMap(([app, feeds]) =>
-      (feeds ?? []).filter((f) => /supplier|purchase/i.test(`${f.entity} ${f.path}`)).map(() => app),
-    );
-    expect(purchasing.length).toBeGreaterThan(0);
-    expect(new Set(purchasing)).toEqual(new Set(["INVENTORIFY"]));
+    expect(appsSyncing(/supplier|purchase/)).toEqual(new Set(["INVENTORIFY"]));
     expect(grainKeys).not.toMatch(/supplier|purchase|\bpo\b/);
   });
 });
@@ -320,14 +325,20 @@ describe("rule #21: buyer risk — deferred (not in Growzar's feeds)", () => {
   it("has no risk feed or grain field, so no screen can show a risk from the wrong engine", () => expectNotSynced(/risk|fraud/));
 });
 
-describe("rule #22: consent / opted out — deferred (Phase 5)", () => {
-  it("has no consent feed or grain field", () => expectNotSynced(/consent|opt.?out|unsubscrib/));
+describe("rule #22: consent / opted out — synced from Retainify; not shown until the customer page", () => {
+  it("reads consent only from Retainify, and keeps it out of the order grain", () => {
+    expect(appsSyncing(/consent|opt.?out|unsubscrib/)).toEqual(new Set(["RETAINIFY"]));
+    expect(grainKeys).not.toMatch(/consent|opt.?out|unsubscrib/);
+  });
 });
 
 // ── E. Checkout, recovery and confirmation ──────────────────────────────────
 
-describe("rule #23: abandoned carts — deferred", () => {
-  it("has no cart or checkout feed", () => expectNotSynced(/cart|checkout|abandon/));
+describe("rule #23: abandoned carts — Retainify's checkouts synced; not shown yet", () => {
+  it("reads checkouts only from Retainify, and keeps them out of the order grain", () => {
+    expect(appsSyncing(/cart|checkout|abandon/)).toEqual(new Set(["RETAINIFY"]));
+    expect(grainKeys).not.toMatch(/cart|checkout|abandon/);
+  });
 });
 
 describe("rule #24: recovered carts — deferred; recovered = message sent, then an order within 7 days", () => {
@@ -376,8 +387,11 @@ describe("rule #30: product identity — the variant id; SKU is display-only", (
 
 // ── G. Messaging ────────────────────────────────────────────────────────────
 
-describe("rule #31: WhatsApp messages and cost — deferred", () => {
-  it("has no messaging feed", () => expectNotSynced(/message|conversation|whatsapp/));
+describe("rule #31: WhatsApp messages and cost — Retainify's messages synced; not shown yet", () => {
+  it("reads messages only from Retainify, and keeps them out of the order grain", () => {
+    expect(appsSyncing(/message|conversation|whatsapp/)).toEqual(new Set(["RETAINIFY"]));
+    expect(grainKeys).not.toMatch(/message|conversation|whatsapp/);
+  });
 });
 
 describe("rule #32: campaigns — deferred; both apps shown, labelled by source, once read", () => {
