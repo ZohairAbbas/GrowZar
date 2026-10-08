@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useFetcher } from "react-router";
-import { ArrowRight, ChevronLeft, ChevronRight, Database, Lightbulb, Target, Truck, Undo2, Wallet, X } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, Database, Lightbulb, Package, Target, Truck, Undo2, Wallet, X } from "lucide-react";
 
 import type {
   CashHeldFinding,
@@ -21,6 +21,7 @@ import type {
   NotReceivedFinding,
   DeductionsFinding,
 } from "~/lib/metrics/findings";
+import type { StockoutFinding } from "~/lib/metrics/stockout";
 import type { InboxItem, InboxView } from "~/lib/insights/inbox.server";
 import { DISMISS_REASONS } from "~/lib/insights/actions";
 import { formatAmount, MoneyList, outcomeLabel } from "./Metrics";
@@ -45,6 +46,7 @@ const AREAS: Record<Finding["kind"], { label: string; Icon: typeof Wallet; tint:
   stuck_parcels: { label: "Shipping", Icon: Truck, tint: "bg-data-100 text-data-700" },
   returns_not_received: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
   courier_deductions: { label: "Money owed", Icon: Wallet, tint: "bg-coral-100 text-coral-700" },
+  stockout: { label: "Stock", Icon: Package, tint: "bg-data-100 text-data-700" },
 };
 
 function AreaTag() {
@@ -340,6 +342,41 @@ function StuckCard({ f, period, id, canManage }: { f: StuckFinding } & CardProps
         ))}
       </ul>
       <Leaves items={["Only parcels booked through Courierify: the status time is Courierify's own, so a parcel booked elsewhere cannot be judged."]} />
+    </Card>
+  );
+}
+
+const variantName = (f: StockoutFinding) => (f.variantTitle ? `${f.title} (${f.variantTitle})` : f.title);
+const stockoutHeadline = (f: StockoutFinding) =>
+  f.situation === "out"
+    ? `${variantName(f)} is out of stock while selling ${f.perDay.toFixed(1)} a day`
+    : `${variantName(f)} runs out in about ${n(f.daysOfCover)} day${f.daysOfCover === 1 ? "" : "s"}, before a reorder could arrive`;
+
+function StockoutCard({ f, id, canManage }: { f: StockoutFinding } & CardProps) {
+  return (
+    <Card id={id} canManage={canManage} title={stockoutHeadline(f)} link={{ to: "/inventory?days=30", label: "See stock" }}>
+      <p>
+        {f.situation === "out" ? (
+          <>It has no stock left, and sold {f.perDay.toFixed(1)} a day over the last 30 days. </>
+        ) : (
+          <>
+            At the last 30 days' rate ({f.perDay.toFixed(1)} a day) the {n(f.stock)} on hand last about {n(f.daysOfCover)} days.{" "}
+          </>
+        )}
+        Its lead time in Inventorify is {n(f.leadTimeDays)} days, so stock ordered today leaves about{" "}
+        <strong>
+          {n(f.shortDays)} days with nothing to sell: roughly {n(f.unitsShort)} units of demand
+        </strong>
+        .
+        {f.orderedShare !== null ? <> It was {pct(f.orderedShare)} of the units ordered in the last {n(f.periodDays)} days.</> : null}
+      </p>
+      <Leaves
+        items={[
+          "Nothing is on order for it in Inventorify. If you have reordered outside Inventorify, dismiss this.",
+          "The lead time is Inventorify's setting for this product; set the real one there and this card follows it.",
+          "No money estimate yet: what a stock-out costs is shown once it has been checked against past stock-outs.",
+        ]}
+      />
     </Card>
   );
 }
@@ -724,6 +761,8 @@ function FullCard({ item, period, canManage }: { item: InboxItem; period: string
         return <NotReceivedCard f={f} {...props} />;
       case "courier_deductions":
         return <DeductionsCard f={f} {...props} />;
+      case "stockout":
+        return <StockoutCard f={f} {...props} />;
     }
   })();
   return <Area.Provider value={f.kind}>{card}</Area.Provider>;
@@ -853,6 +892,15 @@ function summaryOf(f: Finding, period: string): Summary {
         why: "Growzar takes the courier's answer, through Courierify.",
         affects: `${n(f.total)} orders`,
         link: { to: `/orders?${period}&disagree=1`, label: "See orders" },
+      };
+    case "stockout":
+      return {
+        headline: stockoutHeadline(f),
+        figure: f.situation === "out" ? "Out" : `${n(f.daysOfCover)} days`,
+        note: `left, with a ${n(f.leadTimeDays)}-day lead time and nothing on order`,
+        next: "Reorder it in Inventorify now, or set its real lead time there.",
+        affects: `about ${n(f.unitsShort)} units of demand`,
+        link: { to: "/inventory?days=30", label: "See stock" },
       };
     case "stuck_parcels":
       return {

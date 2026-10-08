@@ -23,6 +23,8 @@ import type { Outcome } from "./order-grain";
 import { productLines, type Bucket, type Profit, type RollupOrder } from "./rollups";
 import type { PayerHistory } from "./settlements";
 import { times, type ReturnCost } from "./return-cost";
+import type { InventoryView } from "./inventory";
+import type { StockoutFinding } from "./stockout";
 
 /** A variant needs this many delivered-or-returned orders to be compared. */
 export const MIN_DECIDED_PER_VARIANT = 30;
@@ -328,7 +330,7 @@ export type DeductionsFinding = {
   keptShare: number | null;
 };
 
-export type Finding = ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding | StuckFinding | NotReceivedFinding | DeductionsFinding;
+export type Finding = StockoutFinding | ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding | StuckFinding | NotReceivedFinding | DeductionsFinding;
 
 /**
  * Why a finding is absent (G-GZR3-3). "Not enough data" and "checked, nothing
@@ -378,6 +380,8 @@ export type FindingsInput = {
   period?: { from: string; to: string };
   /** The store's measured courier charge on a return (return-cost.ts); null when not enough is known. */
   returnCost?: ReturnCost | null;
+  /** I3: the Inventory section's view with every row, when Inventorify is connected. */
+  inventory?: InventoryView | null;
 };
 
 const DECIDED: Outcome[] = ["delivered", "returned"];

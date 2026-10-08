@@ -171,7 +171,10 @@ export function inventoryView(input: {
   period: { from: string; to: string };
   today: string;
   currency: string | null;
+  /** Rows kept; the screen shows ROWS_SHOWN, a detector wants them all. */
+  limit?: number;
 }): InventoryView {
+  const limit = input.limit ?? ROWS_SHOWN;
   const { period, today, currency } = input;
   const rateTo = shiftDay(today, -1);
   const rateFrom = shiftDay(today, -RATE_DAYS);
@@ -281,8 +284,8 @@ export function inventoryView(input: {
     untracked: rows.filter((r) => r.state === "untracked").length,
     stockValue,
     uncosted,
-    rows: rows.slice(0, ROWS_SHOWN),
-    hiddenRows: Math.max(0, rows.length - ROWS_SHOWN),
+    rows: rows.slice(0, limit),
+    hiddenRows: Math.max(0, rows.length - limit),
     openOrders: open.map((po) => ({
       id: po.id,
       poNumber: po.poNumber,

@@ -22,6 +22,7 @@ export async function inventorySection(
   storeId: string,
   period: { from: string; to: string; today: string },
   currency: string | null,
+  limit?: number,
 ): Promise<InventoryView> {
   const since = [period.from, shiftDay(period.today, -SELLING_DAYS)].sort()[0]!;
   // Snapshots for the period, and for the rate window (sales off an empty shelf).
@@ -51,5 +52,6 @@ export async function inventorySection(
     period,
     today: period.today,
     currency,
+    limit,
   });
 }
