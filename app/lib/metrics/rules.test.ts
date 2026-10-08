@@ -287,8 +287,15 @@ describe("rule #17: cash collected — 'paid by courier' now; 'received in bank'
   });
 });
 
-describe("rule #18: suppliers and purchase orders — deferred (Phase 5)", () => {
-  it("has no purchasing feed yet", () => expectNotSynced(/supplier|purchase|\bpo\b/));
+describe("rule #18: suppliers and purchase orders — Inventorify owns them; not shown until the Inventory section", () => {
+  it("reads purchasing only from Inventorify, and keeps it out of the order grain", () => {
+    const purchasing = Object.entries(APP_FEEDS).flatMap(([app, feeds]) =>
+      (feeds ?? []).filter((f) => /supplier|purchase/i.test(`${f.entity} ${f.path}`)).map(() => app),
+    );
+    expect(purchasing.length).toBeGreaterThan(0);
+    expect(new Set(purchasing)).toEqual(new Set(["INVENTORIFY"]));
+    expect(grainKeys).not.toMatch(/supplier|purchase|\bpo\b/);
+  });
 });
 
 // ── D. Customers ────────────────────────────────────────────────────────────

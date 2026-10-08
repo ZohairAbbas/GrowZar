@@ -3,11 +3,14 @@ import type { Prisma, SuiteApp, SyncEntity } from "@prisma/client";
 import { prisma } from "../db.server";
 import { appRequest } from "../apps/client.server";
 import { getAppCredentials } from "../apps/registry.server";
+import { fetchAppStatus } from "../apps/status.server";
 import {
   extractId,
   extractTombstones,
   extractUpdatedAt,
+  feedOffered,
   feedsFor,
+  reportsPurge,
   type EntityFeed,
 } from "./entities";
 import { recordOrderSnapshot } from "./snapshots.server";
@@ -42,6 +45,13 @@ const LEASE_MS = 10 * 60 * 1000;
  * repeats are deduplicated, not written.
  */
 const UPDATED_SINCE_OVERLAP_MS = 5 * 60 * 1000;
+
+/**
+ * How long a connection's declared capabilities are trusted before asking the
+ * app again. Nothing refreshed them after the claim before Phase 5, so every
+ * connection still holds what its app said at connect time — often `[]`.
+ */
+const CAPABILITY_REFRESH_MS = 60 * 60 * 1000;
 
 type ContractPage = {
   shop?: string;
@@ -244,13 +254,15 @@ async function writePage(options: {
           externalId,
         },
       },
-      select: { id: true, sourceUpdatedAt: true },
+      select: { id: true, sourceUpdatedAt: true, deletedAt: true },
     });
 
     if (existing && existing.sourceUpdatedAt.getTime() === sourceUpdatedAt.getTime()) {
       await prisma.rawRecord.update({
         where: { id: existing.id },
-        data: { lastSeenAt: new Date() },
+        // A row the app still serves is alive, even unchanged: a purge marked
+        // everything deleted, and a re-sent row must undo that.
+        data: { lastSeenAt: new Date(), ...(existing.deletedAt ? { deletedAt: null } : {}) },
       });
       duplicates += 1;
       continue;
@@ -453,6 +465,7 @@ export async function syncFeed(options: {
 
   let cursor = state.cursor;
   let highWater = state.updatedSince;
+  let purgeApplied = false;
 
   try {
     for (let page = 0; page < MAX_PAGES_PER_RUN; page += 1) {
@@ -488,6 +501,19 @@ export async function syncFeed(options: {
 
       base.pages += 1;
       await learnShopFacts(storeId, app, response.data);
+
+      // The app wiped this shop's data while staying installed, so everything
+      // Growzar holds from this feed is gone. Rows already re-read in this run
+      // have a newer `lastSeenAt` and survive; any later row revives itself.
+      if (!purgeApplied && feed.sink !== "shipment_events" && reportsPurge(response.data)) {
+        purgeApplied = true;
+        const { count } = await prisma.rawRecord.updateMany({
+          where: { storeId, app, entity: feed.entity, deletedAt: null, lastSeenAt: { lt: now } },
+          data: { deletedAt: new Date() },
+        });
+        base.tombstoned += count;
+        console.warn(`[sync] ${app}/${feed.entity} reports a purge for store ${storeId}; ${count} rows marked deleted`);
+      }
 
       // Re-read each page: `learnShopFacts` may have just taught us the
       // country, and the first page of the first feed is exactly when that
@@ -568,7 +594,31 @@ export async function syncFeed(options: {
   }
 }
 
-/** Every feed of every connected app, for one store. */
+/**
+ * The connection's capabilities, re-asked from the app at most hourly, and
+ * only for apps with capability-gated feeds. A failed or "not installed"
+ * answer keeps what is stored: deciding a disconnect is not the sync's job.
+ */
+async function currentCapabilities(
+  connection: { id: string; app: SuiteApp; capabilities: string[]; updatedAt: Date },
+  shopDomain: string,
+  now = new Date(),
+): Promise<string[]> {
+  if (!feedsFor(connection.app).some((f) => f.capability)) return connection.capabilities;
+  if (now.getTime() - connection.updatedAt.getTime() < CAPABILITY_REFRESH_MS) return connection.capabilities;
+
+  const result = await fetchAppStatus(connection.app, shopDomain);
+  if (!result.ok || !result.status.installed) return connection.capabilities;
+
+  // Written even when unchanged: `updatedAt` is what spaces out the checks.
+  await prisma.appConnection.update({
+    where: { id: connection.id },
+    data: { capabilities: result.status.capabilities },
+  });
+  return result.status.capabilities;
+}
+
+/** Every feed of every connected app that the app says it serves, for one store. */
 export async function syncStore(storeId: string): Promise<FeedRunResult[]> {
   const store = await prisma.store.findUnique({
     where: { id: storeId },
@@ -577,7 +627,7 @@ export async function syncStore(storeId: string): Promise<FeedRunResult[]> {
       shopDomain: true,
       connections: {
         where: { status: "CONNECTED" },
-        select: { app: true },
+        select: { id: true, app: true, capabilities: true, updatedAt: true },
       },
     },
   });
@@ -590,7 +640,8 @@ export async function syncStore(storeId: string): Promise<FeedRunResult[]> {
   // four production apps on 2 vCPUs with swap already full (pack rule #1), and
   // Growzar's own pool is 2 connections in the worker.
   for (const connection of store.connections) {
-    for (const feed of feedsFor(connection.app)) {
+    const capabilities = await currentCapabilities(connection, store.shopDomain);
+    for (const feed of feedsFor(connection.app).filter((f) => feedOffered(f, capabilities))) {
       results.push(
         await syncFeed({
           storeId: store.id,
@@ -610,4 +661,5 @@ export const SYNC_SETTINGS = {
   MAX_PAGES_PER_RUN,
   LEASE_MS,
   UPDATED_SINCE_OVERLAP_MS,
+  CAPABILITY_REFRESH_MS,
 };

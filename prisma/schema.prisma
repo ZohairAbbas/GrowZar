@@ -233,6 +233,17 @@ enum SyncEntity {
   /// `/api/v1/products`): titles, SKU, status and image. Display only; the
   /// variant id stays the product key (rule #30).
   PRODUCT
+  /// Inventorify (Phase 5, G-GZR5-1). Inventorify owns stock, units sold
+  /// (rule #28) and purchase orders (rule #18); Growzar reads them, never
+  /// re-derives them from Shopify. Every id is Inventorify's, numeric variant
+  /// ids as strings.
+  INVENTORY_VARIANT
+  STOCK_LEVEL
+  DAILY_SALES
+  STOCK_SNAPSHOT
+  PURCHASE_ORDER
+  SUPPLIER
+  RETURN_RESTOCK
 }
 
 enum SyncRunStatus {
