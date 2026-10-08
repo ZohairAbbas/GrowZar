@@ -42,6 +42,13 @@ export type EntityFeed = {
    */
   tombstoneTruncatedKey?: string;
   /**
+   * Match tombstones against this payload field instead of the row's id.
+   * Retainify reports an erased buyer's consent history as `deletedContactIds`
+   * while each history row is keyed by its own event id; matching ids would
+   * leave the history of an erased buyer in place.
+   */
+  tombstoneMatchField?: string;
+  /**
    * The row field holding its change time, which the cursor and dedupe run
    * on. `updatedAt` everywhere except the event log, whose rows never change
    * and so carry only `createdAt`.
@@ -219,12 +226,88 @@ const INVENTORIFY_FEEDS: EntityFeed[] = [
   },
 ];
 
+/**
+ * Retainify, from its Phase 5 report (2026-10-08, PRs #9 and #10).
+ *
+ * Every feed reports deletions, on every page, because a GDPR erasure
+ * hard-deletes a buyer's contact, enrollments, messages and carts. Its
+ * `shopCountry` stays null until a merchant approves `read_locations`; phones
+ * then come as `phoneRaw` only, and Growzar parses them itself.
+ */
+const RETAINIFY_FEEDS: EntityFeed[] = [
+  {
+    // One row per message job; ids are prefixed by channel (`email:…`,
+    // `whatsapp:…`, `push:…`). Delivered/opened/read times are when Retainify
+    // received the provider's webhook, not the provider's event time.
+    entity: "MESSAGE",
+    path: "/api/v1/growzar/messages",
+    capability: "messages:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedMessageIds"],
+    tombstoneTruncatedKey: "deletedMessageIdsTruncated",
+    pageLimit: 500,
+  },
+  {
+    // Flows and one-off campaigns (`kind`).
+    entity: "JOURNEY",
+    path: "/api/v1/growzar/journeys",
+    capability: "journeys:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedJourneyIds"],
+    tombstoneTruncatedKey: "deletedJourneyIdsTruncated",
+  },
+  {
+    entity: "ENROLLMENT",
+    path: "/api/v1/growzar/enrollments",
+    capability: "enrollments:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedEnrollmentIds"],
+    tombstoneTruncatedKey: "deletedEnrollmentIdsTruncated",
+    pageLimit: 500,
+  },
+  {
+    // One row per Shopify checkout, abandoned or not, keyed by its token. Its
+    // `recoveredAt` only means "became an order", never "a message recovered
+    // it" (rule #24 is Growzar's to compute).
+    entity: "CHECKOUT",
+    path: "/api/v1/growzar/checkouts",
+    capability: "checkouts:read",
+    idFields: ["checkoutToken"],
+    tombstoneKeys: ["deletedCheckoutTokens"],
+    tombstoneTruncatedKey: "deletedCheckoutTokensTruncated",
+    pageLimit: 500,
+  },
+  {
+    // Current consent per contact and channel.
+    entity: "CONSENT",
+    path: "/api/v1/growzar/consent",
+    capability: "consent:read",
+    idFields: ["contactId"],
+    tombstoneKeys: ["deletedContactIds"],
+    tombstoneTruncatedKey: "deletedContactIdsTruncated",
+    pageLimit: 500,
+  },
+  {
+    // Consent history, append-only; starts with one baseline row per contact
+    // and channel. `consent:read` covers both consent feeds.
+    entity: "CONSENT_EVENT",
+    path: "/api/v1/growzar/consent-events",
+    capability: "consent:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedContactIds"],
+    tombstoneTruncatedKey: "deletedContactIdsTruncated",
+    tombstoneMatchField: "contactId",
+    pageLimit: 500,
+  },
+];
+
 export const APP_FEEDS: Partial<Record<SuiteApp, EntityFeed[]>> = {
   COURIERIFY: COURIERIFY_FEEDS,
   FINANCIFY: FINANCIFY_FEEDS,
   INVENTORIFY: INVENTORIFY_FEEDS,
-  // Phase 5 (R2) brings WhatKaBot's conversations and Retainify's and
-  // Preventify's reads. Until then they report installation state only (§12).
+  RETAINIFY: RETAINIFY_FEEDS,
+  // Phase 5 (R2) brings WhatKaBot's conversations and Preventify's reads.
+  // Until then they report installation state only (§12).
 };
 
 export function feedsFor(app: SuiteApp): EntityFeed[] {

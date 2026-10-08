@@ -244,6 +244,16 @@ enum SyncEntity {
   PURCHASE_ORDER
   SUPPLIER
   RETURN_RESTOCK
+  /// Retainify (Phase 5, G-GZR5-2): messages across email, WhatsApp and push,
+  /// journeys and campaigns, enrollments, Shopify checkouts, and consent (its
+  /// current state per contact, and its history). Buyer keys are email and
+  /// phone; Growzar resolves them to its own customers where it uses them.
+  MESSAGE
+  JOURNEY
+  ENROLLMENT
+  CHECKOUT
+  CONSENT
+  CONSENT_EVENT
 }
 
 enum SyncRunStatus {

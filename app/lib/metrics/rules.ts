@@ -35,8 +35,8 @@ export const DISPLAY_RULES: readonly DisplayRule[] = [
   { id: 19, title: "Number of customers / repeat rate", status: "implemented", where: "Growzar's customer record by normalised phone; screens count it, never an app's count" },
   { id: 20, title: "Customer lifetime value / order count", status: "implemented", where: "order grain grouped by customerId" },
   { id: 21, title: "Buyer risk", status: "deferred", reason: "Courierify's network band and Preventify's level are not in Growzar's feeds", meanwhile: "Orders says risk is not available" },
-  { id: 22, title: "Consent / opted out", status: "deferred", reason: "Retainify and WhatKaBot consent reads are Phase 5", meanwhile: "Customers says consent is not available" },
-  { id: 23, title: "Abandoned carts", status: "deferred", reason: "no checkout feed from any app yet", meanwhile: "not shown" },
+  { id: 22, title: "Consent / opted out", status: "deferred", reason: "Retainify's consent and its history are synced (G-GZR5-2); shown on the customer page in G-GZR5-7; WhatKaBot not read yet", meanwhile: "Customers says consent is not available" },
+  { id: 23, title: "Abandoned carts", status: "deferred", reason: "Retainify's Shopify checkouts are synced (G-GZR5-2), shown in G-GZR5-6; Preventify's form abandonments follow its feed", meanwhile: "not shown" },
   { id: 24, title: "Recovered carts / revenue", status: "deferred", reason: "needs recovery messages and carts; Phase 5", meanwhile: "not shown" },
   { id: 25, title: "COD order confirmation", status: "implemented", where: "order grain confirmation from Courierify OrderConfirmation (not OrderCase.stage)" },
   { id: 26, title: "Checkout conversion rate", status: "deferred", reason: "Preventify's read API is Phase 5", meanwhile: "not shown" },
@@ -44,6 +44,6 @@ export const DISPLAY_RULES: readonly DisplayRule[] = [
   { id: 28, title: "Units sold per product", status: "implemented", where: "rollups.productLines from Financify lines (Inventorify not yet read)" },
   { id: 29, title: "Return rate per product", status: "implemented", where: "rollups.productLines: order lines × outcome, by order" },
   { id: 30, title: "Product identity", status: "implemented", where: "Shopify variant id everywhere; SKU never a key" },
-  { id: 31, title: "WhatsApp messages sent / cost", status: "deferred", reason: "no messaging feed from any app yet", meanwhile: "not shown" },
+  { id: 31, title: "WhatsApp messages sent / cost", status: "deferred", reason: "Retainify's messages are synced (G-GZR5-2), with no cost; WhatKaBot not read yet", meanwhile: "not shown" },
   { id: 32, title: "Campaigns", status: "deferred", reason: "Retainify and WhatKaBot campaign reads are Phase 5", meanwhile: "not shown (ad campaigns from Financify are ad spend, not messaging campaigns)" },
 ];

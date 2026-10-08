@@ -336,9 +336,17 @@ async function writePage(options: {
   let tombstoned = 0;
   const graves = extractTombstones(page as Record<string, unknown>, feed);
 
-  for (const externalId of graves.ids) {
+  for (const tombstoneId of graves.ids) {
     const { count } = await prisma.rawRecord.updateMany({
-      where: { storeId, app, entity: feed.entity, externalId, deletedAt: null },
+      where: {
+        storeId,
+        app,
+        entity: feed.entity,
+        deletedAt: null,
+        ...(feed.tombstoneMatchField
+          ? { payload: { path: [feed.tombstoneMatchField], equals: tombstoneId } }
+          : { externalId: tombstoneId }),
+      },
       data: { deletedAt: new Date(), lastSeenAt: new Date() },
     });
     tombstoned += count;
