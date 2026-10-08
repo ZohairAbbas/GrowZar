@@ -54,6 +54,13 @@ export type EntityFeed = {
    * `shipment_events` is the event log's own table (G-GZR2-1).
    */
   sink?: "raw" | "shipment_events";
+  /**
+   * The `/growzar/status` capability that says this app serves the feed
+   * (§11). Phase 5 apps ship their feeds one release at a time, so a feed is
+   * only asked for once the app declares it; asking earlier would 404 every
+   * cycle. Absent on the R1 feeds, which predate capabilities.
+   */
+  capability?: string;
 };
 
 /**
@@ -135,15 +142,107 @@ const FINANCIFY_FEEDS: EntityFeed[] = [
   },
 ];
 
+/**
+ * Inventorify, from its Phase 5 report (2026-10-08, `main` at `4b0af3b`).
+ *
+ * Tombstones are only on the first page of an incremental walk, and only on
+ * the four feeds that can lose rows; daily sales, snapshots and restocks never
+ * delete. A keep-session purge is reported as `shopPurged` on the envelope
+ * instead (see `syncFeed`).
+ */
+const INVENTORIFY_FEEDS: EntityFeed[] = [
+  {
+    entity: "INVENTORY_VARIANT",
+    path: "/api/v1/growzar/variants",
+    capability: "variants:read",
+    idFields: ["variantId", "id"],
+    tombstoneKeys: ["deletedVariantIds"],
+    tombstoneTruncatedKey: "deletedVariantIdsTruncated",
+    pageLimit: 500,
+  },
+  {
+    // Keyed `<variantId>:<locationId>`: the table rewrites its rows, so the
+    // natural key is the only stable id.
+    entity: "STOCK_LEVEL",
+    path: "/api/v1/growzar/stock-levels",
+    capability: "stock-levels:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedStockLevelIds"],
+    tombstoneTruncatedKey: "deletedStockLevelIdsTruncated",
+    pageLimit: 500,
+  },
+  {
+    // Units sold per variant per shop-local day, keyed `<variantId>:<date>`.
+    // Inventorify owns this number (rule #28).
+    entity: "DAILY_SALES",
+    path: "/api/v1/growzar/daily-sales",
+    capability: "daily-sales:read",
+    idFields: ["id"],
+    tombstoneKeys: [],
+    pageLimit: 500,
+  },
+  {
+    // One opening-stock row per live variant per shop-local day; written once
+    // and never updated.
+    entity: "STOCK_SNAPSHOT",
+    path: "/api/v1/growzar/stock-snapshots",
+    capability: "stock-snapshots:read",
+    idFields: ["id"],
+    tombstoneKeys: [],
+    pageLimit: 500,
+  },
+  {
+    // Inventorify owns purchase orders (rule #18). Items arrive nested.
+    entity: "PURCHASE_ORDER",
+    path: "/api/v1/growzar/purchase-orders",
+    capability: "purchase-orders:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedPurchaseOrderIds"],
+    tombstoneTruncatedKey: "deletedPurchaseOrderIdsTruncated",
+  },
+  {
+    entity: "SUPPLIER",
+    path: "/api/v1/growzar/suppliers",
+    capability: "suppliers:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedSupplierIds"],
+    tombstoneTruncatedKey: "deletedSupplierIdsTruncated",
+  },
+  {
+    // What happened to returned stock: restocked or written off. Keyed by
+    // Inventorify's row id; `shipmentId` is Courierify's, for joining.
+    entity: "RETURN_RESTOCK",
+    path: "/api/v1/growzar/return-restocks",
+    capability: "return-restocks:read",
+    idFields: ["id"],
+    tombstoneKeys: [],
+  },
+];
+
 export const APP_FEEDS: Partial<Record<SuiteApp, EntityFeed[]>> = {
   COURIERIFY: COURIERIFY_FEEDS,
   FINANCIFY: FINANCIFY_FEEDS,
-  // Phase 5 (R2) brings WhatKaBot's conversations and the other three apps'
-  // reads. In R1 they report installation state and nothing else (§12).
+  INVENTORIFY: INVENTORIFY_FEEDS,
+  // Phase 5 (R2) brings WhatKaBot's conversations and Retainify's and
+  // Preventify's reads. Until then they report installation state only (§12).
 };
 
 export function feedsFor(app: SuiteApp): EntityFeed[] {
   return APP_FEEDS[app] ?? [];
+}
+
+/** Whether the app has declared this feed (§11). Pre-capability feeds always are. */
+export function feedOffered(feed: EntityFeed, capabilities: readonly string[]): boolean {
+  return !feed.capability || capabilities.includes(feed.capability);
+}
+
+/**
+ * A keep-session purge (Inventorify): the app wiped the shop while it stayed
+ * installed, so no 410 ever comes. Only a literal `true` counts; a missing
+ * flag means "nothing purged", never "unknown, so purge".
+ */
+export function reportsPurge(page: unknown): boolean {
+  return !!page && typeof page === "object" && (page as Record<string, unknown>).shopPurged === true;
 }
 
 /**
