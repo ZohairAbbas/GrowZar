@@ -215,6 +215,10 @@ const FEED_LABEL: Record<string, { phrase: string; sections: Section[] }> = {
   "COURIERIFY:CONFIRMATION": { phrase: "Courierify confirmations", sections: ["home", "orders"] },
   "FINANCIFY:ORDER": { phrase: "Financify orders", sections: ["home", "orders", "shipping", "finance", "customers", "marketing"] },
   "FINANCIFY:PRODUCT": { phrase: "Financify products", sections: ["marketing"] },
+  "INVENTORIFY:INVENTORY_VARIANT": { phrase: "Inventorify stock", sections: ["inventory"] },
+  "INVENTORIFY:DAILY_SALES": { phrase: "Inventorify units sold", sections: ["inventory"] },
+  "INVENTORIFY:STOCK_SNAPSHOT": { phrase: "Inventorify daily stock", sections: ["inventory"] },
+  "INVENTORIFY:PURCHASE_ORDER": { phrase: "Inventorify purchase orders", sections: ["inventory"] },
 };
 
 const ago = (from: Date, asOf: Date) => {

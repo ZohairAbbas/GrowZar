@@ -14,6 +14,7 @@ import { normalizePhone } from "../customers/phone";
 import { currentStatusTiming } from "../shipments/events";
 import { buildOrderGrain, localDayOf, type OrderGrain, type SourceRow } from "./order-grain";
 import { CurrencyMismatchError, addMoney, sumByCurrency } from "./money";
+import { inventoryView } from "./inventory";
 import { NO_FX_SOURCE, convertDated } from "./fx";
 import { compareSettings } from "./profit-settings";
 import {
@@ -296,14 +297,26 @@ describe("rule #17: cash collected — 'paid by courier' now; 'received in bank'
   });
 });
 
-describe("rule #18: suppliers and purchase orders — Inventorify owns them; not shown until the Inventory section", () => {
+describe("rule #18: suppliers and purchase orders — Inventorify's, shown on Inventory", () => {
   it("reads purchasing only from Inventorify, and keeps it out of the order grain", () => {
     expect(appsSyncing(/supplier|purchase/)).toEqual(new Set(["INVENTORIFY"]));
     expect(grainKeys).not.toMatch(/supplier|purchase|\bpo\b/);
   });
-});
 
-// ── D. Customers ────────────────────────────────────────────────────────────
+  it("counts units on order from Inventorify's open purchase orders only", () => {
+    const po = (status: string) => ({ id: status, poNumber: status, status, supplierName: null, expectedDeliveryDate: null, items: [{ variantId: "v1", onOrder: 4 }] });
+    const v = inventoryView({
+      variants: [{ variantId: "v1", title: "x", variantTitle: null, sku: null, stock: 1, leadTimeDays: 7, unitCost: null, archived: false }],
+      sales: [],
+      snapshots: [],
+      purchaseOrders: [po("sent"), po("draft"), po("received")],
+      period: { from: "2026-10-01", to: "2026-10-08" },
+      today: "2026-10-08",
+      currency: "PKR",
+    });
+    expect(v.rows[0]!.onOrder).toBe(4);
+  });
+});
 
 describe("rule #19: number of customers — Growzar's own record, one person per normalised phone", () => {
   it("reads the same person from both apps' shapes and phone spellings", () => {
@@ -364,6 +377,19 @@ describe("rule #27: upsell performance — deferred (Preventify, Phase 5)", () =
 // ── F. Products and inventory ───────────────────────────────────────────────
 
 describe("rule #28: units sold per product — Inventorify when connected, otherwise Financify", () => {
+  it("takes Inventorify's daily units on Inventory, never re-derived from orders", () => {
+    const v = inventoryView({
+      variants: [{ variantId: "v1", title: "x", variantTitle: null, sku: null, stock: 9, leadTimeDays: 7, unitCost: null, archived: false }],
+      sales: [{ variantId: "v1", date: "2026-10-05", units: 3 }, { variantId: "v1", date: "2026-10-06", units: 2 }],
+      snapshots: [],
+      purchaseOrders: [],
+      period: { from: "2026-10-01", to: "2026-10-08" },
+      today: "2026-10-08",
+      currency: "PKR",
+    });
+    expect(v.rows[0]!.soldInPeriod).toBe(5);
+  });
+
   it("counts ordered units from Financify's lines", () => {
     const lines = productLines([row({ lines: [{ variantId: "v1", productId: "p1", quantity: 3, value: null, cost: null }] })]);
     expect(lines[0]).toMatchObject({ variantId: "v1", units: 3 });
