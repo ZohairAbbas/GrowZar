@@ -38,6 +38,8 @@ import {
   ShippingPanel,
 } from "~/components/metrics/SectionPanels";
 import { CoverageLine } from "~/components/metrics/Metrics";
+import { InventoryPanel } from "~/components/metrics/InventoryPanel";
+import { inventorySection } from "~/lib/metrics/inventory.server";
 import { FilterBar } from "~/components/metrics/FilterBar";
 import { previousPeriod, withoutComparison } from "~/lib/metrics/compare";
 import { NO_SCOPE, parseScope, scopeQuery } from "~/lib/metrics/scope";
@@ -162,7 +164,7 @@ export async function loader({ request, url }: Route.LoaderArgs) {
   };
 }
 
-const METRIC_SECTIONS = new Set<Section>(["home", "finance", "orders", "shipping", "customers", "marketing"]);
+const METRIC_SECTIONS = new Set<Section>(["home", "finance", "orders", "shipping", "customers", "marketing", "inventory"]);
 
 async function buildMetrics(
   section: Section,
@@ -172,8 +174,10 @@ async function buildMetrics(
 ) {
   const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { timezone: true } });
   const period = periodFrom(url, store.timezone);
-  // Home's insights are store-wide, so Home takes no courier or city.
-  const scope = section === "home" ? NO_SCOPE : parseScope(url.searchParams);
+  // Home's insights are store-wide, so Home takes no courier or city; stock
+  // has neither.
+  const storeWide = section === "home" || section === "inventory";
+  const scope = storeWide ? NO_SCOPE : parseScope(url.searchParams);
   const before = previousPeriod(period.from, period.to);
   const [summary, prev, first] = await Promise.all([
     storeSummary(storeId, period.from, period.to, scope),
@@ -208,7 +212,7 @@ async function buildMetrics(
     historyFrom: comparable ? null : historyFrom,
     firstDay: historyFrom,
     scope,
-    scopeOptions: section === "home" ? null : summary.scopeOptions,
+    scopeOptions: storeWide ? null : summary.scopeOptions,
     /** Query parameters a change of courier or city keeps (the finding filter and outcome). */
     keepForScope: extra,
   };
@@ -253,6 +257,8 @@ async function buildMetrics(
     }
     case "marketing":
       return { ...base, kind: "marketing" as const, view: await marketingView(storeId, summary) };
+    case "inventory":
+      return { ...base, kind: "inventory" as const, view: await inventorySection(storeId, period, summary.store.currency) };
     default:
       return null;
   }
@@ -296,6 +302,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} depth={metrics.depth} period={metrics.period.query} scope={metrics.scope} /> : null}
           {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} canSeeMoney={metrics.canSeeMoney} /> : null}
+          {metrics.kind === "inventory" ? <InventoryPanel view={metrics.view} periodDays={metrics.period.days} /> : null}
         </div>
       ) : null}
 
