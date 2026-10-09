@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useFetcher } from "react-router";
-import { ArrowRight, ChevronLeft, ChevronRight, Database, Lightbulb, Package, Target, Truck, Undo2, Wallet, X } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, Database, Lightbulb, Mail, Package, Target, Truck, Undo2, Wallet, X } from "lucide-react";
 
 import type {
   CashHeldFinding,
@@ -22,6 +22,7 @@ import type {
   DeductionsFinding,
 } from "~/lib/metrics/findings";
 import type { StockoutFinding } from "~/lib/metrics/stockout";
+import type { UnfollowedCheckoutsFinding } from "~/lib/metrics/checkouts";
 import type { InboxItem, InboxView } from "~/lib/insights/inbox.server";
 import { DISMISS_REASONS } from "~/lib/insights/actions";
 import { formatAmount, MoneyList, outcomeLabel } from "./Metrics";
@@ -47,6 +48,7 @@ const AREAS: Record<Finding["kind"], { label: string; Icon: typeof Wallet; tint:
   returns_not_received: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
   courier_deductions: { label: "Money owed", Icon: Wallet, tint: "bg-coral-100 text-coral-700" },
   stockout: { label: "Stock", Icon: Package, tint: "bg-data-100 text-data-700" },
+  unfollowed_checkouts: { label: "Marketing", Icon: Mail, tint: "bg-mint-100 text-mint-700" },
 };
 
 function AreaTag() {
@@ -379,6 +381,35 @@ function StockoutCard({ f, id, canManage }: { f: StockoutFinding } & CardProps) 
             ? "The lead time is measured on this supplier's received purchase orders."
             : "The lead time is the product's setting in Inventorify; set the real one there, or receive 3 purchase orders from its supplier, and this card follows it.",
           "No money estimate yet: what a stock-out costs is shown once it has been checked against past stock-outs.",
+        ]}
+      />
+    </Card>
+  );
+}
+
+const shortDate = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+const checkoutsHeadline = (f: UnfollowedCheckoutsFinding) =>
+  `${n(f.notFollowedUp)} of ${n(f.settled)} abandoned checkouts got no reminder`;
+
+function UnfollowedCheckoutsCard({ f, period, id, canManage }: { f: UnfollowedCheckoutsFinding } & CardProps) {
+  return (
+    <Card id={id} canManage={canManage} title={checkoutsHeadline(f)} link={{ to: `/marketing?${period}`, label: "See checkouts" }}>
+      <p>
+        {n(f.settled)} checkouts were started and never became an order within the hour, and their 7 days to come back are over.{" "}
+        <strong>{n(f.notFollowedUp)} got no message from Retainify</strong>
+        {f.notFollowedUpValue.length ? <> (carts worth <MoneyList values={f.notFollowedUpValue} />)</> : null}.{" "}
+        {n(f.recovered)} came back after a reminder; {n(f.cameBack)} came back on their own.
+      </p>
+      {f.pausedJourney ? (
+        <p>
+          Retainify's cart journey “{f.pausedJourney.name}” is {f.pausedJourney.status ?? "not published"}
+          {f.pausedJourney.lastSent ? <>; it last sent a message on {shortDate(f.pausedJourney.lastSent)}</> : null}.
+        </p>
+      ) : null}
+      <Leaves
+        items={[
+          "Only Retainify's messages are seen: a reminder sent by WhatsApp from another app counts as none.",
+          "Cart value is what was in the checkout, not what a reminder would bring back.",
         ]}
       />
     </Card>
@@ -767,6 +798,8 @@ function FullCard({ item, period, canManage }: { item: InboxItem; period: string
         return <DeductionsCard f={f} {...props} />;
       case "stockout":
         return <StockoutCard f={f} {...props} />;
+      case "unfollowed_checkouts":
+        return <UnfollowedCheckoutsCard f={f} {...props} />;
     }
   })();
   return <Area.Provider value={f.kind}>{card}</Area.Provider>;
@@ -896,6 +929,15 @@ function summaryOf(f: Finding, period: string): Summary {
         why: "Growzar takes the courier's answer, through Courierify.",
         affects: `${n(f.total)} orders`,
         link: { to: `/orders?${period}&disagree=1`, label: "See orders" },
+      };
+    case "unfollowed_checkouts":
+      return {
+        headline: checkoutsHeadline(f),
+        figure: f.notFollowedUpValue[0] ? figure(f.notFollowedUpValue[0]) : n(f.notFollowedUp),
+        note: f.notFollowedUpValue[0] ? `in ${n(f.notFollowedUp)} carts nobody reminded` : `of ${n(f.settled)} abandoned checkouts`,
+        next: f.pausedJourney ? `Turn Retainify's “${f.pausedJourney.name}” journey back on.` : "Turn on a cart reminder in Retainify.",
+        affects: `${n(f.notFollowedUp)} abandoned checkouts`,
+        link: { to: `/marketing?${period}`, label: "See checkouts" },
       };
     case "stockout":
       return {

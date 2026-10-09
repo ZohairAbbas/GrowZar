@@ -38,7 +38,15 @@ export type MessageRow = {
   customerId: string | null;
 };
 
-export type JourneyRow = { id: string; name: string; kind: "flow" | "campaign" };
+export type JourneyRow = {
+  id: string;
+  name: string;
+  kind: "flow" | "campaign";
+  /** Retainify's trigger, e.g. `cart_abandoned`, `order_placed`, `broadcast`. */
+  trigger?: string | null;
+  /** `draft`, `published` or `paused`. */
+  status?: string | null;
+};
 
 export type FollowedOrder = {
   orderId: string;
@@ -80,7 +88,7 @@ export function parseJourney(p: unknown): JourneyRow | null {
   const r = p as Record<string, unknown>;
   const id = str(r.id);
   if (!id) return null;
-  return { id, name: str(r.name) ?? "Untitled", kind: r.kind === "campaign" ? "campaign" : "flow" };
+  return { id, name: str(r.name) ?? "Untitled", kind: r.kind === "campaign" ? "campaign" : "flow", trigger: str(r.trigger), status: str(r.status) };
 }
 
 /**

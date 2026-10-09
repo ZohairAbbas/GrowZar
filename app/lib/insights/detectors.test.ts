@@ -64,6 +64,12 @@ describe("detectors: every answer is found, nothing found, not enough data, or l
     expect(withInv.find((o) => o.detector === "stockout")).toMatchObject({ status: "not_enough_data" });
   });
 
+  it("locks I6 without Retainify, and says it lacks data when Retainify has sent no checkouts", () => {
+    expect(runDetectors(input(), both).find((o) => o.detector === "unfollowed_checkouts")).toMatchObject({ status: "locked", needs: ["RETAINIFY"] });
+    const withRet = runDetectors({ ...input(), checkouts: null }, new Set<App>(["COURIERIFY", "FINANCIFY", "RETAINIFY"]));
+    expect(withRet.find((o) => o.detector === "unfollowed_checkouts")).toMatchObject({ status: "not_enough_data" });
+  });
+
   it("passes a gate's reason through instead of an empty space", () => {
     const quiet = runDetectors(input(times(40, () => order())), both);
     expect(quiet.find((o) => o.detector === "outcome_disagreement")).toMatchObject({ status: "nothing_found", reason: expect.stringMatching(/0 material/) });

@@ -16,6 +16,7 @@ import { buildOrderGrain, localDayOf, type OrderGrain, type SourceRow } from "./
 import { CurrencyMismatchError, addMoney, sumByCurrency } from "./money";
 import { inventoryView } from "./inventory";
 import { messagingView } from "./messaging";
+import { checkoutFate } from "./checkouts";
 import { NO_FX_SOURCE, convertDated } from "./fx";
 import { compareSettings } from "./profit-settings";
 import {
@@ -348,15 +349,23 @@ describe("rule #22: consent / opted out — synced from Retainify; not shown unt
 
 // ── E. Checkout, recovery and confirmation ──────────────────────────────────
 
-describe("rule #23: abandoned carts — Retainify's checkouts synced; not shown yet", () => {
-  it("reads checkouts only from Retainify, and keeps them out of the order grain", () => {
+describe("rule #23: abandoned carts — a checkout with no order within the hour", () => {
+  it("reads checkouts only from Retainify, keeps them out of the order grain, and drops one that became an order", () => {
     expect(appsSyncing(/cart|checkout|abandon/)).toEqual(new Set(["RETAINIFY"]));
     expect(grainKeys).not.toMatch(/cart|checkout|abandon/);
+    const c = { token: "t", startedAt: new Date("2026-10-01T10:00:00Z"), total: null, email: null, customerId: null, becameOrderAt: new Date("2026-10-01T10:10:00Z") };
+    expect(checkoutFate(c, { messages: [], orderTimes: new Map(), now: new Date("2026-10-20T00:00:00Z") }).fate).toBe("converted");
   });
 });
 
-describe("rule #24: recovered carts — deferred; recovered = message sent, then an order within 7 days", () => {
-  it("has no recovery feed, so no raw 'recovered' stamp can be shown", () => expectNotSynced(/recover/));
+describe("rule #24: recovered carts — recovered = message sent, then an order within 7 days", () => {
+  it("never calls Retainify's 'became an order' a recovery without a message before it", () => {
+    const c = { token: "t", startedAt: new Date("2026-10-01T10:00:00Z"), total: null, email: null, customerId: null, becameOrderAt: new Date("2026-10-03T10:00:00Z") };
+    const now = new Date("2026-10-20T00:00:00Z");
+    expect(checkoutFate(c, { messages: [], orderTimes: new Map(), now }).fate).toBe("came_back");
+    const msg = { checkoutToken: "t", email: null, customerId: null, sentAt: new Date("2026-10-02T10:00:00Z") };
+    expect(checkoutFate(c, { messages: [msg], orderTimes: new Map(), now }).fate).toBe("recovered");
+  });
 });
 
 describe("rule #25: COD confirmation — Courierify's OrderConfirmation, else WhatKaBot", () => {

@@ -7,6 +7,21 @@ type Payload = { payload: unknown };
 const DAY_MS = 86_400_000;
 
 /**
+ * The store's customers by E.164 phone. Growzar's customers carry PHONE
+ * identities only (no app sends a buyer email yet). A merged customer
+ * answers as its winner.
+ */
+export async function customersByPhone(storeId: string, phones: ReadonlyArray<string | null>): Promise<Map<string, string>> {
+  const wanted = [...new Set(phones.filter((p): p is string => p !== null))];
+  if (!wanted.length) return new Map();
+  const ids = await prisma.$queryRaw<Array<{ value: string; customerId: string }>>`
+    SELECT i.value, COALESCE(c."mergedIntoId", c.id) AS "customerId"
+    FROM customer_identities i JOIN customers c ON c.id = i."customerId"
+    WHERE i."storeId" = ${storeId} AND i.kind = 'PHONE' AND i.value = ANY(${wanted})`;
+  return new Map(ids.map((r) => [r.value, r.customerId]));
+}
+
+/**
  * The Marketing section's Retainify block for one store: messages sent in the
  * period's local days, their buyers resolved to the store's customers by
  * phone, and the orders those customers placed in the windows that follow.
@@ -40,16 +55,7 @@ export async function messagingSection(
     });
   if (!parsed.length) return null;
 
-  // Buyers by phone: Growzar's customers carry PHONE identities only (no
-  // app sends a buyer email yet). A merged customer answers as its winner.
-  const phones = [...new Set(parsed.map((m) => buyerPhone(m.phoneE164, m.phoneRaw, store.country)).filter((p): p is string => p !== null))];
-  const ids = phones.length
-    ? await prisma.$queryRaw<Array<{ value: string; customerId: string }>>`
-        SELECT i.value, COALESCE(c."mergedIntoId", c.id) AS "customerId"
-        FROM customer_identities i JOIN customers c ON c.id = i."customerId"
-        WHERE i."storeId" = ${storeId} AND i.kind = 'PHONE' AND i.value = ANY(${phones})`
-    : [];
-  const customerOf = new Map(ids.map((r) => [r.value, r.customerId]));
+  const customerOf = await customersByPhone(storeId, parsed.map((m) => buyerPhone(m.phoneE164, m.phoneRaw, store.country)));
   const messages = parsed.map(({ phoneE164, phoneRaw, ...m }) => {
     const phone = buyerPhone(phoneE164, phoneRaw, store.country);
     return { ...m, customerId: phone ? (customerOf.get(phone) ?? null) : null };
