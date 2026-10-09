@@ -34,7 +34,7 @@ export const DISPLAY_RULES: readonly DisplayRule[] = [
   { id: 18, title: "Suppliers and purchase orders", status: "implemented", where: "Inventory section: units on order per variant and open purchase orders, from Inventorify (the owner)" },
   { id: 19, title: "Number of customers / repeat rate", status: "implemented", where: "Growzar's customer record by normalised phone; screens count it, never an app's count" },
   { id: 20, title: "Customer lifetime value / order count", status: "implemented", where: "order grain grouped by customerId" },
-  { id: 21, title: "Buyer risk", status: "deferred", reason: "Courierify's network band and Preventify's level are not in Growzar's feeds", meanwhile: "Orders says risk is not available" },
+  { id: 21, title: "Buyer risk", status: "deferred", reason: "Preventify's level is synced but is network risk, kept for labelling only; I5 scores buyers per store (D-51) until the buyer network (D-52)", meanwhile: "Orders says risk is not available" },
   { id: 22, title: "Consent / opted out", status: "implemented", where: "Customers: Retainify's consent per channel (subscribed and not suppressed) matched to buyers by phone, and its history of changes from 8 Oct 2026 (consent.ts); WhatKaBot not read yet" },
   { id: 23, title: "Abandoned carts", status: "implemented", where: "Marketing and I6: Retainify's Shopify checkouts with no order from the buyer within the hour (checkouts.ts); Preventify's form abandonments follow its feed" },
   { id: 24, title: "Recovered carts / revenue", status: "implemented", where: "checkouts.ts: a Retainify reminder, then an order within 7 days; an order with no reminder first came back on its own; Retainify's recoveredAt is read only as \"became an order\"" },

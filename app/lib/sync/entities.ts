@@ -301,13 +301,91 @@ const RETAINIFY_FEEDS: EntityFeed[] = [
   },
 ];
 
+/**
+ * Preventify, from its Phase 5 report (2026-10-09, PRs #145 and #146).
+ *
+ * Its `riskLevel` is network risk (every path, cross-merchant) and is stored
+ * for labelling only. Money on form orders is in the shop's currency but
+ * Markets shops' line prices may be in the presentment currency, so order
+ * value comes from Financify, never from these rows. `verificationMethod`
+ * changed meaning on 2026-09-28: `null` since then, `verification_skipped`
+ * before, both mean "OTP off".
+ */
+const PREVENTIFY_FEEDS: EntityFeed[] = [
+  {
+    entity: "FORM_ORDER",
+    path: "/api/v1/growzar/form-orders",
+    capability: "form_orders:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedFormOrderIds"],
+    tombstoneTruncatedKey: "deletedFormOrderIdsTruncated",
+    pageLimit: 500,
+  },
+  {
+    // `recovered` means the session became an order, not that a message did it.
+    entity: "FORM_ABANDONMENT",
+    path: "/api/v1/growzar/abandonments",
+    capability: "abandonments:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedAbandonmentIds"],
+    tombstoneTruncatedKey: "deletedAbandonmentIdsTruncated",
+    pageLimit: 500,
+  },
+  {
+    // One row per shop: what verification is switched on.
+    entity: "FORM_SETTINGS",
+    path: "/api/v1/growzar/settings",
+    capability: "settings:read",
+    idFields: ["id"],
+    tombstoneKeys: [],
+  },
+  {
+    // Append-only history of those settings, from a baseline on 2026-10-08.
+    entity: "FORM_SETTINGS_CHANGE",
+    path: "/api/v1/growzar/settings-changes",
+    capability: "settings:read",
+    idFields: ["id"],
+    tombstoneKeys: [],
+    pageLimit: 500,
+  },
+  {
+    entity: "OFFER",
+    path: "/api/v1/growzar/offers",
+    capability: "offers:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedOfferIds"],
+    tombstoneTruncatedKey: "deletedOfferIdsTruncated",
+  },
+  {
+    // Shown / accepted (a click) per offer and storefront tab, from 2026-10-09.
+    entity: "OFFER_EVENT",
+    path: "/api/v1/growzar/offer-events",
+    capability: "offers:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedOfferEventIds"],
+    tombstoneTruncatedKey: "deletedOfferEventIdsTruncated",
+    pageLimit: 500,
+  },
+  {
+    // Blocked buyers, quantity and repeat-order gates, OTP sent/verified/failed.
+    entity: "FRAUD_EVENT",
+    path: "/api/v1/growzar/fraud-events",
+    capability: "fraud_events:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedFraudEventIds"],
+    tombstoneTruncatedKey: "deletedFraudEventIdsTruncated",
+    pageLimit: 500,
+  },
+];
+
 export const APP_FEEDS: Partial<Record<SuiteApp, EntityFeed[]>> = {
   COURIERIFY: COURIERIFY_FEEDS,
   FINANCIFY: FINANCIFY_FEEDS,
   INVENTORIFY: INVENTORIFY_FEEDS,
   RETAINIFY: RETAINIFY_FEEDS,
-  // Phase 5 (R2) brings WhatKaBot's conversations and Preventify's reads.
-  // Until then they report installation state only (§12).
+  PREVENTIFY: PREVENTIFY_FEEDS,
+  // WhatKaBot's conversations are still to come; until then it reports
+  // installation state only (§12).
 };
 
 export function feedsFor(app: SuiteApp): EntityFeed[] {

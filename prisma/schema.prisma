@@ -254,6 +254,17 @@ enum SyncEntity {
   CHECKOUT
   CONSENT
   CONSENT_EVENT
+  /// Preventify (Phase 5, G-GZR5-8): COD-form orders with verification,
+  /// network risk (labelled, never used to score) and offers taken; form
+  /// abandonments; verification settings and their history; offers; dated
+  /// offer events; blocked and OTP events.
+  FORM_ORDER
+  FORM_ABANDONMENT
+  FORM_SETTINGS
+  FORM_SETTINGS_CHANGE
+  OFFER
+  OFFER_EVENT
+  FRAUD_EVENT
 }
 
 enum SyncRunStatus {

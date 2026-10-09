@@ -165,13 +165,12 @@ async function learnShopFacts(storeId: string, app: SuiteApp, page: ContractPage
   // The shop's country, for normalising locally-written phone numbers
   // (rule #19). A reported country always beats an inferred one, and an
   // inference is recorded as such so nobody later reads it as fact. When
-  // apps report different countries, Courierify's wins (shop-country.ts).
+  // apps report different countries, the higher-ranked app's wins (shop-country.ts).
   const reported = page.shopCountry && /^[A-Za-z]{2}$/.test(page.shopCountry) ? page.shopCountry.toUpperCase() : null;
-  const courierifyConnected =
-    reported && app !== "COURIERIFY"
-      ? (await prisma.appConnection.count({ where: { storeId, app: "COURIERIFY", status: "CONNECTED" } })) > 0
-      : false;
-  if (reported && acceptReportedCountry(app, courierifyConnected)) {
+  const connected = reported
+    ? (await prisma.appConnection.findMany({ where: { storeId, status: "CONNECTED" }, select: { app: true } })).map((c) => c.app)
+    : [];
+  if (reported && acceptReportedCountry(app, connected)) {
     data.country = reported;
     data.countryInferred = false;
   } else if (!reported && page.shopTimezone) {

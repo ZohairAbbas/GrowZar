@@ -337,8 +337,11 @@ describe("rule #20: customer lifetime value and order count — computed in Grow
   });
 });
 
-describe("rule #21: buyer risk — deferred (not in Growzar's feeds)", () => {
-  it("has no risk feed or grain field, so no screen can show a risk from the wrong engine", () => expectNotSynced(/risk|fraud/));
+describe("rule #21: buyer risk — deferred; Preventify's network level is synced for labelling only", () => {
+  it("reads risk and fraud events only from Preventify, and keeps them out of the order grain", () => {
+    expect(appsSyncing(/risk|fraud/)).toEqual(new Set(["PREVENTIFY"]));
+    expect(grainKeys).not.toMatch(/risk|fraud/);
+  });
 });
 
 describe("rule #22: consent — Retainify's, shown on Customers; only subscribed and unsuppressed may be messaged", () => {
@@ -354,7 +357,7 @@ describe("rule #22: consent — Retainify's, shown on Customers; only subscribed
 
 describe("rule #23: abandoned carts — a checkout with no order within the hour", () => {
   it("reads checkouts only from Retainify, keeps them out of the order grain, and drops one that became an order", () => {
-    expect(appsSyncing(/cart|checkout|abandon/)).toEqual(new Set(["RETAINIFY"]));
+    expect(appsSyncing(/cart|checkout|abandon/)).toEqual(new Set(["RETAINIFY", "PREVENTIFY"]));
     expect(grainKeys).not.toMatch(/cart|checkout|abandon/);
     const c = { token: "t", startedAt: new Date("2026-10-01T10:00:00Z"), total: null, email: null, customerId: null, becameOrderAt: new Date("2026-10-01T10:10:00Z") };
     expect(checkoutFate(c, { messages: [], orderTimes: new Map(), now: new Date("2026-10-20T00:00:00Z") }).fate).toBe("converted");
