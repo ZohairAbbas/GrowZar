@@ -27,6 +27,7 @@ import type { InventoryView } from "./inventory";
 import type { StockoutFinding } from "./stockout";
 import type { CheckoutsView, UnfollowedCheckoutsFinding } from "./checkouts";
 import type { OfferReturnsFinding, OffersView } from "./offers";
+import type { BuyerHistoryView, ReturnersFinding } from "./buyer-history";
 
 /** A variant needs this many delivered-or-returned orders to be compared. */
 export const MIN_DECIDED_PER_VARIANT = 30;
@@ -332,7 +333,7 @@ export type DeductionsFinding = {
   keptShare: number | null;
 };
 
-export type Finding = OfferReturnsFinding | UnfollowedCheckoutsFinding | StockoutFinding | ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding | StuckFinding | NotReceivedFinding | DeductionsFinding;
+export type Finding = ReturnersFinding | OfferReturnsFinding | UnfollowedCheckoutsFinding | StockoutFinding | ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding | StuckFinding | NotReceivedFinding | DeductionsFinding;
 
 /**
  * Why a finding is absent (G-GZR3-3). "Not enough data" and "checked, nothing
@@ -392,6 +393,8 @@ export type FindingsInput = {
   retainifyConnected?: boolean;
   /** I9: Preventify's form orders by offer, with outcomes, when Preventify is connected. */
   offers?: OffersView | null;
+  /** I5 per store: the period's orders by the buyer's earlier history (D-51). */
+  buyerHistory?: BuyerHistoryView | null;
 };
 
 const DECIDED: Outcome[] = ["delivered", "returned"];

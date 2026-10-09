@@ -24,6 +24,7 @@ import type {
 import type { StockoutFinding } from "~/lib/metrics/stockout";
 import type { UnfollowedCheckoutsFinding } from "~/lib/metrics/checkouts";
 import type { OfferReturnsFinding } from "~/lib/metrics/offers";
+import type { ReturnersFinding } from "~/lib/metrics/buyer-history";
 import type { InboxItem, InboxView } from "~/lib/insights/inbox.server";
 import { DISMISS_REASONS } from "~/lib/insights/actions";
 import { formatAmount, MoneyList, outcomeLabel } from "./Metrics";
@@ -51,6 +52,7 @@ const AREAS: Record<Finding["kind"], { label: string; Icon: typeof Wallet; tint:
   stockout: { label: "Stock", Icon: Package, tint: "bg-data-100 text-data-700" },
   unfollowed_checkouts: { label: "Marketing", Icon: Mail, tint: "bg-mint-100 text-mint-700" },
   offer_returns: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
+  returners: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
 };
 
 function AreaTag() {
@@ -451,6 +453,34 @@ function OfferReturnsCard({ f, period, id, canManage }: { f: OfferReturnsFinding
   );
 }
 
+const returnersHeadline = (f: ReturnersFinding) => `Buyers who returned a parcel before come back ${pct(f.rate)} of the time`;
+const returnersNext = (f: ReturnersFinding) =>
+  f.otpEnabled === null || (f.formShare ?? 0) < 50
+    ? "Confirm orders from these buyers before booking, or ask them to pay ahead."
+    : "Turn on OTP verification in Preventify, or block repeat returners' numbers there.";
+
+function ReturnersCard({ f, period, id, canManage }: { f: ReturnersFinding } & CardProps) {
+  return (
+    <Card id={id} canManage={canManage} title={returnersHeadline(f)} link={{ to: `/customers?${period}`, label: "See buyers" }}>
+      <p>
+        Of {n(f.decided)} orders delivered or returned from buyers who had already sent a parcel back to you, <strong>{pct(f.rate)} came back</strong>,
+        against {pct(f.restRate)} of {n(f.restDecided)} orders from everyone else.
+        {f.returnsFromReturners !== null ? <> They made {pct(f.returnsFromReturners)} of all returns in the period.</> : null}{" "}
+        {f.otpEnabled === null
+          ? "Preventify is not connected, so no verification is on."
+          : `Preventify's OTP verification is ${f.otpEnabled ? "on" : "off"}${f.formShare !== null ? `, and its form took ${pct(f.formShare)} of the period's orders, so OTP reaches only those` : ""}.`}
+      </p>
+      <Leaves
+        items={[
+          "Only your own orders: a buyer's history with other stores is not used.",
+          "A buyer counts as having returned before only if that return was known when the new order was placed.",
+          "No money estimate yet: what verification would save is shown once it has been checked against past orders.",
+        ]}
+      />
+    </Card>
+  );
+}
+
 function NotReceivedCard({ f, period, id, canManage }: { f: NotReceivedFinding } & CardProps) {
   return (
     <Card id={id} canManage={canManage} title={`${n(f.older)} returns not confirmed back after 14 days`} link={{ to: `/shipping?${period}`, label: "See returns on Shipping" }}>
@@ -837,6 +867,8 @@ function FullCard({ item, period, canManage }: { item: InboxItem; period: string
         return <UnfollowedCheckoutsCard f={f} {...props} />;
       case "offer_returns":
         return <OfferReturnsCard f={f} {...props} />;
+      case "returners":
+        return <ReturnersCard f={f} {...props} />;
     }
   })();
   return <Area.Provider value={f.kind}>{card}</Area.Provider>;
@@ -966,6 +998,15 @@ function summaryOf(f: Finding, period: string): Summary {
         why: "Growzar takes the courier's answer, through Courierify.",
         affects: `${n(f.total)} orders`,
         link: { to: `/orders?${period}&disagree=1`, label: "See orders" },
+      };
+    case "returners":
+      return {
+        headline: returnersHeadline(f),
+        figure: pct(f.rate),
+        note: `came back, against ${pct(f.restRate)} for everyone else`,
+        next: returnersNext(f),
+        affects: `${n(f.orders)} orders from buyers who returned before`,
+        link: { to: `/customers?${period}`, label: "See buyers" },
       };
     case "offer_returns":
       return {
