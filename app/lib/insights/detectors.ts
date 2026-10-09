@@ -35,6 +35,7 @@ import {
 import { stockoutFindings } from "../metrics/stockout";
 import { unfollowedCheckoutsFinding } from "../metrics/checkouts";
 import { offerReturnsFindings } from "../metrics/offers";
+import { returnersFinding } from "../metrics/buyer-history";
 
 export type App = "COURIERIFY" | "FINANCIFY" | "INVENTORIFY" | "RETAINIFY" | "PREVENTIFY";
 
@@ -55,7 +56,8 @@ export type DetectorId =
   | "stockout"
   | "unfollowed_checkouts"
   | "unfollowed_form_abandonments"
-  | "offer_returns";
+  | "offer_returns"
+  | "returners";
 
 export type Insight = {
   detector: DetectorId;
@@ -322,6 +324,20 @@ export const DETECTORS: readonly Detector[] = [
       return list.map((f) => insight("offer_returns", f.type, f, { group: "specific", ordersAffected: f.orders }, true));
     },
   },
+  {
+    // I5 per store (D-51): buyers who returned before, from the store's own
+    // orders and outcomes, whichever app decided them. Preventify, when
+    // connected, only adds whether verification is on.
+    id: "returners",
+    needs: [],
+    label: "Buyers who returned before, returning again",
+    preview: "How often buyers who sent a parcel back before do it again",
+    run(input) {
+      const f = returnersFinding(input.buyerHistory);
+      if (f.kind === "skip") return f;
+      return [insight("returners", "store", f, { group: "specific", ordersAffected: f.orders }, false)];
+    },
+  },
 ];
 
 export function runDetectors(input: FindingsInput, connected: ReadonlySet<App>): DetectorOutcome[] {
@@ -400,6 +416,8 @@ export function evidenceOf(i: Insight): Record<string, number | string> {
       return { orders: f.orders, older: f.older };
     case "courier_deductions":
       return { unitemized: f.unitemized.amount, share: f.unitemizedShare, statements: f.statements };
+    case "returners":
+      return { rate: f.rate, restRate: f.restRate, decided: f.decided, z: f.z };
     case "offer_returns":
       return { type: f.type, returnRate: f.returnRate, baselineRate: f.baselineRate, decided: f.decided, valueLift: f.valueLiftPct ?? "" };
     case "unfollowed_checkouts":

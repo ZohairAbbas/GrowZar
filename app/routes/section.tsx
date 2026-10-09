@@ -48,6 +48,8 @@ import { offersSection } from "~/lib/metrics/offers.server";
 import { OffersPanel } from "~/components/metrics/OffersPanel";
 import { consentSection } from "~/lib/metrics/consent.server";
 import { ConsentPanel } from "~/components/metrics/ConsentPanel";
+import { buyerHistorySection } from "~/lib/metrics/buyer-history.server";
+import { BuyerHistoryPanel } from "~/components/metrics/BuyerHistoryPanel";
 import { FilterBar } from "~/components/metrics/FilterBar";
 import { previousPeriod, withoutComparison } from "~/lib/metrics/compare";
 import { NO_SCOPE, parseScope, scopeQuery } from "~/lib/metrics/scope";
@@ -267,6 +269,7 @@ async function buildMetrics(
         view: compared(await customersView(storeId, summary, prev!, viewer.canSeeMoney)),
         canSeeMoney: viewer.canSeeMoney,
         consent: await consentSection(storeId, period),
+        buyerHistory: await buyerHistorySection(storeId, period),
       };
     }
     case "marketing": {
@@ -334,6 +337,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} depth={metrics.depth} period={metrics.period.query} scope={metrics.scope} /> : null}
           {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} canSeeMoney={metrics.canSeeMoney} canMessage={metrics.consent?.byCustomer ?? null} /> : null}
+          {metrics.kind === "customers" && metrics.buyerHistory ? <BuyerHistoryPanel view={metrics.buyerHistory} /> : null}
           {metrics.kind === "customers" && metrics.consent ? <ConsentPanel view={metrics.consent.view} periodDays={metrics.period.days} /> : null}
           {metrics.kind === "inventory" ? <InventoryPanel view={metrics.view} periodDays={metrics.period.days} /> : null}
         </div>
