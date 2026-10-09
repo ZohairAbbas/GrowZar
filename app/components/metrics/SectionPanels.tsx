@@ -633,7 +633,16 @@ export function ShippingPanel({
 
 // ── Customers ───────────────────────────────────────────────────────────────
 
-export function CustomersPanel({ view, canSeeMoney = false }: { view: CustomersView; canSeeMoney?: boolean }) {
+export function CustomersPanel({
+  view,
+  canSeeMoney = false,
+  canMessage,
+}: {
+  view: CustomersView;
+  canSeeMoney?: boolean;
+  /** Channels each buyer may be messaged on (Retainify's consent), when Retainify is connected. */
+  canMessage?: Record<string, Array<"email" | "whatsapp" | "push">> | null;
+}) {
   return (
     <section className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
@@ -662,6 +671,7 @@ export function CustomersPanel({ view, canSeeMoney = false }: { view: CustomersV
               <th className="px-5 py-3 text-right">Orders</th>
               <th className="px-5 py-3">Delivery</th>
               <th className="px-5 py-3 text-right">Delivered revenue</th>
+              {canMessage ? <th className="px-5 py-3">Can message</th> : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -675,6 +685,15 @@ export function CustomersPanel({ view, canSeeMoney = false }: { view: CustomersV
                   {c.deliveryRate.stillOpen ? ` · ${c.deliveryRate.stillOpen} in transit` : ""}
                 </td>
                 <td className="px-5 py-3 text-right"><MoneyList values={c.deliveredRevenue} /></td>
+                {canMessage ? (
+                  <td className="px-5 py-3 text-gray-700">
+                    {c.customerId in canMessage
+                      ? canMessage[c.customerId]!.length
+                        ? canMessage[c.customerId]!.map((ch) => ({ email: "Email", whatsapp: "WhatsApp", push: "Push" })[ch]).join(", ")
+                        : "No"
+                      : <span className="text-gray-400">Not in Retainify</span>}
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>
