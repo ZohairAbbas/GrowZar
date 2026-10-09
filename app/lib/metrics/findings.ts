@@ -25,6 +25,7 @@ import type { PayerHistory } from "./settlements";
 import { times, type ReturnCost } from "./return-cost";
 import type { InventoryView } from "./inventory";
 import type { StockoutFinding } from "./stockout";
+import type { CheckoutsView, UnfollowedCheckoutsFinding } from "./checkouts";
 
 /** A variant needs this many delivered-or-returned orders to be compared. */
 export const MIN_DECIDED_PER_VARIANT = 30;
@@ -330,7 +331,7 @@ export type DeductionsFinding = {
   keptShare: number | null;
 };
 
-export type Finding = StockoutFinding | ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding | StuckFinding | NotReceivedFinding | DeductionsFinding;
+export type Finding = UnfollowedCheckoutsFinding | StockoutFinding | ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding | StuckFinding | NotReceivedFinding | DeductionsFinding;
 
 /**
  * Why a finding is absent (G-GZR3-3). "Not enough data" and "checked, nothing
@@ -382,6 +383,8 @@ export type FindingsInput = {
   returnCost?: ReturnCost | null;
   /** I3: the Inventory section's view with every row, when Inventorify is connected. */
   inventory?: InventoryView | null;
+  /** I6: the period's checkouts and their follow-up, when Retainify is connected. */
+  checkouts?: CheckoutsView | null;
 };
 
 const DECIDED: Outcome[] = ["delivered", "returned"];

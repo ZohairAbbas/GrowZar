@@ -33,8 +33,9 @@ import {
   type Skip,
 } from "../metrics/findings";
 import { stockoutFindings } from "../metrics/stockout";
+import { unfollowedCheckoutsFinding } from "../metrics/checkouts";
 
-export type App = "COURIERIFY" | "FINANCIFY" | "INVENTORIFY";
+export type App = "COURIERIFY" | "FINANCIFY" | "INVENTORIFY" | "RETAINIFY";
 
 export type DetectorId =
   | "outcome_disagreement"
@@ -50,7 +51,8 @@ export type DetectorId =
   | "stuck_parcels"
   | "returns_not_received"
   | "courier_deductions"
-  | "stockout";
+  | "stockout"
+  | "unfollowed_checkouts";
 
 export type Insight = {
   detector: DetectorId;
@@ -276,6 +278,20 @@ export const DETECTORS: readonly Detector[] = [
       return list.map((f) => insight("stockout", f.variantId, f, { group: "specific", ordersAffected: f.unitsShort }, false));
     },
   },
+  {
+    // I6 on Shopify checkouts. Retainify alone sees its own carts; with the
+    // store's orders Growzar can tell abandoned from converted, and recovered
+    // from came back on its own.
+    id: "unfollowed_checkouts",
+    needs: ["RETAINIFY", "FINANCIFY"],
+    label: "Abandoned checkouts nobody followed up",
+    preview: "Checkouts that never became an order and got no reminder",
+    run(input) {
+      const f = unfollowedCheckoutsFinding(input.checkouts);
+      if (f.kind === "skip") return f;
+      return [insight("unfollowed_checkouts", "store", f, { group: "specific", ordersAffected: f.notFollowedUp }, true)];
+    },
+  },
 ];
 
 export function runDetectors(input: FindingsInput, connected: ReadonlySet<App>): DetectorOutcome[] {
@@ -317,6 +333,7 @@ export function withoutMoney(insights: readonly Insight[]): Insight[] {
     if (f.kind === "missing_fees") return [{ ...i, revealsMoney: false, finding: { ...f, estimate: null } }];
     if (f.kind === "stuck_parcels") return [{ ...i, revealsMoney: false, finding: { ...f, placed: null } }];
     if (f.kind === "returns_not_received") return [{ ...i, revealsMoney: false, finding: { ...f, productCost: null, value: null } }];
+    if (f.kind === "unfollowed_checkouts") return [{ ...i, revealsMoney: false, finding: { ...f, notFollowedUpValue: [] } }];
     if (f.kind === "variant_returns") {
       return [{ ...i, revealsMoney: false, finding: { ...f, flagged: f.flagged.map((v) => ({ ...v, cost: null })) } }];
     }
@@ -352,6 +369,8 @@ export function evidenceOf(i: Insight): Record<string, number | string> {
       return { orders: f.orders, older: f.older };
     case "courier_deductions":
       return { unitemized: f.unitemized.amount, share: f.unitemizedShare, statements: f.statements };
+    case "unfollowed_checkouts":
+      return { settled: f.settled, notFollowedUp: f.notFollowedUp, recovered: f.recovered, cameBack: f.cameBack };
     case "stockout":
       return { situation: f.situation, stock: f.stock, perDay: f.perDay, cover: f.daysOfCover, lead: f.leadTimeDays };
     case "courier_for_city":
