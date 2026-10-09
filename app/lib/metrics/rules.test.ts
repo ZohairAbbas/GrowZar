@@ -304,9 +304,9 @@ describe("rule #18: suppliers and purchase orders — Inventorify's, shown on In
   });
 
   it("counts units on order from Inventorify's open purchase orders only", () => {
-    const po = (status: string) => ({ id: status, poNumber: status, status, supplierName: null, expectedDeliveryDate: null, items: [{ variantId: "v1", onOrder: 4 }] });
+    const po = (status: string) => ({ id: status, poNumber: status, status, supplierName: null, expectedDeliveryDate: null, receivedOn: null, items: [{ variantId: "v1", onOrder: 4 }] });
     const v = inventoryView({
-      variants: [{ variantId: "v1", title: "x", variantTitle: null, sku: null, stock: 1, leadTimeDays: 7, unitCost: null, archived: false }],
+      variants: [{ variantId: "v1", title: "x", variantTitle: null, sku: null, stock: 1, leadTimeDays: 7, unitCost: null, archived: false, supplierId: null }],
       sales: [],
       snapshots: [],
       purchaseOrders: [po("sent"), po("draft"), po("received")],
@@ -379,7 +379,7 @@ describe("rule #27: upsell performance — deferred (Preventify, Phase 5)", () =
 describe("rule #28: units sold per product — Inventorify when connected, otherwise Financify", () => {
   it("takes Inventorify's daily units on Inventory, never re-derived from orders", () => {
     const v = inventoryView({
-      variants: [{ variantId: "v1", title: "x", variantTitle: null, sku: null, stock: 9, leadTimeDays: 7, unitCost: null, archived: false }],
+      variants: [{ variantId: "v1", title: "x", variantTitle: null, sku: null, stock: 9, leadTimeDays: 7, unitCost: null, archived: false, supplierId: null }],
       sales: [{ variantId: "v1", date: "2026-10-05", units: 3 }, { variantId: "v1", date: "2026-10-06", units: 2 }],
       snapshots: [],
       purchaseOrders: [],

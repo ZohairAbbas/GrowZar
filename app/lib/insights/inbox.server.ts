@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "../db.server";
 import type { FindingsInput } from "../metrics/findings";
+import { inventorySection } from "../metrics/inventory.server";
 import { sumByCurrency } from "../metrics/money";
 import { localDayOf } from "../metrics/order-grain";
 import { periodFrom } from "../metrics/screens.server";
@@ -46,7 +47,7 @@ export async function detectorInput(
   const viaCourierify = s.rows.filter((o) => o.parcelCount > 0).map((o) => o.orderId);
   const [connections, lastParcel, payers, awaiting, perProduct, returnCost, parcels, statements] = await Promise.all([
     prisma.appConnection.findMany({
-      where: { storeId: s.store.id, status: "CONNECTED", app: { in: ["COURIERIFY", "FINANCIFY"] } },
+      where: { storeId: s.store.id, status: "CONNECTED", app: { in: ["COURIERIFY", "FINANCIFY", "INVENTORIFY"] } },
       select: { app: true },
     }),
     prisma.orderGrain.findFirst({
@@ -68,6 +69,10 @@ export async function detectorInput(
     loadStatements(s.store.id),
   ]);
   const connected = new Set(connections.map((c) => c.app as App));
+  // I3 judges today's stock, whatever the period: "now" in the store's own days.
+  const inventory = connected.has("INVENTORIFY")
+    ? await inventorySection(s.store.id, { from: s.period.from, to: s.period.to, today: localDayOf(now, s.store.timezone ?? "UTC") }, s.store.currency, Infinity)
+    : null;
   const ads = s.adSpend;
   const complete = ads && ads.daysFetched === ads.daysInPeriod;
   return {
@@ -90,6 +95,7 @@ export async function detectorInput(
       parcels,
       statements,
       period: s.period,
+      inventory,
     },
   };
 }
@@ -172,7 +178,7 @@ export type InboxView = {
   canManage: boolean;
 };
 
-const APP_NAMES: Record<App, string> = { COURIERIFY: "Courierify", FINANCIFY: "Financify" };
+const APP_NAMES: Record<App, string> = { COURIERIFY: "Courierify", FINANCIFY: "Financify", INVENTORIFY: "Inventorify" };
 
 export async function inboxView(
   s: StoreSummary,

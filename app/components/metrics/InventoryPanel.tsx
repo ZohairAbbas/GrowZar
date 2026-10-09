@@ -28,6 +28,7 @@ export type InventoryPanelView = {
     perDay: number;
     daysOfCover: number | null;
     leadTimeDays: number | null;
+    leadSource: "measured" | "setting" | null;
     onOrder: number;
     daysOut: number;
     daysSnapshotted: number;
@@ -35,6 +36,8 @@ export type InventoryPanelView = {
     state: StockState;
   }>;
   hiddenRows: number;
+  receivedOrders: number;
+  reordersInInventorify: boolean;
   openOrders: Array<{ id: string; poNumber: string; status: string; supplierName: string | null; expected: string | null; units: number; variants: number }>;
 };
 
@@ -90,7 +93,7 @@ export function InventoryPanel({ view, periodDays }: { view: InventoryPanelView;
       <div className="rounded-2xl bg-white p-5">
         <h2 className="font-display text-lg font-bold text-gray-900">What runs out first</h2>
         <p className="mt-1 text-sm text-gray-600">
-          Days of cover = on hand ÷ units a day, sold {rate}. Lead time is each variant's setting in Inventorify. Days out of stock count
+          Days of cover = on hand ÷ units a day, sold {rate}. Lead time is the supplier's measured time from order to delivery once it has 3 received purchase orders, otherwise the variant's setting in Inventorify. Days out of stock count
           the days in this period that opened with an empty shelf.
         </p>
         <div className="mt-4 overflow-x-auto">
@@ -127,7 +130,7 @@ export function InventoryPanel({ view, periodDays }: { view: InventoryPanelView;
                   <td className="py-2 pr-4 text-right tabular-nums text-gray-700">{r.soldInPeriod.toLocaleString()}</td>
                   <td className="py-2 pr-4 text-right tabular-nums text-gray-700">{r.perDay ? r.perDay.toFixed(1) : r.daysOfCover !== null && r.stock > 0 ? "<0.1" : "—"}</td>
                   <td className="py-2 pr-4 text-right tabular-nums text-gray-900">{r.daysOfCover === null ? "—" : r.daysOfCover.toLocaleString()}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums text-gray-700">{r.leadTimeDays === null ? "—" : `${r.leadTimeDays}d`}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums text-gray-700">{r.leadTimeDays === null ? "—" : `${r.leadTimeDays}d${r.leadSource === "measured" ? " (measured)" : ""}`}</td>
                   <td className="py-2 pr-4 text-right tabular-nums text-gray-700">{r.onOrder ? r.onOrder.toLocaleString() : "—"}</td>
                   <td className="py-2 text-right tabular-nums text-gray-700">
                     {r.daysSnapshotted ? `${r.daysOut} of ${r.daysSnapshotted}` : <span className="text-gray-400">no record</span>}

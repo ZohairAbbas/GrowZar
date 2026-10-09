@@ -32,8 +32,9 @@ import {
   type FindingsInput,
   type Skip,
 } from "../metrics/findings";
+import { stockoutFindings } from "../metrics/stockout";
 
-export type App = "COURIERIFY" | "FINANCIFY";
+export type App = "COURIERIFY" | "FINANCIFY" | "INVENTORIFY";
 
 export type DetectorId =
   | "outcome_disagreement"
@@ -48,7 +49,8 @@ export type DetectorId =
   | "city_returns"
   | "stuck_parcels"
   | "returns_not_received"
-  | "courier_deductions";
+  | "courier_deductions"
+  | "stockout";
 
 export type Insight = {
   detector: DetectorId;
@@ -260,6 +262,20 @@ export const DETECTORS: readonly Detector[] = [
       return list.map((f) => insight("courier_deductions", f.payer, f, { group: "specific", ordersAffected: 0 }, true));
     },
   },
+  {
+    // I3. Inventorify alone can say "running low"; with Financify's orders
+    // Growzar can say what share of the store's sales it is.
+    id: "stockout",
+    needs: ["INVENTORIFY", "FINANCIFY"],
+    label: "Products that run out before a reorder could arrive",
+    preview: "Best sellers that will run out before new stock can arrive",
+    run(input) {
+      const list = stockoutFindings({ inventory: input.inventory, rows: input.rows, period: input.period });
+      if (!Array.isArray(list)) return list;
+      // One per variant, so dismissing one product leaves the next alone.
+      return list.map((f) => insight("stockout", f.variantId, f, { group: "specific", ordersAffected: f.unitsShort }, false));
+    },
+  },
 ];
 
 export function runDetectors(input: FindingsInput, connected: ReadonlySet<App>): DetectorOutcome[] {
@@ -336,6 +352,8 @@ export function evidenceOf(i: Insight): Record<string, number | string> {
       return { orders: f.orders, older: f.older };
     case "courier_deductions":
       return { unitemized: f.unitemized.amount, share: f.unitemizedShare, statements: f.statements };
+    case "stockout":
+      return { situation: f.situation, stock: f.stock, perDay: f.perDay, cover: f.daysOfCover, lead: f.leadTimeDays };
     case "courier_for_city":
       return { best: `${f.best.courier}/${f.best.via}`, bestRate: f.best.rate, worst: `${f.worse[0]!.courier}/${f.worse[0]!.via}`, gap: f.worse[0]!.gapPoints };
   }

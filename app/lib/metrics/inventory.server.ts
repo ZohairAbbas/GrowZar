@@ -4,6 +4,7 @@ import {
   parseDailySales,
   parsePurchaseOrder,
   parseSnapshot,
+  parseSupplier,
   parseVariant,
   shiftDay,
   RATE_DAYS,
@@ -22,11 +23,12 @@ export async function inventorySection(
   storeId: string,
   period: { from: string; to: string; today: string },
   currency: string | null,
+  limit?: number,
 ): Promise<InventoryView> {
   const since = [period.from, shiftDay(period.today, -SELLING_DAYS)].sort()[0]!;
   // Snapshots for the period, and for the rate window (sales off an empty shelf).
   const snapshotsFrom = [period.from, shiftDay(period.today, -RATE_DAYS)].sort()[0]!;
-  const [variants, sales, snapshots, purchaseOrders] = await Promise.all([
+  const [variants, sales, snapshots, purchaseOrders, suppliers] = await Promise.all([
     prisma.$queryRaw<Payload[]>`
       SELECT payload FROM raw_records
       WHERE "storeId" = ${storeId} AND app = 'INVENTORIFY' AND entity = 'INVENTORY_VARIANT' AND "deletedAt" IS NULL`,
@@ -41,6 +43,9 @@ export async function inventorySection(
     prisma.$queryRaw<Payload[]>`
       SELECT payload FROM raw_records
       WHERE "storeId" = ${storeId} AND app = 'INVENTORIFY' AND entity = 'PURCHASE_ORDER' AND "deletedAt" IS NULL`,
+    prisma.$queryRaw<Payload[]>`
+      SELECT payload FROM raw_records
+      WHERE "storeId" = ${storeId} AND app = 'INVENTORIFY' AND entity = 'SUPPLIER' AND "deletedAt" IS NULL`,
   ]);
   const keep = <T,>(rows: Payload[], parse: (p: unknown) => T | null) => rows.map((r) => parse(r.payload)).filter((x): x is T => x !== null);
   return inventoryView({
@@ -48,8 +53,10 @@ export async function inventorySection(
     sales: keep(sales, parseDailySales),
     snapshots: keep(snapshots, parseSnapshot),
     purchaseOrders: keep(purchaseOrders, parsePurchaseOrder),
+    suppliers: keep(suppliers, parseSupplier),
     period,
     today: period.today,
     currency,
+    limit,
   });
 }

@@ -58,6 +58,12 @@ describe("detectors: every answer is found, nothing found, not enough data, or l
     expect(outcomes.find((o) => o.detector === "margin_ceiling")).toMatchObject({ status: "found" });
   });
 
+  it("locks I3 without Inventorify, and says it lacks data when Inventorify has sent nothing", () => {
+    expect(runDetectors(input(), both).find((o) => o.detector === "stockout")).toMatchObject({ status: "locked", needs: ["INVENTORIFY"] });
+    const withInv = runDetectors({ ...input(), inventory: null }, new Set<App>(["COURIERIFY", "FINANCIFY", "INVENTORIFY"]));
+    expect(withInv.find((o) => o.detector === "stockout")).toMatchObject({ status: "not_enough_data" });
+  });
+
   it("passes a gate's reason through instead of an empty space", () => {
     const quiet = runDetectors(input(times(40, () => order())), both);
     expect(quiet.find((o) => o.detector === "outcome_disagreement")).toMatchObject({ status: "nothing_found", reason: expect.stringMatching(/0 material/) });
