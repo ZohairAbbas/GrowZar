@@ -17,6 +17,7 @@ import { CurrencyMismatchError, addMoney, sumByCurrency } from "./money";
 import { inventoryView } from "./inventory";
 import { messagingView } from "./messaging";
 import { checkoutFate } from "./checkouts";
+import { parseConsent } from "./consent";
 import { NO_FX_SOURCE, convertDated } from "./fx";
 import { compareSettings } from "./profit-settings";
 import {
@@ -340,10 +341,12 @@ describe("rule #21: buyer risk — deferred (not in Growzar's feeds)", () => {
   it("has no risk feed or grain field, so no screen can show a risk from the wrong engine", () => expectNotSynced(/risk|fraud/));
 });
 
-describe("rule #22: consent / opted out — synced from Retainify; not shown until the customer page", () => {
-  it("reads consent only from Retainify, and keeps it out of the order grain", () => {
+describe("rule #22: consent — Retainify's, shown on Customers; only subscribed and unsuppressed may be messaged", () => {
+  it("reads consent only from Retainify, keeps it out of the order grain, and never treats suppressed as reachable", () => {
     expect(appsSyncing(/consent|opt.?out|unsubscrib/)).toEqual(new Set(["RETAINIFY"]));
     expect(grainKeys).not.toMatch(/consent|opt.?out|unsubscrib/);
+    const c = parseConsent({ contactId: "c", buyer: {}, email: { state: "subscribed", suppressed: true }, whatsapp: { state: "subscribed" }, push: { state: "never_opted_in" } });
+    expect(c?.reachable).toEqual({ email: false, whatsapp: true, push: false });
   });
 });
 

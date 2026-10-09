@@ -44,6 +44,8 @@ import { messagingSection } from "~/lib/metrics/messaging.server";
 import { MessagingPanel } from "~/components/metrics/MessagingPanel";
 import { checkoutsSection } from "~/lib/metrics/checkouts.server";
 import { CheckoutsPanel } from "~/components/metrics/CheckoutsPanel";
+import { consentSection } from "~/lib/metrics/consent.server";
+import { ConsentPanel } from "~/components/metrics/ConsentPanel";
 import { FilterBar } from "~/components/metrics/FilterBar";
 import { previousPeriod, withoutComparison } from "~/lib/metrics/compare";
 import { NO_SCOPE, parseScope, scopeQuery } from "~/lib/metrics/scope";
@@ -257,7 +259,13 @@ async function buildMetrics(
     case "customers": {
       // Gross profit in the cohorts only for a role that may see Finance.
       const viewer = await inboxViewer();
-      return { ...base, kind: "customers" as const, view: compared(await customersView(storeId, summary, prev!, viewer.canSeeMoney)), canSeeMoney: viewer.canSeeMoney };
+      return {
+        ...base,
+        kind: "customers" as const,
+        view: compared(await customersView(storeId, summary, prev!, viewer.canSeeMoney)),
+        canSeeMoney: viewer.canSeeMoney,
+        consent: await consentSection(storeId, period),
+      };
     }
     case "marketing": {
       const viewer = await inboxViewer();
@@ -316,7 +324,8 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {metrics.kind === "marketing" && metrics.messaging ? <MessagingPanel view={metrics.messaging} periodDays={metrics.period.days} /> : null}
           {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} depth={metrics.depth} period={metrics.period.query} scope={metrics.scope} /> : null}
-          {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} canSeeMoney={metrics.canSeeMoney} /> : null}
+          {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} canSeeMoney={metrics.canSeeMoney} canMessage={metrics.consent?.byCustomer ?? null} /> : null}
+          {metrics.kind === "customers" && metrics.consent ? <ConsentPanel view={metrics.consent.view} periodDays={metrics.period.days} /> : null}
           {metrics.kind === "inventory" ? <InventoryPanel view={metrics.view} periodDays={metrics.period.days} /> : null}
         </div>
       ) : null}
