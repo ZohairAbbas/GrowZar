@@ -82,3 +82,25 @@ describe("Retainify feeds", () => {
     expect(retainify.filter((f) => f.tombstoneMatchField).map((f) => f.entity)).toEqual(["CONSENT_EVENT"]);
   });
 });
+
+const preventify = feedsFor("PREVENTIFY");
+
+describe("Preventify feeds", () => {
+  it("lists its seven feeds behind the five capabilities it declares", () => {
+    expect(preventify.map((f) => [f.entity, f.capability])).toEqual([
+      ["FORM_ORDER", "form_orders:read"],
+      ["FORM_ABANDONMENT", "abandonments:read"],
+      ["FORM_SETTINGS", "settings:read"],
+      ["FORM_SETTINGS_CHANGE", "settings:read"],
+      ["OFFER", "offers:read"],
+      ["OFFER_EVENT", "offers:read"],
+      ["FRAUD_EVENT", "fraud_events:read"],
+    ]);
+  });
+
+  it("reads each feed's own tombstone key", () => {
+    const f = preventify.find((x) => x.entity === "FORM_ORDER")!;
+    expect(extractTombstones({ deletedFormOrderIds: ["a"], deletedFormOrderIdsTruncated: true }, f)).toEqual({ ids: ["a"], truncated: true });
+    expect(preventify.filter((x) => x.tombstoneKeys.length === 0).map((x) => x.entity)).toEqual(["FORM_SETTINGS", "FORM_SETTINGS_CHANGE"]);
+  });
+});
