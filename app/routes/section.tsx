@@ -40,6 +40,8 @@ import {
 import { CoverageLine } from "~/components/metrics/Metrics";
 import { InventoryPanel } from "~/components/metrics/InventoryPanel";
 import { inventorySection } from "~/lib/metrics/inventory.server";
+import { messagingSection } from "~/lib/metrics/messaging.server";
+import { MessagingPanel } from "~/components/metrics/MessagingPanel";
 import { FilterBar } from "~/components/metrics/FilterBar";
 import { previousPeriod, withoutComparison } from "~/lib/metrics/compare";
 import { NO_SCOPE, parseScope, scopeQuery } from "~/lib/metrics/scope";
@@ -256,7 +258,7 @@ async function buildMetrics(
       return { ...base, kind: "customers" as const, view: compared(await customersView(storeId, summary, prev!, viewer.canSeeMoney)), canSeeMoney: viewer.canSeeMoney };
     }
     case "marketing":
-      return { ...base, kind: "marketing" as const, view: await marketingView(storeId, summary) };
+      return { ...base, kind: "marketing" as const, view: await marketingView(storeId, summary), messaging: await messagingSection(storeId, period) };
     case "inventory":
       return { ...base, kind: "inventory" as const, view: await inventorySection(storeId, period, summary.store.currency) };
     default:
@@ -299,6 +301,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {metrics.kind === "home" ? <HomePanel view={metrics.view} owed={metrics.owed} inbox={metrics.inbox} period={metrics.period} /> : null}
           {metrics.kind === "finance" ? <FinancePanel view={metrics.view} ageing={metrics.ageing} depth={metrics.depth} period={metrics.period.query} scope={scopeQuery(metrics.scope)} /> : null}
           {metrics.kind === "marketing" ? <MarketingPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} /> : null}
+          {metrics.kind === "marketing" && metrics.messaging ? <MessagingPanel view={metrics.messaging} periodDays={metrics.period.days} /> : null}
           {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} depth={metrics.depth} period={metrics.period.query} scope={metrics.scope} /> : null}
           {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} canSeeMoney={metrics.canSeeMoney} /> : null}

@@ -45,5 +45,5 @@ export const DISPLAY_RULES: readonly DisplayRule[] = [
   { id: 29, title: "Return rate per product", status: "implemented", where: "rollups.productLines: order lines × outcome, by order" },
   { id: 30, title: "Product identity", status: "implemented", where: "Shopify variant id everywhere; SKU never a key" },
   { id: 31, title: "WhatsApp messages sent / cost", status: "deferred", reason: "Retainify's messages are synced (G-GZR5-2), with no cost; WhatKaBot not read yet", meanwhile: "not shown" },
-  { id: 32, title: "Campaigns", status: "deferred", reason: "Retainify and WhatKaBot campaign reads are Phase 5", meanwhile: "not shown (ad campaigns from Financify are ad spend, not messaging campaigns)" },
+  { id: 32, title: "Campaigns", status: "implemented", where: "Marketing: Retainify's journeys and campaigns, labelled as Retainify's, with the orders that followed counted by Growzar; WhatKaBot not read yet; Financify's ad campaigns stay ad spend" },
 ];

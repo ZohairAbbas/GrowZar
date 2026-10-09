@@ -15,6 +15,7 @@ import { currentStatusTiming } from "../shipments/events";
 import { buildOrderGrain, localDayOf, type OrderGrain, type SourceRow } from "./order-grain";
 import { CurrencyMismatchError, addMoney, sumByCurrency } from "./money";
 import { inventoryView } from "./inventory";
+import { messagingView } from "./messaging";
 import { NO_FX_SOURCE, convertDated } from "./fx";
 import { compareSettings } from "./profit-settings";
 import {
@@ -420,6 +421,13 @@ describe("rule #31: WhatsApp messages and cost — Retainify's messages synced; 
   });
 });
 
-describe("rule #32: campaigns — deferred; both apps shown, labelled by source, once read", () => {
-  it("has no messaging-campaign feed (Financify's ad campaigns are ad spend, not this)", () => expectNotSynced(/campaign/));
+describe("rule #32: campaigns — messaging campaigns from Retainify, labelled; ad campaigns stay ad spend", () => {
+  it("counts an order after a message from Growzar's own orders, never Retainify's revenue claim", () => {
+    const v = messagingView({
+      messages: [{ id: "m", channel: "email", journeyId: "j", sentAt: new Date("2026-10-01T10:00:00Z"), deliveredAt: new Date("2026-10-01T10:00:05Z"), openedAt: null, readAt: null, clickedAt: null, failedAt: null, customerId: "c" }],
+      journeys: [{ id: "j", name: "Weekend sale", kind: "campaign" }],
+      orders: [{ orderId: "o", customerId: "c", placedAt: new Date("2026-10-01T12:00:00Z"), outcome: "returned", delivered: null }],
+    });
+    expect(v.journeys[0]).toMatchObject({ kind: "campaign", orders: 1, delivered: 0, returned: 1, deliveredRevenue: [] });
+  });
 });
