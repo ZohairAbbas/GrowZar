@@ -26,6 +26,7 @@ import { times, type ReturnCost } from "./return-cost";
 import type { InventoryView } from "./inventory";
 import type { StockoutFinding } from "./stockout";
 import type { CheckoutsView, UnfollowedCheckoutsFinding } from "./checkouts";
+import type { OfferReturnsFinding, OffersView } from "./offers";
 
 /** A variant needs this many delivered-or-returned orders to be compared. */
 export const MIN_DECIDED_PER_VARIANT = 30;
@@ -331,7 +332,7 @@ export type DeductionsFinding = {
   keptShare: number | null;
 };
 
-export type Finding = UnfollowedCheckoutsFinding | StockoutFinding | ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding | StuckFinding | NotReceivedFinding | DeductionsFinding;
+export type Finding = OfferReturnsFinding | UnfollowedCheckoutsFinding | StockoutFinding | ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding | StuckFinding | NotReceivedFinding | DeductionsFinding;
 
 /**
  * Why a finding is absent (G-GZR3-3). "Not enough data" and "checked, nothing
@@ -389,6 +390,8 @@ export type FindingsInput = {
   formAbandonments?: CheckoutsView | null;
   /** Whether Retainify, the only reminder sender Growzar reads, is connected. */
   retainifyConnected?: boolean;
+  /** I9: Preventify's form orders by offer, with outcomes, when Preventify is connected. */
+  offers?: OffersView | null;
 };
 
 const DECIDED: Outcome[] = ["delivered", "returned"];
@@ -659,7 +662,7 @@ const inCityRoute = (o: RollupOrder, city: string, r: Route) =>
   fromCourierify(o) && o.city === city && routeOf(o).courier === r.courier && routeOf(o).via === r.via;
 
 /** Two-proportion z for p1 > p2 (pooled). */
-function zScore(d1: number, n1: number, d2: number, n2: number): number {
+export function zScore(d1: number, n1: number, d2: number, n2: number): number {
   const p = (d1 + d2) / (n1 + n2);
   const se = Math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2));
   return se ? (d1 / n1 - d2 / n2) / se : 0;

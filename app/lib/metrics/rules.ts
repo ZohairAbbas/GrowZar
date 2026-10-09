@@ -40,7 +40,7 @@ export const DISPLAY_RULES: readonly DisplayRule[] = [
   { id: 24, title: "Recovered carts / revenue", status: "implemented", where: "checkouts.ts: a Retainify reminder, then an order within 7 days; an order with no reminder first came back on its own; Retainify's recoveredAt is read only as \"became an order\"" },
   { id: 25, title: "COD order confirmation", status: "implemented", where: "order grain confirmation from Courierify OrderConfirmation (not OrderCase.stage)" },
   { id: 26, title: "Checkout conversion rate", status: "deferred", reason: "Preventify's read API is Phase 5", meanwhile: "not shown" },
-  { id: 27, title: "Upsell performance", status: "deferred", reason: "Preventify's read API is Phase 5", meanwhile: "not shown" },
+  { id: 27, title: "Upsell performance", status: "implemented", where: "Marketing: orders that took each Preventify offer (bundle, one-tick, upsell, downsell) against form orders with none, by Financify order value and the grain's outcomes (offers.ts); shown and clicked counts from 9 Oct 2026 are labelled indicative" },
   { id: 28, title: "Units sold per product", status: "implemented", where: "Inventory section: Inventorify's daily units sold; order-based product tables: rollups.productLines from Financify lines" },
   { id: 29, title: "Return rate per product", status: "implemented", where: "rollups.productLines: order lines × outcome, by order" },
   { id: 30, title: "Product identity", status: "implemented", where: "Shopify variant id everywhere; SKU never a key" },

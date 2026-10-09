@@ -4,6 +4,7 @@ import { prisma } from "../db.server";
 import type { FindingsInput } from "../metrics/findings";
 import { inventorySection } from "../metrics/inventory.server";
 import { checkoutsSection, formAbandonmentsSection } from "../metrics/checkouts.server";
+import { offersSection } from "../metrics/offers.server";
 import { sumByCurrency } from "../metrics/money";
 import { localDayOf } from "../metrics/order-grain";
 import { periodFrom } from "../metrics/screens.server";
@@ -76,6 +77,7 @@ export async function detectorInput(
     : null;
   const checkouts = connected.has("RETAINIFY") ? await checkoutsSection(s.store.id, s.period, now) : null;
   const formAbandonments = connected.has("PREVENTIFY") ? await formAbandonmentsSection(s.store.id, s.period, now) : null;
+  const offers = connected.has("PREVENTIFY") ? await offersSection(s.store.id, s.period) : null;
   const ads = s.adSpend;
   const complete = ads && ads.daysFetched === ads.daysInPeriod;
   return {
@@ -102,6 +104,7 @@ export async function detectorInput(
       checkouts,
       formAbandonments,
       retainifyConnected: connected.has("RETAINIFY"),
+      offers,
     },
   };
 }

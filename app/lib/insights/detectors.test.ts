@@ -70,8 +70,9 @@ describe("detectors: every answer is found, nothing found, not enough data, or l
     expect(withRet.find((o) => o.detector === "unfollowed_checkouts")).toMatchObject({ status: "not_enough_data" });
   });
 
-  it("locks I6 on COD forms without Preventify", () => {
+  it("locks I6 on COD forms and I9 without Preventify", () => {
     expect(runDetectors(input(), both).find((o) => o.detector === "unfollowed_form_abandonments")).toMatchObject({ status: "locked", needs: ["PREVENTIFY"] });
+    expect(runDetectors(input(), both).find((o) => o.detector === "offer_returns")).toMatchObject({ status: "locked", needs: ["PREVENTIFY"] });
   });
 
   it("passes a gate's reason through instead of an empty space", () => {
