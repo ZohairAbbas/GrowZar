@@ -44,6 +44,8 @@ import { messagingSection } from "~/lib/metrics/messaging.server";
 import { MessagingPanel } from "~/components/metrics/MessagingPanel";
 import { checkoutsSection, formAbandonmentsSection } from "~/lib/metrics/checkouts.server";
 import { CheckoutsPanel } from "~/components/metrics/CheckoutsPanel";
+import { offersSection } from "~/lib/metrics/offers.server";
+import { OffersPanel } from "~/components/metrics/OffersPanel";
 import { consentSection } from "~/lib/metrics/consent.server";
 import { ConsentPanel } from "~/components/metrics/ConsentPanel";
 import { FilterBar } from "~/components/metrics/FilterBar";
@@ -276,6 +278,7 @@ async function buildMetrics(
         messaging: await messagingSection(storeId, period),
         checkouts: await checkoutsSection(storeId, period),
         formAbandonments: await formAbandonmentsSection(storeId, period),
+        offers: await offersSection(storeId, period),
         retainifyConnected: (await prisma.appConnection.count({ where: { storeId, app: "RETAINIFY", status: "CONNECTED" } })) > 0,
         canSeeMoney: viewer.canSeeMoney,
       };
@@ -326,6 +329,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {metrics.kind === "marketing" && metrics.formAbandonments ? (
             <CheckoutsPanel view={metrics.formAbandonments} canSeeMoney={metrics.canSeeMoney} source="cod_form" retainifyConnected={metrics.retainifyConnected} />
           ) : null}
+          {metrics.kind === "marketing" && metrics.offers ? <OffersPanel view={metrics.offers} canSeeMoney={metrics.canSeeMoney} /> : null}
           {metrics.kind === "marketing" && metrics.messaging ? <MessagingPanel view={metrics.messaging} periodDays={metrics.period.days} /> : null}
           {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} depth={metrics.depth} period={metrics.period.query} scope={metrics.scope} /> : null}

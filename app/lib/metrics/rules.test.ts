@@ -18,6 +18,7 @@ import { inventoryView } from "./inventory";
 import { messagingView } from "./messaging";
 import { checkoutFate } from "./checkouts";
 import { parseConsent } from "./consent";
+import { offersView } from "./offers";
 import { NO_FX_SOURCE, convertDated } from "./fx";
 import { compareSettings } from "./profit-settings";
 import {
@@ -386,8 +387,20 @@ describe("rule #26: checkout conversion — deferred (Preventify, Phase 5)", () 
   it("has no form-open or conversion feed", () => expectNotSynced(/conversion|form.?open|visitor/));
 });
 
-describe("rule #27: upsell performance — deferred (Preventify, Phase 5)", () => {
-  it("has no upsell feed", () => expectNotSynced(/upsell|impression/));
+describe("rule #27: upsell performance — by what the orders did, not by Preventify's counters", () => {
+  it("compares orders that took an offer with form orders that took none, on outcomes", () => {
+    const v = offersView({
+      formOrders: [
+        { orderId: "a", createdAt: new Date("2026-10-01T00:00:00Z"), offers: [{ type: "upsell", offerId: "u", source: "preventify" }] },
+        { orderId: "b", createdAt: new Date("2026-10-01T00:00:00Z"), offers: [] },
+      ],
+      facts: new Map([["a", { placed: null, outcome: "returned" }], ["b", { placed: null, outcome: "delivered" }]]),
+      offerNames: new Map(),
+      events: [],
+      currency: "PKR",
+    });
+    expect(v.byType.map((g) => [g.type, g.returned, g.delivered])).toEqual([["none", 0, 1], ["upsell", 1, 0]]);
+  });
 });
 
 // ── F. Products and inventory ───────────────────────────────────────────────

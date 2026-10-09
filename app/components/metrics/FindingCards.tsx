@@ -23,6 +23,7 @@ import type {
 } from "~/lib/metrics/findings";
 import type { StockoutFinding } from "~/lib/metrics/stockout";
 import type { UnfollowedCheckoutsFinding } from "~/lib/metrics/checkouts";
+import type { OfferReturnsFinding } from "~/lib/metrics/offers";
 import type { InboxItem, InboxView } from "~/lib/insights/inbox.server";
 import { DISMISS_REASONS } from "~/lib/insights/actions";
 import { formatAmount, MoneyList, outcomeLabel } from "./Metrics";
@@ -49,6 +50,7 @@ const AREAS: Record<Finding["kind"], { label: string; Icon: typeof Wallet; tint:
   courier_deductions: { label: "Money owed", Icon: Wallet, tint: "bg-coral-100 text-coral-700" },
   stockout: { label: "Stock", Icon: Package, tint: "bg-data-100 text-data-700" },
   unfollowed_checkouts: { label: "Marketing", Icon: Mail, tint: "bg-mint-100 text-mint-700" },
+  offer_returns: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
 };
 
 function AreaTag() {
@@ -416,6 +418,33 @@ function UnfollowedCheckoutsCard({ f, period, id, canManage }: { f: UnfollowedCh
           f.source === "cod_form"
             ? "Value is what was in the form, from Preventify (on stores selling in several currencies it may be in the buyer's), not what a reminder would bring back."
             : "Cart value is what was in the checkout, not what a reminder would bring back.",
+        ]}
+      />
+    </Card>
+  );
+}
+
+const offerHeadline = (f: OfferReturnsFinding) =>
+  `${f.label}${f.valueLiftPct !== null ? ` raise order value ${f.valueLiftPct.toFixed(0)}%, but` : ""} come back ${f.gapPoints.toFixed(1)} points more`;
+
+function OfferReturnsCard({ f, period, id, canManage }: { f: OfferReturnsFinding } & CardProps) {
+  return (
+    <Card id={id} canManage={canManage} title={offerHeadline(f)} link={{ to: `/marketing?${period}`, label: "See offers" }}>
+      <p>
+        Of {n(f.decided)} COD-form orders with {f.label.toLowerCase()} that have been delivered or returned, <strong>{pct(f.returnRate)} came back</strong>,
+        against {pct(f.baselineRate)} of {n(f.baselineDecided)} orders with no offer.
+        {f.avgPlaced && f.baselineAvg ? (
+          <>
+            {" "}
+            Their average order was <MoneyList values={[f.avgPlaced]} />, against <MoneyList values={[f.baselineAvg]} />.
+          </>
+        ) : null}
+      </p>
+      <Leaves
+        items={[
+          "Offers from Preventify; order value from Financify; outcomes from Courierify, else Financify.",
+          "Buyers who take offers may differ from those who do not, so this shows a pattern, not proof the offer causes returns.",
+          "No money estimate yet: what the extra returns cost is shown once it has been checked against past orders.",
         ]}
       />
     </Card>
@@ -806,6 +835,8 @@ function FullCard({ item, period, canManage }: { item: InboxItem; period: string
         return <StockoutCard f={f} {...props} />;
       case "unfollowed_checkouts":
         return <UnfollowedCheckoutsCard f={f} {...props} />;
+      case "offer_returns":
+        return <OfferReturnsCard f={f} {...props} />;
     }
   })();
   return <Area.Provider value={f.kind}>{card}</Area.Provider>;
@@ -935,6 +966,15 @@ function summaryOf(f: Finding, period: string): Summary {
         why: "Growzar takes the courier's answer, through Courierify.",
         affects: `${n(f.total)} orders`,
         link: { to: `/orders?${period}&disagree=1`, label: "See orders" },
+      };
+    case "offer_returns":
+      return {
+        headline: offerHeadline(f),
+        figure: pct(f.returnRate),
+        note: `returned, against ${pct(f.baselineRate)} with no offer`,
+        next: `Check which ${f.label.toLowerCase()} come back most in Marketing, and restrict or turn them off in Preventify.`,
+        affects: `${n(f.orders)} orders with ${f.label.toLowerCase()}`,
+        link: { to: `/marketing?${period}`, label: "See offers" },
       };
     case "unfollowed_checkouts":
       return {

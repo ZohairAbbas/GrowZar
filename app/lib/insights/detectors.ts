@@ -34,6 +34,7 @@ import {
 } from "../metrics/findings";
 import { stockoutFindings } from "../metrics/stockout";
 import { unfollowedCheckoutsFinding } from "../metrics/checkouts";
+import { offerReturnsFindings } from "../metrics/offers";
 
 export type App = "COURIERIFY" | "FINANCIFY" | "INVENTORIFY" | "RETAINIFY" | "PREVENTIFY";
 
@@ -53,7 +54,8 @@ export type DetectorId =
   | "courier_deductions"
   | "stockout"
   | "unfollowed_checkouts"
-  | "unfollowed_form_abandonments";
+  | "unfollowed_form_abandonments"
+  | "offer_returns";
 
 export type Insight = {
   detector: DetectorId;
@@ -307,6 +309,19 @@ export const DETECTORS: readonly Detector[] = [
       return [insight("unfollowed_form_abandonments", "cod_form", f, { group: "specific", ordersAffected: f.notFollowedUp }, true)];
     },
   },
+  {
+    // I9. Preventify alone sees which offers sold; with the store's orders
+    // Growzar can see what those orders went on to do.
+    id: "offer_returns",
+    needs: ["PREVENTIFY", "FINANCIFY"],
+    label: "Offers that raise order value and returns together",
+    preview: "Bundles and upsells that make orders bigger but bring more of them back",
+    run(input) {
+      const list = offerReturnsFindings(input.offers);
+      if (!Array.isArray(list)) return list;
+      return list.map((f) => insight("offer_returns", f.type, f, { group: "specific", ordersAffected: f.orders }, true));
+    },
+  },
 ];
 
 export function runDetectors(input: FindingsInput, connected: ReadonlySet<App>): DetectorOutcome[] {
@@ -349,6 +364,7 @@ export function withoutMoney(insights: readonly Insight[]): Insight[] {
     if (f.kind === "stuck_parcels") return [{ ...i, revealsMoney: false, finding: { ...f, placed: null } }];
     if (f.kind === "returns_not_received") return [{ ...i, revealsMoney: false, finding: { ...f, productCost: null, value: null } }];
     if (f.kind === "unfollowed_checkouts") return [{ ...i, revealsMoney: false, finding: { ...f, notFollowedUpValue: [] } }];
+    if (f.kind === "offer_returns") return [{ ...i, revealsMoney: false, finding: { ...f, avgPlaced: null, baselineAvg: null } }];
     if (f.kind === "variant_returns") {
       return [{ ...i, revealsMoney: false, finding: { ...f, flagged: f.flagged.map((v) => ({ ...v, cost: null })) } }];
     }
@@ -384,6 +400,8 @@ export function evidenceOf(i: Insight): Record<string, number | string> {
       return { orders: f.orders, older: f.older };
     case "courier_deductions":
       return { unitemized: f.unitemized.amount, share: f.unitemizedShare, statements: f.statements };
+    case "offer_returns":
+      return { type: f.type, returnRate: f.returnRate, baselineRate: f.baselineRate, decided: f.decided, valueLift: f.valueLiftPct ?? "" };
     case "unfollowed_checkouts":
       return { settled: f.settled, notFollowedUp: f.notFollowedUp, recovered: f.recovered, cameBack: f.cameBack };
     case "stockout":
