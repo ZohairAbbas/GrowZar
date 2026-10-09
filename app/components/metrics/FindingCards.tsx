@@ -388,15 +388,19 @@ function StockoutCard({ f, id, canManage }: { f: StockoutFinding } & CardProps) 
 }
 
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
-const checkoutsHeadline = (f: UnfollowedCheckoutsFinding) =>
-  `${n(f.notFollowedUp)} of ${n(f.settled)} abandoned checkouts got no reminder`;
+const abandonedNoun = (f: UnfollowedCheckoutsFinding) => (f.source === "cod_form" ? "COD-form abandonments" : "abandoned checkouts");
+const checkoutsHeadline = (f: UnfollowedCheckoutsFinding) => `${n(f.notFollowedUp)} of ${n(f.settled)} ${abandonedNoun(f)} got no reminder`;
 
 function UnfollowedCheckoutsCard({ f, period, id, canManage }: { f: UnfollowedCheckoutsFinding } & CardProps) {
   return (
     <Card id={id} canManage={canManage} title={checkoutsHeadline(f)} link={{ to: `/marketing?${period}`, label: "See checkouts" }}>
       <p>
-        {n(f.settled)} checkouts were started and never became an order within the hour, and their 7 days to come back are over.{" "}
-        <strong>{n(f.notFollowedUp)} got no message from Retainify</strong>
+        {f.source === "cod_form"
+          ? `${n(f.settled)} buyers filled in your COD form and left (Preventify), did not order within the hour, and their 7 days to come back are over. `
+          : `${n(f.settled)} checkouts were started and never became an order within the hour, and their 7 days to come back are over. `}
+        <strong>
+          {n(f.notFollowedUp)} got no message from Retainify{f.retainifyConnected ? "" : ", which is not connected to this store"}
+        </strong>
         {f.notFollowedUpValue.length ? <> (carts worth <MoneyList values={f.notFollowedUpValue} />)</> : null}.{" "}
         {n(f.recovered)} came back after a reminder; {n(f.cameBack)} came back on their own.
       </p>
@@ -409,7 +413,9 @@ function UnfollowedCheckoutsCard({ f, period, id, canManage }: { f: UnfollowedCh
       <Leaves
         items={[
           "Only Retainify's messages are seen: a reminder sent by WhatsApp from another app counts as none.",
-          "Cart value is what was in the checkout, not what a reminder would bring back.",
+          f.source === "cod_form"
+            ? "Value is what was in the form, from Preventify (on stores selling in several currencies it may be in the buyer's), not what a reminder would bring back."
+            : "Cart value is what was in the checkout, not what a reminder would bring back.",
         ]}
       />
     </Card>
@@ -935,8 +941,14 @@ function summaryOf(f: Finding, period: string): Summary {
         headline: checkoutsHeadline(f),
         figure: f.notFollowedUpValue[0] ? figure(f.notFollowedUpValue[0]) : n(f.notFollowedUp),
         note: f.notFollowedUpValue[0] ? `in ${n(f.notFollowedUp)} carts nobody reminded` : `of ${n(f.settled)} abandoned checkouts`,
-        next: f.pausedJourney ? `Turn Retainify's “${f.pausedJourney.name}” journey back on.` : "Turn on a cart reminder in Retainify.",
-        affects: `${n(f.notFollowedUp)} abandoned checkouts`,
+        next: f.pausedJourney
+          ? `Turn Retainify's “${f.pausedJourney.name}” journey back on.`
+          : f.source === "cod_form"
+            ? f.retainifyConnected
+              ? "Remind COD-form leavers from Retainify or WhatKaBot."
+              : "Connect Retainify or WhatKaBot to remind COD-form leavers."
+            : "Turn on a cart reminder in Retainify.",
+        affects: `${n(f.notFollowedUp)} ${abandonedNoun(f)}`,
         link: { to: `/marketing?${period}`, label: "See checkouts" },
       };
     case "stockout":

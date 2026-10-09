@@ -42,7 +42,7 @@ import { InventoryPanel } from "~/components/metrics/InventoryPanel";
 import { inventorySection } from "~/lib/metrics/inventory.server";
 import { messagingSection } from "~/lib/metrics/messaging.server";
 import { MessagingPanel } from "~/components/metrics/MessagingPanel";
-import { checkoutsSection } from "~/lib/metrics/checkouts.server";
+import { checkoutsSection, formAbandonmentsSection } from "~/lib/metrics/checkouts.server";
 import { CheckoutsPanel } from "~/components/metrics/CheckoutsPanel";
 import { consentSection } from "~/lib/metrics/consent.server";
 import { ConsentPanel } from "~/components/metrics/ConsentPanel";
@@ -275,6 +275,8 @@ async function buildMetrics(
         view: await marketingView(storeId, summary),
         messaging: await messagingSection(storeId, period),
         checkouts: await checkoutsSection(storeId, period),
+        formAbandonments: await formAbandonmentsSection(storeId, period),
+        retainifyConnected: (await prisma.appConnection.count({ where: { storeId, app: "RETAINIFY", status: "CONNECTED" } })) > 0,
         canSeeMoney: viewer.canSeeMoney,
       };
     }
@@ -321,6 +323,9 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {metrics.kind === "finance" ? <FinancePanel view={metrics.view} ageing={metrics.ageing} depth={metrics.depth} period={metrics.period.query} scope={scopeQuery(metrics.scope)} /> : null}
           {metrics.kind === "marketing" ? <MarketingPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} /> : null}
           {metrics.kind === "marketing" && metrics.checkouts ? <CheckoutsPanel view={metrics.checkouts} canSeeMoney={metrics.canSeeMoney} /> : null}
+          {metrics.kind === "marketing" && metrics.formAbandonments ? (
+            <CheckoutsPanel view={metrics.formAbandonments} canSeeMoney={metrics.canSeeMoney} source="cod_form" retainifyConnected={metrics.retainifyConnected} />
+          ) : null}
           {metrics.kind === "marketing" && metrics.messaging ? <MessagingPanel view={metrics.messaging} periodDays={metrics.period.days} /> : null}
           {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} depth={metrics.depth} period={metrics.period.query} scope={metrics.scope} /> : null}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { checkoutFate, checkoutsView, parseCheckout, unfollowedCheckoutsFinding, type Checkout, type CheckoutMessage } from "./checkouts";
+import { checkoutFate, checkoutsView, parseCheckout, parseFormAbandonment, unfollowedCheckoutsFinding, type Checkout, type CheckoutMessage } from "./checkouts";
 
 const NOW = new Date("2026-10-20T00:00:00Z");
 const at = (d: string) => new Date(`2026-10-${d}Z`);
@@ -73,3 +73,22 @@ describe("parseCheckout", () => {
   });
 });
 
+
+describe("COD-form abandonments (Preventify)", () => {
+  it("reads Preventify's row as a checkout, with no email and its session's order as becoming an order", () => {
+    expect(
+      parseFormAbandonment({ id: "ab1", sessionId: "s", abandonedAt: "2026-10-01T10:00:00.000Z", total: { amount: "1500.00", currency: "AED" }, phone: "+971501234567", phoneRaw: "0501234567", hasEmail: true, recovered: true, recoveredAt: "2026-10-01T12:00:00.000Z" }),
+    ).toMatchObject({ token: "ab1", email: null, total: { amount: "1500.00", currency: "AED" }, phoneE164: "+971501234567", becameOrderAt: new Date("2026-10-01T12:00:00.000Z") });
+  });
+
+  it("never blames a COD-form abandonment on Retainify's cart journey, and says when Retainify is not connected", () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ token: `f${i}`, startedAt: new Date("2026-10-01T10:00:00Z"), total: null, email: null, customerId: `x${i}`, becameOrderAt: null }));
+    const v = checkoutsView({
+      checkouts: many, messages: [], orderTimes: new Map(),
+      journeys: [{ id: "j", name: "Abandoned Cart", kind: "flow", trigger: "cart_abandoned", status: "paused" }],
+      lastSentByJourney: new Map(), now: new Date("2026-10-20T00:00:00Z"),
+    });
+    expect(unfollowedCheckoutsFinding(v, "cod_form", false)).toMatchObject({ source: "cod_form", retainifyConnected: false, pausedJourney: null, notFollowedUp: 25 });
+    expect(unfollowedCheckoutsFinding(null, "cod_form", false)).toMatchObject({ status: "not_enough_data", reason: expect.stringMatching(/Preventify/) });
+  });
+});

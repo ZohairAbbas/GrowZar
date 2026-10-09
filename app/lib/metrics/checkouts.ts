@@ -59,6 +59,32 @@ export function parseCheckout(p: unknown): (Omit<Checkout, "customerId"> & { pho
   };
 }
 
+/**
+ * Preventify's COD-form abandonment (G-GZR5-9), as a checkout: Preventify
+ * already waited 10–15 minutes of idleness before calling it abandoned, and
+ * its `recoveredAt` means the session later became an order, so the same
+ * rules apply. There is no email, only whether one was given.
+ */
+export function parseFormAbandonment(p: unknown): (Omit<Checkout, "customerId"> & { phoneE164: string | null; phoneRaw: string | null }) | null {
+  if (!p || typeof p !== "object") return null;
+  const r = p as Record<string, unknown>;
+  const token = str(r.id);
+  const startedAt = date(r.abandonedAt);
+  if (!token || !startedAt) return null;
+  return {
+    token,
+    startedAt,
+    total: readMoney(r.total),
+    email: null,
+    becameOrderAt: date(r.recoveredAt),
+    phoneE164: str(r.phone),
+    phoneRaw: str(r.phoneRaw),
+  };
+}
+
+/** Where an abandonment came from: a Shopify checkout (Retainify) or a COD form (Preventify). */
+export type AbandonmentSource = "shopify_checkout" | "cod_form";
+
 export type CheckoutFate = "converted" | "open" | "recovered" | "came_back" | "lost";
 
 export type CheckoutsView = {
@@ -154,6 +180,9 @@ export function checkoutsView(input: {
 
 export type UnfollowedCheckoutsFinding = {
   kind: "unfollowed_checkouts";
+  source: AbandonmentSource;
+  /** Whether Retainify, the only reminder sender Growzar reads, is connected at all. */
+  retainifyConnected: boolean;
   settled: number;
   notFollowedUp: number;
   notFollowedUpValue: Money[];
@@ -166,22 +195,30 @@ export type UnfollowedCheckoutsFinding = {
 type Skip = { kind: "skip"; status: "not_enough_data" | "nothing_found"; reason: string };
 
 /** I6: abandoned checkouts that nobody followed up. */
-export function unfollowedCheckoutsFinding(v: CheckoutsView | null | undefined): UnfollowedCheckoutsFinding | Skip {
-  if (!v) return { kind: "skip", status: "not_enough_data", reason: "Retainify has sent no checkouts for this period" };
+export function unfollowedCheckoutsFinding(
+  v: CheckoutsView | null | undefined,
+  source: AbandonmentSource = "shopify_checkout",
+  retainifyConnected = true,
+): UnfollowedCheckoutsFinding | Skip {
+  const what = source === "cod_form" ? "COD-form abandonments" : "abandoned checkouts";
+  if (!v) return { kind: "skip", status: "not_enough_data", reason: source === "cod_form" ? "Preventify has sent no form abandonments for this period" : "Retainify has sent no checkouts for this period" };
   if (v.settled < MIN_ABANDONED) {
-    return { kind: "skip", status: "not_enough_data", reason: `${v.settled} abandoned checkouts have had their 7 days; ${MIN_ABANDONED} are needed` };
+    return { kind: "skip", status: "not_enough_data", reason: `${v.settled} ${what} have had their 7 days; ${MIN_ABANDONED} are needed` };
   }
   if (v.notFollowedUp / v.settled < UNFOLLOWED_SHARE) {
-    return { kind: "skip", status: "nothing_found", reason: `${v.followedUp} of ${v.settled} abandoned checkouts got a message within 7 days` };
+    return { kind: "skip", status: "nothing_found", reason: `${v.followedUp} of ${v.settled} ${what} got a message within 7 days` };
   }
   const live = v.cartJourneys.find((j) => j.status === "published");
   return {
     kind: "unfollowed_checkouts",
+    source,
+    retainifyConnected,
     settled: v.settled,
     notFollowedUp: v.notFollowedUp,
     notFollowedUpValue: v.notFollowedUpValue,
     recovered: v.recovered,
     cameBack: v.cameBack,
-    pausedJourney: live ? null : (v.cartJourneys[0] ?? null),
+    // Retainify's cart journeys react to Shopify checkouts only, never to a COD form.
+    pausedJourney: source === "cod_form" || live ? null : (v.cartJourneys[0] ?? null),
   };
 }

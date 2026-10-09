@@ -1,7 +1,7 @@
 import { prisma } from "../db.server";
 import { normalizeEmail } from "../customers/phone";
 import { localDayOf } from "./order-grain";
-import { checkoutsView, parseCheckout, RECOVERY_MS, type CheckoutsView } from "./checkouts";
+import { checkoutsView, parseCheckout, parseFormAbandonment, RECOVERY_MS, type CheckoutsView } from "./checkouts";
 import { buyerPhone, parseJourney, parseMessage } from "./messaging";
 import { customersByPhone } from "./messaging.server";
 
@@ -11,19 +11,36 @@ const DAY_MS = 86_400_000;
 /**
  * Checkouts started in the period's local days (Retainify), what happened to
  * each, and whether any Retainify message followed it up. Null when
- * Retainify has sent no checkouts for the period.
+ * Retainify has sent no checkouts for the period. Preventify's COD-form
+ * abandonments go through the same core.
  */
 export async function checkoutsSection(storeId: string, period: { from: string; to: string }, now = new Date()): Promise<CheckoutsView | null> {
+  return abandonmentsSection(storeId, period, now, "CHECKOUT", parseCheckout);
+}
+
+/** Preventify's COD-form abandonments in the period, by the same rules (G-GZR5-9). */
+export async function formAbandonmentsSection(storeId: string, period: { from: string; to: string }, now = new Date()): Promise<CheckoutsView | null> {
+  return abandonmentsSection(storeId, period, now, "FORM_ABANDONMENT", parseFormAbandonment);
+}
+
+async function abandonmentsSection(
+  storeId: string,
+  period: { from: string; to: string },
+  now: Date,
+  entity: "CHECKOUT" | "FORM_ABANDONMENT",
+  parse: typeof parseCheckout,
+): Promise<CheckoutsView | null> {
   const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { timezone: true, country: true } });
   const tz = store.timezone ?? "UTC";
   const after = new Date(Date.parse(`${period.from}T00:00:00Z`) - DAY_MS).toISOString();
   const before = new Date(Date.parse(`${period.to}T00:00:00Z`) + 2 * DAY_MS).toISOString();
+  const app = entity === "CHECKOUT" ? "RETAINIFY" : "PREVENTIFY";
   const rows = await prisma.$queryRaw<Payload[]>`
     SELECT payload FROM raw_records
-    WHERE "storeId" = ${storeId} AND app = 'RETAINIFY' AND entity = 'CHECKOUT' AND "deletedAt" IS NULL
+    WHERE "storeId" = ${storeId} AND app = ${app}::"SuiteApp" AND entity = ${entity}::"SyncEntity" AND "deletedAt" IS NULL
       AND payload->>'abandonedAt' >= ${after} AND payload->>'abandonedAt' < ${before}`;
   const parsed = rows
-    .map((r) => parseCheckout(r.payload))
+    .map((r) => parse(r.payload))
     .filter((c): c is NonNullable<typeof c> => c !== null)
     .filter((c) => {
       const d = localDayOf(c.startedAt, tz);
@@ -81,7 +98,8 @@ export async function checkoutsSection(storeId: string, period: { from: string; 
       };
     }),
     orderTimes,
-    journeys: journeyRows.map((r) => parseJourney(r.payload)).filter((j): j is NonNullable<typeof j> => j !== null),
+    // Retainify's cart journeys answer Shopify checkouts, not COD forms.
+    journeys: entity === "CHECKOUT" ? journeyRows.map((r) => parseJourney(r.payload)).filter((j): j is NonNullable<typeof j> => j !== null) : [],
     lastSentByJourney: new Map(lastSent.filter((r) => r.journeyId).map((r) => [r.journeyId, r.lastSent])),
     now,
   });

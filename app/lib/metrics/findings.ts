@@ -385,6 +385,10 @@ export type FindingsInput = {
   inventory?: InventoryView | null;
   /** I6: the period's checkouts and their follow-up, when Retainify is connected. */
   checkouts?: CheckoutsView | null;
+  /** I6 on COD forms: the period's Preventify form abandonments and their follow-up. */
+  formAbandonments?: CheckoutsView | null;
+  /** Whether Retainify, the only reminder sender Growzar reads, is connected. */
+  retainifyConnected?: boolean;
 };
 
 const DECIDED: Outcome[] = ["delivered", "returned"];
