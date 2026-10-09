@@ -363,7 +363,9 @@ function StockoutCard({ f, id, canManage }: { f: StockoutFinding } & CardProps) 
             At the last 30 days' rate ({f.perDay.toFixed(1)} a day) the {n(f.stock)} on hand last about {n(f.daysOfCover)} days.{" "}
           </>
         )}
-        Its lead time in Inventorify is {n(f.leadTimeDays)} days, so stock ordered today leaves about{" "}
+        {f.leadSource === "measured"
+          ? <>Its supplier takes {n(f.leadTimeDays)} days on average from order to delivery in Inventorify, so stock ordered today leaves about </>
+          : <>Its lead time set in Inventorify is {n(f.leadTimeDays)} days, so stock ordered today leaves about </>}
         <strong>
           {n(f.shortDays)} days with nothing to sell: roughly {n(f.unitsShort)} units of demand
         </strong>
@@ -373,7 +375,9 @@ function StockoutCard({ f, id, canManage }: { f: StockoutFinding } & CardProps) 
       <Leaves
         items={[
           "Nothing is on order for it in Inventorify. If you have reordered outside Inventorify, dismiss this.",
-          "The lead time is Inventorify's setting for this product; set the real one there and this card follows it.",
+          f.leadSource === "measured"
+            ? "The lead time is measured on this supplier's received purchase orders."
+            : "The lead time is the product's setting in Inventorify; set the real one there, or receive 3 purchase orders from its supplier, and this card follows it.",
           "No money estimate yet: what a stock-out costs is shown once it has been checked against past stock-outs.",
         ]}
       />

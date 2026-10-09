@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   inventoryView,
+  parseSupplier,
   isOnTheWay,
   parseDailySales,
   parsePurchaseOrder,
@@ -15,7 +16,7 @@ const TODAY = "2026-10-08";
 const pkr = (amount: string) => ({ amount, currency: "PKR" });
 
 function variant(id: string, o: Partial<InventoryVariant> = {}): InventoryVariant {
-  return { variantId: id, title: `Item ${id}`, variantTitle: null, sku: null, stock: 10, leadTimeDays: 7, unitCost: pkr("100.00"), archived: false, ...o };
+  return { variantId: id, title: `Item ${id}`, variantTitle: null, sku: null, stock: 10, leadTimeDays: 7, unitCost: pkr("100.00"), archived: false, supplierId: null, ...o };
 }
 
 /** `units` sold on each of the `days` full days before today. */
@@ -57,7 +58,7 @@ describe("inventoryView", () => {
     const v = view({
       variants: [variant("a", { stock: 5 }), variant("b", { stock: 5 }), variant("c", { stock: 100 })],
       sales: [...sales("a", 1), ...sales("b", 1), ...sales("c", 1)],
-      purchaseOrders: [{ id: "p", poNumber: "PO-1", status: "sent", supplierName: null, expectedDeliveryDate: null, items: [{ variantId: "b", onOrder: 20 }] }],
+      purchaseOrders: [{ id: "p", poNumber: "PO-1", status: "sent", supplierName: null, expectedDeliveryDate: null, receivedOn: null, items: [{ variantId: "b", onOrder: 20 }] }],
     });
     const state = Object.fromEntries(v.rows.map((r) => [r.variantId, r.state]));
     expect(state).toEqual({ a: "reorder", b: "on_order", c: "ok" });
@@ -132,5 +133,22 @@ describe("inventoryView", () => {
       title: "Charging & Travel Kit",
       variantTitle: '"Red"',
     });
+  });
+
+  it("uses the supplier's measured lead time once it has 3 received orders, else the setting", () => {
+    const suppliers = [parseSupplier({ id: "s1", avgActualLeadTime: 11.5, totalPosReceived: 4 })!, parseSupplier({ id: "s2", avgActualLeadTime: 3, totalPosReceived: 2 })!];
+    const v = view({
+      variants: [variant("a", { supplierId: "s1", leadTimeDays: 7 }), variant("b", { supplierId: "s2", leadTimeDays: 7 })],
+      suppliers,
+    });
+    const lead = Object.fromEntries(v.rows.map((r) => [r.variantId, [r.leadTimeDays, r.leadSource]]));
+    expect(lead).toEqual({ a: [12, "measured"], b: [7, "setting"] });
+  });
+
+  it("counts purchase orders received in the last 90 days to tell a store that reorders through Inventorify", () => {
+    const po = (on: string | null) => ({ id: String(on), poNumber: "P", status: "received", supplierName: null, expectedDeliveryDate: null, receivedOn: on, items: [] });
+    const v = view({ purchaseOrders: [po(shiftDay(TODAY, -5)), po(shiftDay(TODAY, -80)), po(shiftDay(TODAY, -120)), po(null)] });
+    expect([v.receivedOrders, v.reordersInInventorify]).toEqual([2, false]);
+    expect(parsePurchaseOrder({ id: "p", status: "received", actualDeliveryDate: "2026-10-01T09:00:00.000Z", items: [] })?.receivedOn).toBe("2026-10-01");
   });
 });

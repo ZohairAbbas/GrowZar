@@ -1,4 +1,4 @@
-import type { InventoryView } from "./inventory";
+import { PO_USE_DAYS, PO_USE_MIN, type InventoryView } from "./inventory";
 import { productLines, type RollupOrder } from "./rollups";
 
 /**
@@ -7,7 +7,13 @@ import { productLines, type RollupOrder } from "./rollups";
  * A selling variant whose stock runs out before a reorder placed today could
  * arrive, with nothing on order in Inventorify; or one that has just run out.
  * Everything comes from the Inventory section's own figures, so the card and
- * the table never disagree. No money yet: an estimate of lost profit waits for
+ * the table never disagree.
+ *
+ * "Just ran out" is a fact and shows for every store. "Will run out" is a
+ * forecast, and shows only for a store that reorders through Inventorify
+ * (`reordersInInventorify`): elsewhere "nothing on order" is not "nothing on
+ * the way", and on 0dscam-qn, which restocks outside it, the forecast flagged
+ * 11 variant-days in 60 and none ran out. No money yet: an estimate of lost profit waits for
  * a backtest (PLAN.md §3), as with every other detector.
  */
 
@@ -27,6 +33,7 @@ export type StockoutFinding = {
   /** Whole days the stock lasts; 0 when already out. */
   daysOfCover: number;
   leadTimeDays: number;
+  leadSource: "measured" | "setting";
   /** Days with nothing to sell if it is reordered today: lead time less cover. */
   shortDays: number;
   /** Demand in those days at the current rate, rounded up. */
@@ -55,8 +62,8 @@ export function stockoutFindings(input: {
   const unitsOf = new Map(lines.map((l) => [l.variantId, l.units]));
 
   const found = inv.rows.flatMap((r): StockoutFinding[] => {
-    if (r.state !== "reorder" && r.state !== "out") return [];
-    if (r.perDay < MIN_PER_DAY || r.leadTimeDays === null || r.daysOfCover === null) return [];
+    if (r.state !== "out" && !(r.state === "reorder" && inv.reordersInInventorify)) return [];
+    if (r.perDay < MIN_PER_DAY || r.leadTimeDays === null || r.leadSource === null || r.daysOfCover === null) return [];
     const shortDays = Math.max(0, r.leadTimeDays - r.daysOfCover);
     if (shortDays === 0) return [];
     const ordered = unitsOf.get(r.variantId) ?? 0;
@@ -71,6 +78,7 @@ export function stockoutFindings(input: {
         perDay: r.perDay,
         daysOfCover: r.daysOfCover,
         leadTimeDays: r.leadTimeDays,
+        leadSource: r.leadSource,
         shortDays,
         unitsShort: Math.ceil(r.perDay * shortDays),
         orderedShare: totalUnits > 0 && ordered > 0 ? Math.round((1000 * ordered) / totalUnits) / 10 : null,
@@ -83,7 +91,9 @@ export function stockoutFindings(input: {
     return {
       kind: "skip",
       status: "nothing_found",
-      reason: `No product selling ${MIN_PER_DAY} or more a day runs out before a reorder could arrive`,
+      reason: inv.reordersInInventorify
+        ? `No product selling ${MIN_PER_DAY} or more a day runs out before a reorder could arrive`
+        : `No product selling ${MIN_PER_DAY} or more a day is out of stock. Running-out forecasts start once the store receives ${PO_USE_MIN} purchase orders through Inventorify in ${PO_USE_DAYS} days (${inv.receivedOrders} so far)`,
     };
   }
   return found.sort((a, b) => b.unitsShort - a.unitsShort || a.variantId.localeCompare(b.variantId)).slice(0, MAX_STOCKOUTS);

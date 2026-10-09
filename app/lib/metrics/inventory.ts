@@ -18,7 +18,11 @@ export type InventoryVariant = {
   leadTimeDays: number | null;
   unitCost: Money | null;
   archived: boolean;
+  supplierId: string | null;
 };
+
+/** Inventorify's supplier, for its measured lead time (sent → received). */
+export type Supplier = { id: string; avgActualLeadTime: number | null; totalPosReceived: number };
 
 export type DailySales = { variantId: string; date: string; units: number };
 export type StockSnapshot = { variantId: string; date: string; stock: number };
@@ -28,6 +32,8 @@ export type PurchaseOrder = {
   status: string;
   supplierName: string | null;
   expectedDeliveryDate: string | null;
+  /** The day it was received, when it was. */
+  receivedOn: string | null;
   items: Array<{ variantId: string; onOrder: number }>;
 };
 
@@ -42,6 +48,15 @@ export const SELLING_DAYS = 90;
  * One or two can be a restock during the day; older ones predate a restock.
  */
 export const UNTRACKED_SALE_DAYS = 3;
+/** Received purchase orders before a supplier's measured lead time replaces the setting (Inventorify's own rule). */
+export const MEASURED_LEAD_MIN_POS = 3;
+/**
+ * Purchase orders received in the last PO_USE_DAYS before a store counts as
+ * reordering through Inventorify. Only then can "nothing on order" be read
+ * as nothing on the way, and only then does I3 forecast a stock-out.
+ */
+export const PO_USE_MIN = 3;
+export const PO_USE_DAYS = 90;
 /** Rows on screen; the rest is counted. */
 export const ROWS_SHOWN = 50;
 
@@ -70,7 +85,17 @@ export function parseVariant(p: unknown): InventoryVariant | null {
     leadTimeDays: int(r.leadTimeDays),
     unitCost: readMoney(r.unitCost),
     archived: r.archived === true,
+    supplierId: str(r.supplierId),
   };
+}
+
+export function parseSupplier(p: unknown): Supplier | null {
+  if (!p || typeof p !== "object") return null;
+  const r = p as Record<string, unknown>;
+  const id = str(r.id);
+  if (!id) return null;
+  const avg = typeof r.avgActualLeadTime === "number" && Number.isFinite(r.avgActualLeadTime) && r.avgActualLeadTime > 0 ? r.avgActualLeadTime : null;
+  return { id, avgActualLeadTime: avg, totalPosReceived: int(r.totalPosReceived) ?? 0 };
 }
 
 export function parseDailySales(p: unknown): DailySales | null {
@@ -103,6 +128,7 @@ export function parsePurchaseOrder(p: unknown): PurchaseOrder | null {
     status: (str(r.status) ?? "unknown").toLowerCase(),
     supplierName: str(r.supplierName),
     expectedDeliveryDate: day(r.expectedDeliveryDate),
+    receivedOn: typeof r.actualDeliveryDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(r.actualDeliveryDate) ? r.actualDeliveryDate.slice(0, 10) : null,
     items: items.flatMap((i) => {
       const o = (i ?? {}) as Record<string, unknown>;
       const variantId = str(o.variantId);
@@ -135,6 +161,8 @@ export type InventoryRow = {
   /** Whole days the stock lasts at that rate; null when nothing sold. */
   daysOfCover: number | null;
   leadTimeDays: number | null;
+  /** "measured": the supplier's average sent → received; "setting": the variant's lead time in Inventorify. */
+  leadSource: "measured" | "setting" | null;
   onOrder: number;
   /** Days in the period that opened with no stock, of the days with a snapshot. */
   daysOut: number;
@@ -158,6 +186,10 @@ export type InventoryView = {
   uncosted: number;
   rows: InventoryRow[];
   hiddenRows: number;
+  /** Purchase orders received in the last PO_USE_DAYS. */
+  receivedOrders: number;
+  /** Whether the store reorders through Inventorify (PO_USE_MIN), so "nothing on order" means nothing coming. */
+  reordersInInventorify: boolean;
   openOrders: Array<{ id: string; poNumber: string; status: string; supplierName: string | null; expected: string | null; units: number; variants: number }>;
 };
 
@@ -168,6 +200,7 @@ export function inventoryView(input: {
   sales: DailySales[];
   snapshots: StockSnapshot[];
   purchaseOrders: PurchaseOrder[];
+  suppliers?: Supplier[];
   period: { from: string; to: string };
   today: string;
   currency: string | null;
@@ -213,6 +246,14 @@ export function inventoryView(input: {
   const onOrder = new Map<string, number>();
   for (const po of open) for (const i of po.items) onOrder.set(i.variantId, (onOrder.get(i.variantId) ?? 0) + i.onOrder);
 
+  const measured = new Map(
+    (input.suppliers ?? [])
+      .filter((s) => s.totalPosReceived >= MEASURED_LEAD_MIN_POS && s.avgActualLeadTime !== null)
+      .map((s) => [s.id, Math.ceil(s.avgActualLeadTime!)]),
+  );
+  const receivedFrom = shiftDay(today, -PO_USE_DAYS);
+  const receivedOrders = input.purchaseOrders.filter((po) => po.receivedOn !== null && po.receivedOn >= receivedFrom && po.receivedOn <= today).length;
+
   let stockValue: Money | null = currency ? zero(currency) : null;
   let uncosted = 0;
   const rows: InventoryRow[] = [];
@@ -225,13 +266,16 @@ export function inventoryView(input: {
     const untracked = atZero >= UNTRACKED_SALE_DAYS;
     const daysOfCover = untracked ? null : v.stock <= 0 ? 0 : perDay > 0 ? Math.floor(v.stock / perDay) : null;
     const due = onOrder.get(v.variantId) ?? 0;
+    const measuredLead = v.supplierId ? measured.get(v.supplierId) : undefined;
+    const lead = measuredLead ?? v.leadTimeDays;
+    const leadSource = measuredLead !== undefined ? "measured" : v.leadTimeDays !== null ? "setting" : null;
     const state: StockState = !s.selling
       ? "not_selling"
       : untracked
         ? "untracked"
         : v.stock <= 0
         ? "out"
-        : daysOfCover !== null && v.leadTimeDays !== null && daysOfCover <= v.leadTimeDays
+        : daysOfCover !== null && lead !== null && daysOfCover <= lead
           ? due > 0
             ? "on_order"
             : "reorder"
@@ -257,7 +301,8 @@ export function inventoryView(input: {
       soldInPeriod: s.period,
       perDay: Math.round(perDay * 10) / 10,
       daysOfCover,
-      leadTimeDays: v.leadTimeDays,
+      leadTimeDays: lead,
+      leadSource,
       onOrder: due,
       daysOut: o.out,
       daysSnapshotted: o.days,
@@ -286,6 +331,8 @@ export function inventoryView(input: {
     uncosted,
     rows: rows.slice(0, limit),
     hiddenRows: Math.max(0, rows.length - limit),
+    receivedOrders,
+    reordersInInventorify: receivedOrders >= PO_USE_MIN,
     openOrders: open.map((po) => ({
       id: po.id,
       poNumber: po.poNumber,
