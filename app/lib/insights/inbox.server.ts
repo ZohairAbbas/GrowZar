@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.server";
 import type { FindingsInput } from "../metrics/findings";
 import { inventorySection } from "../metrics/inventory.server";
-import { checkoutsSection } from "../metrics/checkouts.server";
+import { checkoutsSection, formAbandonmentsSection } from "../metrics/checkouts.server";
 import { sumByCurrency } from "../metrics/money";
 import { localDayOf } from "../metrics/order-grain";
 import { periodFrom } from "../metrics/screens.server";
@@ -48,7 +48,7 @@ export async function detectorInput(
   const viaCourierify = s.rows.filter((o) => o.parcelCount > 0).map((o) => o.orderId);
   const [connections, lastParcel, payers, awaiting, perProduct, returnCost, parcels, statements] = await Promise.all([
     prisma.appConnection.findMany({
-      where: { storeId: s.store.id, status: "CONNECTED", app: { in: ["COURIERIFY", "FINANCIFY", "INVENTORIFY", "RETAINIFY"] } },
+      where: { storeId: s.store.id, status: "CONNECTED", app: { in: ["COURIERIFY", "FINANCIFY", "INVENTORIFY", "RETAINIFY", "PREVENTIFY"] } },
       select: { app: true },
     }),
     prisma.orderGrain.findFirst({
@@ -75,6 +75,7 @@ export async function detectorInput(
     ? await inventorySection(s.store.id, { from: s.period.from, to: s.period.to, today: localDayOf(now, s.store.timezone ?? "UTC") }, s.store.currency, Infinity)
     : null;
   const checkouts = connected.has("RETAINIFY") ? await checkoutsSection(s.store.id, s.period, now) : null;
+  const formAbandonments = connected.has("PREVENTIFY") ? await formAbandonmentsSection(s.store.id, s.period, now) : null;
   const ads = s.adSpend;
   const complete = ads && ads.daysFetched === ads.daysInPeriod;
   return {
@@ -99,6 +100,8 @@ export async function detectorInput(
       period: s.period,
       inventory,
       checkouts,
+      formAbandonments,
+      retainifyConnected: connected.has("RETAINIFY"),
     },
   };
 }
@@ -181,7 +184,7 @@ export type InboxView = {
   canManage: boolean;
 };
 
-const APP_NAMES: Record<App, string> = { COURIERIFY: "Courierify", FINANCIFY: "Financify", INVENTORIFY: "Inventorify", RETAINIFY: "Retainify" };
+const APP_NAMES: Record<App, string> = { COURIERIFY: "Courierify", FINANCIFY: "Financify", INVENTORIFY: "Inventorify", RETAINIFY: "Retainify", PREVENTIFY: "Preventify" };
 
 export async function inboxView(
   s: StoreSummary,
