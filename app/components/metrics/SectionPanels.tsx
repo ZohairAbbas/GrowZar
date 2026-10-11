@@ -321,6 +321,8 @@ const FILTER_LABEL = (f: NonNullable<OrdersView["filter"]>) =>
           ? `orders shipped to ${f.city} with ${f.courier}${f.via === "direct" ? ", booked directly" : ` through ${f.via}`}`
           : f.kind === "unanswered_waiting"
           ? "orders the buyer never answered on WhatsApp, not yet with the courier"
+          : f.kind === "stuck" && f.wrote
+          ? "parcels with no courier status change for days whose buyer has written to the store on WhatKaBot since ordering"
           : f.kind === "stuck"
           ? "parcels with no courier status change for days: booked and not picked up, or in transit with no update"
           : f.kind === "unpaid"

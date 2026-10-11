@@ -411,7 +411,7 @@ export function evidenceOf(i: Insight): Record<string, number | string> {
     case "city_returns":
       return { returnRate: f.returnRate, rest: f.rest.returnRate, decided: f.decided };
     case "stuck_parcels":
-      return { booked: f.booked, inTransit: f.inTransit, oldestDays: f.oldestDays };
+      return { booked: f.booked, inTransit: f.inTransit, oldestDays: f.oldestDays, ...(f.wroteIn ? { wroteIn: f.wroteIn.orders } : {}) };
     case "returns_not_received":
       return { orders: f.orders, older: f.older };
     case "courier_deductions":

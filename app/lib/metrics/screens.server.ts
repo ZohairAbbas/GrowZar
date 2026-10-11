@@ -61,6 +61,7 @@ import {
 } from "./cash";
 import { loadStatements } from "./settlements.server";
 import { loadSettledHistory } from "./summaries.server";
+import { loadBuyerContact } from "./buyer-contact.server";
 import {
   courierPerformance,
   outcomesByDay,
@@ -446,7 +447,11 @@ export async function ordersView(
       where: cashFilter ? { storeId, outcome: "delivered", uncollectedAmount: { not: null }, ...scopeWhere(scope) } : where,
       orderBy: [{ createdAt: "desc" }, { orderId: "desc" }],
     });
-    const ctx = { payers: filter.kind === "awaiting_payout" ? await loadPayerHistories(storeId) : [], asOf: new Date() };
+    const ctx = {
+      payers: filter.kind === "awaiting_payout" ? await loadPayerHistories(storeId) : [],
+      contact: filter.kind === "stuck" && filter.wrote ? await loadBuyerContact(storeId) : null,
+      asOf: new Date(),
+    };
     const hit = all.filter((r) => matchesFilter(toRollupOrder(r), filter, store.currency, ctx));
     const picked = outcome ? hit.filter((r) => r.outcome === outcome) : hit;
     const shown = picked.slice(0, FILTERED_LIST_LIMIT);

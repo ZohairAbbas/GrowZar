@@ -25,6 +25,7 @@ import type { StockoutFinding } from "~/lib/metrics/stockout";
 import type { UnfollowedCheckoutsFinding } from "~/lib/metrics/checkouts";
 import type { OfferReturnsFinding } from "~/lib/metrics/offers";
 import type { ReturnersFinding } from "~/lib/metrics/buyer-history";
+import { MIN_DECIDED as MIN_CONTACT_DECIDED } from "~/lib/metrics/buyer-contact";
 import type { InboxItem, InboxView } from "~/lib/insights/inbox.server";
 import { DISMISS_REASONS } from "~/lib/insights/actions";
 import { formatAmount, MoneyList, outcomeLabel } from "./Metrics";
@@ -331,7 +332,11 @@ function StuckCard({ f, period, id, canManage }: { f: StuckFinding } & CardProps
     <Card
       id={id}
       canManage={canManage}
-      title={`${n(f.booked + f.inTransit)} parcels have not moved for days`}
+      title={
+        f.wroteIn?.orders
+          ? `${n(f.booked + f.inTransit)} parcels have not moved for days; buyers asked about ${n(f.wroteIn.orders)}`
+          : `${n(f.booked + f.inTransit)} parcels have not moved for days`
+      }
       link={{ to: `/orders?${period}&stuck=1`, label: `See the ${n(f.booked + f.inTransit)} orders` }}
     >
       <p>
@@ -340,6 +345,7 @@ function StuckCard({ f, period, id, canManage }: { f: StuckFinding } & CardProps
         {f.placed ? <>Together they hold <strong>{money(f.placed)}</strong> of orders. </> : null}
         The oldest has not moved for {n(f.oldestDays)} days.
       </p>
+      {f.wroteIn ? <WroteIn w={f.wroteIn} to={via(id, `/orders?${period}&stuck=wrote`)} /> : null}
       <ul className="space-y-0.5 text-xs text-gray-600">
         {f.byCourier.slice(0, 4).map((c) => (
           <li key={c.courier}>
@@ -347,8 +353,45 @@ function StuckCard({ f, period, id, canManage }: { f: StuckFinding } & CardProps
           </li>
         ))}
       </ul>
-      <Leaves items={["Only parcels booked through Courierify: the status time is Courierify's own, so a parcel booked elsewhere cannot be judged."]} />
+      <Leaves
+        items={[
+          "Only parcels booked through Courierify: the status time is Courierify's own, so a parcel booked elsewhere cannot be judged.",
+          ...(f.wroteIn
+            ? [
+                "Wrote in: the buyer sent the store a WhatsApp message on WhatKaBot more than a day after ordering, matched by phone. WhatKaBot's own COD confirmation chats don't count.",
+                `Return rates compare decided Courierify orders since the store's WhatKaBot history began. The card calls these parcels the likeliest to come back only with ${MIN_CONTACT_DECIDED}+ orders each side and a gap unlikely to be chance.`,
+              ]
+            : []),
+        ]}
+      />
     </Card>
+  );
+}
+
+/** I7: the stuck parcels whose buyer wrote in, and what writing in has meant at this store. */
+function WroteIn({ w, to }: { w: NonNullable<StuckFinding["wroteIn"]>; to: string }) {
+  const t = w.test;
+  if (!w.orders) return <p>No buyer of these parcels has written to the store on WhatKaBot since ordering.</p>;
+  return (
+    <p>
+      Buyers have written to the store on WhatKaBot about <strong>{n(w.orders)}</strong> of them since ordering
+      {t.significant ? (
+        <>
+          . At this store, orders whose buyer wrote in came back <strong>{t.wrote.rate}%</strong> of the time, against {t.silent.rate}% for the rest
+          ({n(t.wrote.decided)} and {n(t.silent.decided)} decided orders), so these are the likeliest to become returns.{" "}
+        </>
+      ) : t.z !== null ? (
+        <>
+          . Writing in has not meant more returns at this store ({t.wrote.rate}% against {t.silent.rate}% for the rest), but these buyers are already
+          asking.{" "}
+        </>
+      ) : (
+        <>. There are too few decided orders yet to say whether writing in means a return at this store. </>
+      )}
+      <Link to={to} className="whitespace-nowrap text-primary-600 hover:underline">
+        see these orders
+      </Link>
+    </p>
   );
 }
 
@@ -1043,14 +1086,25 @@ function summaryOf(f: Finding, period: string): Summary {
       };
     case "stuck_parcels":
       return {
-        headline: `${n(f.booked + f.inTransit)} parcels have not moved for days`,
+        headline: f.wroteIn?.orders
+          ? `${n(f.booked + f.inTransit)} parcels have not moved for days; buyers asked about ${n(f.wroteIn.orders)}`
+          : `${n(f.booked + f.inTransit)} parcels have not moved for days`,
         figure: f.placed ? figure(f.placed) : n(f.booked + f.inTransit),
-        note: f.placed
-          ? `in ${n(f.booked + f.inTransit)} orders: ${n(f.booked)} booked and never picked up, ${n(f.inTransit)} in transit with no update`
-          : `${n(f.booked)} booked and never picked up, ${n(f.inTransit)} in transit with no update`,
-        next: f.booked ? "Ask the courier to pick up the booked parcels, or cancel the ones that will not ship." : "Ask the courier where the parcels in transit are.",
+        note:
+          f.wroteIn?.orders && f.wroteIn.test.significant
+            ? `here, orders whose buyer wrote in came back ${f.wroteIn.test.wrote.rate}% of the time, against ${f.wroteIn.test.silent.rate}%`
+            : f.placed
+              ? `in ${n(f.booked + f.inTransit)} orders: ${n(f.booked)} booked and never picked up, ${n(f.inTransit)} in transit with no update`
+              : `${n(f.booked)} booked and never picked up, ${n(f.inTransit)} in transit with no update`,
+        next: f.wroteIn?.orders
+          ? `Reply to the ${n(f.wroteIn.orders)} buyer${f.wroteIn.orders === 1 ? "" : "s"} who wrote in, and raise a delivery case with the courier for their parcels first.`
+          : f.booked
+            ? "Ask the courier to pick up the booked parcels, or cancel the ones that will not ship."
+            : "Ask the courier where the parcels in transit are.",
         affects: `${n(f.booked + f.inTransit)} orders`,
-        link: { to: `/orders?${period}&stuck=1`, label: "See orders" },
+        link: f.wroteIn?.orders
+          ? { to: `/orders?${period}&stuck=wrote`, label: `See the ${n(f.wroteIn.orders)} orders` }
+          : { to: `/orders?${period}&stuck=1`, label: "See orders" },
       };
     case "returns_not_received":
       return {
