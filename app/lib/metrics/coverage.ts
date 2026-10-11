@@ -219,6 +219,8 @@ const FEED_LABEL: Record<string, { phrase: string; sections: Section[] }> = {
   "INVENTORIFY:DAILY_SALES": { phrase: "Inventorify units sold", sections: ["inventory"] },
   "INVENTORIFY:STOCK_SNAPSHOT": { phrase: "Inventorify daily stock", sections: ["inventory"] },
   "INVENTORIFY:PURCHASE_ORDER": { phrase: "Inventorify purchase orders", sections: ["inventory"] },
+  "WHATKABOT:CONVERSATION": { phrase: "WhatKaBot conversations", sections: ["inbox"] },
+  "WHATKABOT:MESSAGE": { phrase: "WhatKaBot messages", sections: ["inbox"] },
 };
 
 const ago = (from: Date, asOf: Date) => {
