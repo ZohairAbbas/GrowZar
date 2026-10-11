@@ -37,7 +37,7 @@ import { unfollowedCheckoutsFinding } from "../metrics/checkouts";
 import { offerReturnsFindings } from "../metrics/offers";
 import { returnersFinding } from "../metrics/buyer-history";
 
-export type App = "COURIERIFY" | "FINANCIFY" | "INVENTORIFY" | "RETAINIFY" | "PREVENTIFY";
+export type App = "COURIERIFY" | "FINANCIFY" | "INVENTORIFY" | "RETAINIFY" | "PREVENTIFY" | "WHATKABOT";
 
 export type DetectorId =
   | "outcome_disagreement"
@@ -299,14 +299,14 @@ export const DETECTORS: readonly Detector[] = [
   },
   {
     // I6 as DECISION-LAYER wrote it: COD-form abandonments (Preventify).
-    // Followed up by any Retainify message to the same buyer; with no
-    // Retainify, nothing Growzar reads is set up to remind them.
+    // Followed up by a Retainify message or a WhatKaBot campaign to the same
+    // buyer; with neither connected, nothing Growzar reads can remind them.
     id: "unfollowed_form_abandonments",
     needs: ["PREVENTIFY", "FINANCIFY"],
     label: "COD-form abandonments nobody followed up",
     preview: "Buyers who filled in your COD form, left, and got no reminder",
     run(input) {
-      const f = unfollowedCheckoutsFinding(input.formAbandonments, "cod_form", input.retainifyConnected ?? false);
+      const f = unfollowedCheckoutsFinding(input.formAbandonments, "cod_form", input.reminderAppConnected ?? false);
       if (f.kind === "skip") return f;
       return [insight("unfollowed_form_abandonments", "cod_form", f, { group: "specific", ordersAffected: f.notFollowedUp }, true)];
     },

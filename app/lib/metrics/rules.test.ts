@@ -15,6 +15,7 @@ import { currentStatusTiming } from "../shipments/events";
 import { buildOrderGrain, localDayOf, type OrderGrain, type SourceRow } from "./order-grain";
 import { CurrencyMismatchError, addMoney, sumByCurrency } from "./money";
 import { inventoryView } from "./inventory";
+import { confirmationGroup } from "./matrices";
 import { messagingView } from "./messaging";
 import { checkoutFate } from "./checkouts";
 import { parseConsent } from "./consent";
@@ -380,6 +381,16 @@ describe("rule #25: COD confirmation — Courierify's OrderConfirmation, else Wh
     const c = (id: string, status: string, day: string): SourceRow => ({ app: "COURIERIFY", entity: "CONFIRMATION", externalId: id, sourceUpdatedAt: new Date(day), payload: { status } });
     expect(grain({ confirmations: [c("1", "timed_out", "2026-09-20Z"), c("2", "confirmed", "2026-09-21Z")] }).confirmation).toBe("confirmed");
     expect(allFeeds.find((f) => f.entity === "CONFIRMATION")!.path).toMatch(/confirmations/);
+  });
+
+  it("falls back to WhatKaBot's COD check only where Courierify has no confirmation", () => {
+    const cfy: SourceRow = { app: "COURIERIFY", entity: "CONFIRMATION", externalId: "c", sourceUpdatedAt: new Date("2026-10-01Z"), payload: { status: "timed_out" } };
+    const wkb: SourceRow = { app: "WHATKABOT", entity: "CONFIRMATION", externalId: "w", sourceUpdatedAt: new Date("2026-10-02Z"), payload: { state: "confirmed", status: "confirmed" } };
+    expect(grain({ confirmations: [cfy, wkb] }).confirmation).toBe("timed_out");
+    const g = grain({ confirmations: [wkb] });
+    expect(g.confirmation).toBe("confirmed");
+    expect(g.explain.confirmation?.source).toMatch(/^whatkabot/);
+    expect(confirmationGroup("no_answer")).toBe("no_answer");
   });
 });
 

@@ -284,7 +284,7 @@ async function buildMetrics(
         checkouts: await checkoutsSection(storeId, period),
         formAbandonments: await formAbandonmentsSection(storeId, period),
         offers: await offersSection(storeId, period),
-        retainifyConnected: (await prisma.appConnection.count({ where: { storeId, app: "RETAINIFY", status: "CONNECTED" } })) > 0,
+        reminderAppConnected: (await prisma.appConnection.count({ where: { storeId, app: { in: ["RETAINIFY", "WHATKABOT"] }, status: "CONNECTED" } })) > 0,
         canSeeMoney: viewer.canSeeMoney,
       };
     }
@@ -342,7 +342,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {metrics.kind === "marketing" ? <MarketingPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} /> : null}
           {metrics.kind === "marketing" && metrics.checkouts ? <CheckoutsPanel view={metrics.checkouts} canSeeMoney={metrics.canSeeMoney} /> : null}
           {metrics.kind === "marketing" && metrics.formAbandonments ? (
-            <CheckoutsPanel view={metrics.formAbandonments} canSeeMoney={metrics.canSeeMoney} source="cod_form" retainifyConnected={metrics.retainifyConnected} />
+            <CheckoutsPanel view={metrics.formAbandonments} canSeeMoney={metrics.canSeeMoney} source="cod_form" reminderAppConnected={metrics.reminderAppConnected} />
           ) : null}
           {metrics.kind === "marketing" && metrics.offers ? <OffersPanel view={metrics.offers} canSeeMoney={metrics.canSeeMoney} /> : null}
           {metrics.kind === "marketing" && metrics.messaging ? <MessagingPanel view={metrics.messaging} periodDays={metrics.period.days} /> : null}

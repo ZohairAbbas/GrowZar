@@ -20,7 +20,7 @@ import { normalizeCity, type CityAlias } from "./city-aliases";
 
 /** A synced row as the grain sees it. */
 export type SourceRow = {
-  app: "FINANCIFY" | "COURIERIFY";
+  app: "FINANCIFY" | "COURIERIFY" | "WHATKABOT";
   entity: "ORDER" | "PARCEL" | "CONFIRMATION";
   externalId: string;
   sourceUpdatedAt: Date;
@@ -37,7 +37,7 @@ export type OrderGrainInput = {
   order: SourceRow | null;
   /** Courierify parcels for this order, each with its status events. */
   parcels: Array<{ row: SourceRow; events: readonly TimelineEvent[] }>;
-  /** Courierify confirmation rows for this order. */
+  /** Confirmation rows for this order: Courierify's, and WhatKaBot's COD checks. */
   confirmations: SourceRow[];
   /** Growzar's own customer (rule #19), resolved by the caller. */
   customer: { id: string; via: string } | null;
@@ -484,17 +484,30 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
   };
 
   // ── Confirmation (rule #25) ─────────────────────────────────────────────
-  const latestConfirmation = [...confirmations].sort(
-    (a, b) => b.sourceUpdatedAt.getTime() - a.sourceUpdatedAt.getTime(),
-  )[0];
-  const confirmation =
-    typeof latestConfirmation?.payload.status === "string" ? latestConfirmation.payload.status : null;
-  explain.confirmation = {
-    rule: ["#25"],
-    source: "courierify.confirmations (OrderConfirmation, not OrderCase.stage)",
-    inputs: confirmations.map((c) => ref(c, "status")),
-    note: confirmations.length > 1 ? "several confirmation rows; the latest is used" : undefined,
-  };
+  // Courierify's OrderConfirmation first; WhatKaBot's COD check only for an
+  // order Courierify never confirmed (rule #25's fallback). WhatKaBot's
+  // normalised `state` is pending / confirmed / cancelled / no_answer.
+  const newest = (rows: SourceRow[]) => [...rows].sort((a, b) => b.sourceUpdatedAt.getTime() - a.sourceUpdatedAt.getTime())[0];
+  const fromCourierify = confirmations.filter((c) => c.app !== "WHATKABOT");
+  const fromWhatKaBot = confirmations.filter((c) => c.app === "WHATKABOT");
+  const latestConfirmation = newest(fromCourierify);
+  const latestCodCheck = latestConfirmation ? undefined : newest(fromWhatKaBot);
+  const confirmation = latestConfirmation
+    ? typeof latestConfirmation.payload.status === "string" ? latestConfirmation.payload.status : null
+    : typeof latestCodCheck?.payload.state === "string" ? latestCodCheck.payload.state : null;
+  explain.confirmation = latestCodCheck
+    ? {
+        rule: ["#25"],
+        source: "whatkabot.confirmations (CodOrderCheck), used because Courierify has no confirmation for this order",
+        inputs: fromWhatKaBot.map((c) => ref(c, "state")),
+        note: fromWhatKaBot.length > 1 ? "several COD checks; the latest is used" : undefined,
+      }
+    : {
+        rule: ["#25"],
+        source: "courierify.confirmations (OrderConfirmation, not OrderCase.stage)",
+        inputs: fromCourierify.map((c) => ref(c, "status")),
+        note: fromCourierify.length > 1 ? "several confirmation rows; the latest is used" : undefined,
+      };
 
   // ── Buyer (rule #19) ────────────────────────────────────────────────────
   explain.customerId = {

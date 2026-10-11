@@ -14,8 +14,9 @@ import type { JourneyRow } from "./messaging";
  * - Recovered (rule #24): followed up, then an order within 7 days. An order
  *   with no message before it came back on its own.
  *
- * Only Retainify's messages are seen; a reminder sent by another app looks
- * like no follow-up, and the screen says so.
+ * Reminders seen: any Retainify message, and WhatKaBot's campaign and
+ * playbook sends. A reminder sent by another app looks like no follow-up,
+ * and the screen says so.
  */
 
 export const CONVERTED_MS = 60 * 60_000;
@@ -181,8 +182,8 @@ export function checkoutsView(input: {
 export type UnfollowedCheckoutsFinding = {
   kind: "unfollowed_checkouts";
   source: AbandonmentSource;
-  /** Whether Retainify, the only reminder sender Growzar reads, is connected at all. */
-  retainifyConnected: boolean;
+  /** Whether an app Growzar reads reminders from (Retainify, WhatKaBot) is connected at all. */
+  reminderAppConnected: boolean;
   settled: number;
   notFollowedUp: number;
   notFollowedUpValue: Money[];
@@ -198,7 +199,7 @@ type Skip = { kind: "skip"; status: "not_enough_data" | "nothing_found"; reason:
 export function unfollowedCheckoutsFinding(
   v: CheckoutsView | null | undefined,
   source: AbandonmentSource = "shopify_checkout",
-  retainifyConnected = true,
+  reminderAppConnected = true,
 ): UnfollowedCheckoutsFinding | Skip {
   const what = source === "cod_form" ? "COD-form abandonments" : "abandoned checkouts";
   if (!v) return { kind: "skip", status: "not_enough_data", reason: source === "cod_form" ? "Preventify has sent no form abandonments for this period" : "Retainify has sent no checkouts for this period" };
@@ -212,7 +213,7 @@ export function unfollowedCheckoutsFinding(
   return {
     kind: "unfollowed_checkouts",
     source,
-    retainifyConnected,
+    reminderAppConnected,
     settled: v.settled,
     notFollowedUp: v.notFollowedUp,
     notFollowedUpValue: v.notFollowedUpValue,
