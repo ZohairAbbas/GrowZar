@@ -347,7 +347,7 @@ describe("rule #21: buyer risk — deferred; Preventify's network level is synce
 
 describe("rule #22: consent — Retainify's, shown on Customers; only subscribed and unsuppressed may be messaged", () => {
   it("reads consent only from Retainify, keeps it out of the order grain, and never treats suppressed as reachable", () => {
-    expect(appsSyncing(/consent|opt.?out|unsubscrib/)).toEqual(new Set(["RETAINIFY"]));
+    expect(appsSyncing(/consent|opt.?out|unsubscrib/)).toEqual(new Set(["RETAINIFY", "WHATKABOT"]));
     expect(grainKeys).not.toMatch(/consent|opt.?out|unsubscrib/);
     const c = parseConsent({ contactId: "c", buyer: {}, email: { state: "subscribed", suppressed: true }, whatsapp: { state: "subscribed" }, push: { state: "never_opted_in" } });
     expect(c?.reachable).toEqual({ email: false, whatsapp: true, push: false });
@@ -444,7 +444,7 @@ describe("rule #30: product identity — the variant id; SKU is display-only", (
 
 describe("rule #31: WhatsApp messages and cost — Retainify's messages synced; not shown yet", () => {
   it("reads messages only from Retainify, and keeps them out of the order grain", () => {
-    expect(appsSyncing(/message|conversation|whatsapp/)).toEqual(new Set(["RETAINIFY"]));
+    expect(appsSyncing(/message|conversation|whatsapp/)).toEqual(new Set(["RETAINIFY", "WHATKABOT"]));
     expect(grainKeys).not.toMatch(/message|conversation|whatsapp/);
   });
 });

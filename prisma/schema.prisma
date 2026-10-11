@@ -265,6 +265,17 @@ enum SyncEntity {
   OFFER
   OFFER_EVENT
   FRAUD_EVENT
+  /// WhatKaBot (Phase 5, G-GZR5-12). Its messages, COD confirmations and
+  /// consent reuse MESSAGE, CONFIRMATION, CONSENT and CONSENT_EVENT: every
+  /// reader filters by app, so they never mix with another app's rows.
+  /// Metadata only: WhatKaBot exports no message text (D-55).
+  CONVERSATION
+  CONVERSATION_EVENT
+  CAMPAIGN
+  CAMPAIGN_RECIPIENT
+  COMPLAINT
+  RETURN_CASE
+  SEARCH_MISS
 }
 
 enum SyncRunStatus {

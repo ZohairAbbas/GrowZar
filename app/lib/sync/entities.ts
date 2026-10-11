@@ -49,6 +49,12 @@ export type EntityFeed = {
    */
   tombstoneMatchField?: string;
   /**
+   * Rows of other entities that go with a tombstoned row. WhatKaBot deletes a
+   * conversation's messages with it and lists only the conversation, so the
+   * conversation's tombstone also marks its messages deleted.
+   */
+  tombstoneCascade?: Array<{ entity: SyncEntity; matchField: string }>;
+  /**
    * The row field holding its change time, which the cursor and dedupe run
    * on. `updatedAt` everywhere except the event log, whose rows never change
    * and so carry only `createdAt`.
@@ -378,14 +384,133 @@ const PREVENTIFY_FEEDS: EntityFeed[] = [
   },
 ];
 
+/**
+ * WhatKaBot, from its Phase 5 report (deployed 2026-10-10) and a read-only
+ * probe of every feed (2026-10-11).
+ *
+ * Metadata only (D-55): no message text, summaries, notes or names. The two
+ * history feeds are append-only and stamp `at`, not `updatedAt`, and report
+ * deletions by their parent's id. Delivery times are when WhatKaBot received
+ * each status, from 2026-10-10. Its `shopCountry` is always null, so it never
+ * sets a store's country. Complaint history is not read until a store has a
+ * complaint: its row shape is unseen.
+ */
+const WHATKABOT_FEEDS: EntityFeed[] = [
+  {
+    entity: "CONVERSATION",
+    path: "/api/v1/growzar/conversations",
+    capability: "conversations:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedConversationIds"],
+    tombstoneTruncatedKey: "deletedConversationIdsTruncated",
+    tombstoneCascade: [{ entity: "MESSAGE", matchField: "conversationId" }],
+    pageLimit: 500,
+  },
+  {
+    // Status history, from 2026-10-10.
+    entity: "CONVERSATION_EVENT",
+    path: "/api/v1/growzar/conversation-events",
+    capability: "conversations:read",
+    idFields: ["id"],
+    updatedAtField: "at",
+    tombstoneKeys: ["deletedConversationIds"],
+    tombstoneTruncatedKey: "deletedConversationIdsTruncated",
+    tombstoneMatchField: "conversationId",
+    pageLimit: 500,
+  },
+  {
+    // Customer-facing messages; `author` campaign / playbook / notification
+    // are WhatKaBot's own sends, `system` mixes in Courierify's automations.
+    entity: "MESSAGE",
+    path: "/api/v1/growzar/messages",
+    capability: "messages:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedMessageIds"],
+    tombstoneTruncatedKey: "deletedMessageIdsTruncated",
+    pageLimit: 500,
+  },
+  {
+    // COD order checks: rule #25's fallback where Courierify has none.
+    entity: "CONFIRMATION",
+    path: "/api/v1/growzar/confirmations",
+    capability: "confirmations:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedConfirmationIds"],
+    tombstoneTruncatedKey: "deletedConfirmationIdsTruncated",
+    pageLimit: 500,
+  },
+  {
+    entity: "CONSENT",
+    path: "/api/v1/growzar/consent",
+    capability: "consent:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedConsentIds"],
+    tombstoneTruncatedKey: "deletedConsentIdsTruncated",
+    pageLimit: 500,
+  },
+  {
+    entity: "CONSENT_EVENT",
+    path: "/api/v1/growzar/consent-events",
+    capability: "consent:read",
+    idFields: ["id"],
+    updatedAtField: "at",
+    tombstoneKeys: ["deletedConsentIds"],
+    tombstoneTruncatedKey: "deletedConsentIdsTruncated",
+    tombstoneMatchField: "consentId",
+    pageLimit: 500,
+  },
+  {
+    entity: "CAMPAIGN",
+    path: "/api/v1/growzar/campaigns",
+    capability: "campaigns:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedCampaignIds"],
+    tombstoneTruncatedKey: "deletedCampaignIdsTruncated",
+  },
+  {
+    entity: "CAMPAIGN_RECIPIENT",
+    path: "/api/v1/growzar/campaign-recipients",
+    capability: "campaigns:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedCampaignIds"],
+    tombstoneTruncatedKey: "deletedCampaignIdsTruncated",
+    tombstoneMatchField: "campaignId",
+    pageLimit: 500,
+  },
+  {
+    entity: "COMPLAINT",
+    path: "/api/v1/growzar/complaints",
+    capability: "complaints:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedComplaintIds"],
+    tombstoneTruncatedKey: "deletedComplaintIdsTruncated",
+  },
+  {
+    entity: "RETURN_CASE",
+    path: "/api/v1/growzar/returns",
+    capability: "returns:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedReturnIds"],
+    tombstoneTruncatedKey: "deletedReturnIdsTruncated",
+  },
+  {
+    // What buyers asked for that the catalogue didn't have, as aggregate terms.
+    entity: "SEARCH_MISS",
+    path: "/api/v1/growzar/product-search-misses",
+    capability: "product-search-misses:read",
+    idFields: ["id"],
+    tombstoneKeys: ["deletedSearchMissIds"],
+    tombstoneTruncatedKey: "deletedSearchMissIdsTruncated",
+  },
+];
+
 export const APP_FEEDS: Partial<Record<SuiteApp, EntityFeed[]>> = {
   COURIERIFY: COURIERIFY_FEEDS,
   FINANCIFY: FINANCIFY_FEEDS,
   INVENTORIFY: INVENTORIFY_FEEDS,
   RETAINIFY: RETAINIFY_FEEDS,
   PREVENTIFY: PREVENTIFY_FEEDS,
-  // WhatKaBot's conversations are still to come; until then it reports
-  // installation state only (§12).
+  WHATKABOT: WHATKABOT_FEEDS,
 };
 
 export function feedsFor(app: SuiteApp): EntityFeed[] {
