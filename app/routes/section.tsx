@@ -50,6 +50,8 @@ import { consentSection } from "~/lib/metrics/consent.server";
 import { ConsentPanel } from "~/components/metrics/ConsentPanel";
 import { buyerHistorySection } from "~/lib/metrics/buyer-history.server";
 import { BuyerHistoryPanel } from "~/components/metrics/BuyerHistoryPanel";
+import { conversationsSection } from "~/lib/metrics/conversations.server";
+import { ConversationsPanel } from "~/components/metrics/ConversationsPanel";
 import { FilterBar } from "~/components/metrics/FilterBar";
 import { previousPeriod, withoutComparison } from "~/lib/metrics/compare";
 import { NO_SCOPE, parseScope, scopeQuery } from "~/lib/metrics/scope";
@@ -174,7 +176,7 @@ export async function loader({ request, url }: Route.LoaderArgs) {
   };
 }
 
-const METRIC_SECTIONS = new Set<Section>(["home", "finance", "orders", "shipping", "customers", "marketing", "inventory"]);
+const METRIC_SECTIONS = new Set<Section>(["home", "finance", "orders", "shipping", "customers", "marketing", "inventory", "inbox"]);
 
 async function buildMetrics(
   section: Section,
@@ -186,7 +188,7 @@ async function buildMetrics(
   const period = periodFrom(url, store.timezone);
   // Home's insights are store-wide, so Home takes no courier or city; stock
   // has neither.
-  const storeWide = section === "home" || section === "inventory";
+  const storeWide = section === "home" || section === "inventory" || section === "inbox";
   const scope = storeWide ? NO_SCOPE : parseScope(url.searchParams);
   const before = previousPeriod(period.from, period.to);
   const [summary, prev, first] = await Promise.all([
@@ -286,6 +288,16 @@ async function buildMetrics(
         canSeeMoney: viewer.canSeeMoney,
       };
     }
+    case "inbox": {
+      const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { shopDomain: true } });
+      return {
+        ...base,
+        kind: "inbox" as const,
+        view: await conversationsSection(storeId, period),
+        // WhatKaBot's app in the merchant's own Shopify admin; it exports no link to a single conversation.
+        whatkabotUrl: `https://admin.shopify.com/store/${store.shopDomain.replace(/\.myshopify\.com$/, "")}/apps/whatkabot`,
+      };
+    }
     case "inventory":
       return { ...base, kind: "inventory" as const, view: await inventorySection(storeId, period, summary.store.currency) };
     default:
@@ -339,6 +351,10 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} canSeeMoney={metrics.canSeeMoney} canMessage={metrics.consent?.byCustomer ?? null} /> : null}
           {metrics.kind === "customers" && metrics.buyerHistory ? <BuyerHistoryPanel view={metrics.buyerHistory} /> : null}
           {metrics.kind === "customers" && metrics.consent ? <ConsentPanel view={metrics.consent.view} periodDays={metrics.period.days} /> : null}
+          {metrics.kind === "inbox" && metrics.view ? <ConversationsPanel view={metrics.view} periodDays={metrics.period.days} whatkabotUrl={metrics.whatkabotUrl} /> : null}
+          {metrics.kind === "inbox" && !metrics.view ? (
+            <section className="rounded-2xl bg-white p-8 text-sm text-gray-600">WhatKaBot is connected; its conversations arrive with the next sync.</section>
+          ) : null}
           {metrics.kind === "inventory" ? <InventoryPanel view={metrics.view} periodDays={metrics.period.days} /> : null}
         </div>
       ) : null}
