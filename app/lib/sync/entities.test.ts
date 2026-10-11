@@ -104,3 +104,27 @@ describe("Preventify feeds", () => {
     expect(preventify.filter((x) => x.tombstoneKeys.length === 0).map((x) => x.entity)).toEqual(["FORM_SETTINGS", "FORM_SETTINGS_CHANGE"]);
   });
 });
+
+const whatkabot = feedsFor("WHATKABOT");
+
+describe("WhatKaBot feeds", () => {
+  it("reads eleven feeds behind its eight capabilities (complaint history waits for a first complaint)", () => {
+    expect(whatkabot.map((f) => f.path.replace("/api/v1/growzar/", ""))).toEqual([
+      "conversations", "conversation-events", "messages", "confirmations", "consent", "consent-events",
+      "campaigns", "campaign-recipients", "complaints", "returns", "product-search-misses",
+    ]);
+    expect(new Set(whatkabot.map((f) => f.capability))).toEqual(
+      new Set(["conversations:read", "messages:read", "confirmations:read", "consent:read", "campaigns:read", "complaints:read", "returns:read", "product-search-misses:read"]),
+    );
+  });
+
+  it("times the two history feeds by `at` and matches their deletions on the parent", () => {
+    const ev = whatkabot.filter((f) => f.updatedAtField === "at").map((f) => [f.entity, f.tombstoneMatchField]);
+    expect(ev).toEqual([["CONVERSATION_EVENT", "conversationId"], ["CONSENT_EVENT", "consentId"]]);
+    expect(whatkabot.find((f) => f.entity === "CAMPAIGN_RECIPIENT")!.tombstoneMatchField).toBe("campaignId");
+  });
+
+  it("deletes a conversation's messages with it", () => {
+    expect(whatkabot.find((f) => f.entity === "CONVERSATION")!.tombstoneCascade).toEqual([{ entity: "MESSAGE", matchField: "conversationId" }]);
+  });
+});

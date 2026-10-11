@@ -349,6 +349,13 @@ async function writePage(options: {
       data: { deletedAt: new Date(), lastSeenAt: new Date() },
     });
     tombstoned += count;
+    for (const c of feed.tombstoneCascade ?? []) {
+      const cascaded = await prisma.rawRecord.updateMany({
+        where: { storeId, app, entity: c.entity, deletedAt: null, payload: { path: [c.matchField], equals: tombstoneId } },
+        data: { deletedAt: new Date(), lastSeenAt: new Date() },
+      });
+      tombstoned += cascaded.count;
+    }
   }
 
   // The app had more deletions than it could return. "No tombstones" and "too
