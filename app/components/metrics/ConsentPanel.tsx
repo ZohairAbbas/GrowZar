@@ -8,6 +8,7 @@ export type ConsentPanelView = {
   buyers: number;
   reachableBuyers: Record<Channel | "any", number>;
   reachableContacts: Record<Channel, number>;
+  whatkabot: { numbers: number; marketingIn: number; marketingOut: number; marketingUnknown: number; utilityIn: number } | null;
   changes: Array<{ channel: Channel; optedIn: number; optedOut: number; reasons: Array<{ reason: string; count: number }> }>;
 };
 
@@ -32,15 +33,22 @@ export function ConsentPanel({ view, periodDays }: { view: ConsentPanelView; per
     <div className="rounded-2xl bg-white p-5">
       <h2 className="font-display text-lg font-bold text-gray-900">Who you can message</h2>
       <p className="mt-1 text-sm text-gray-600">
-        From Retainify's consent. {n(view.matchedBuyers)} of your {n(view.buyers)} buyers matched a Retainify contact by phone (
+        From Retainify's consent{view.whatkabot ? " and WhatKaBot's WhatsApp consent" : ""}. {n(view.matchedBuyers)} of your {n(view.buyers)} buyers matched a contact by phone (
         {pct(view.matchedBuyers, view.buyers)}).
       </p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Figure label="May be messaged at all" value={view.reachableBuyers.any} note={`Of ${n(view.matchedBuyers)} matched buyers`} />
         {(["email", "whatsapp", "push"] as const).map((c) => (
-          <Figure key={c} label={CHANNEL_NAME[c]} value={view.reachableBuyers[c]} note={`${n(view.reachableContacts[c])} of ${n(view.contacts)} Retainify contacts`} />
+          <Figure key={c} label={CHANNEL_NAME[c]} value={view.reachableBuyers[c]} note={`${n(view.reachableContacts[c])} of ${n(view.contacts)} contacts`} />
         ))}
       </div>
+      {view.whatkabot ? (
+        <p className="mt-4 text-sm text-gray-700">
+          WhatKaBot holds WhatsApp consent for {n(view.whatkabot.numbers)} numbers: {n(view.whatkabot.marketingIn)} agreed to marketing,{" "}
+          {n(view.whatkabot.marketingOut)} opted out and {n(view.whatkabot.marketingUnknown)} were never asked; {n(view.whatkabot.utilityIn)} accept order
+          updates, which are not marketing. A WhatKaBot opt-out wins over Retainify on WhatsApp.
+        </p>
+      ) : null}
       <p className="mt-4 text-sm text-gray-700">
         {changed.length
           ? changed
@@ -54,7 +62,7 @@ export function ConsentPanel({ view, periodDays }: { view: ConsentPanelView; per
       </p>
       <ul className="mt-3 list-disc space-y-0.5 pl-5 text-xs text-gray-500">
         <li>May be messaged: Retainify says subscribed on that channel and the buyer is not suppressed (unsubscribed, bounced, blocked).</li>
-        <li>Retainify keeps the history of changes from 8 October 2026; earlier changes are not known. WhatKaBot's consent is not read yet.</li>
+        <li>History of changes starts on 8 October 2026 (Retainify) and 10 October 2026 (WhatKaBot); earlier changes are not known.</li>
       </ul>
     </div>
   );

@@ -35,12 +35,12 @@ export function CheckoutsPanel({
   view,
   canSeeMoney,
   source = "shopify_checkout",
-  retainifyConnected = true,
+  reminderAppConnected = true,
 }: {
   view: CheckoutsPanelView;
   canSeeMoney: boolean;
   source?: "shopify_checkout" | "cod_form";
-  retainifyConnected?: boolean;
+  reminderAppConnected?: boolean;
 }) {
   const m = (x: Money[]) => (canSeeMoney ? x : undefined);
   const form = source === "cod_form";
@@ -61,9 +61,9 @@ export function CheckoutsPanel({
       </div>
       {form ? (
         <p className="mt-4 text-sm text-gray-700">
-          {retainifyConnected
-            ? "Reminders are any Retainify message to the same buyer by phone."
-            : "Retainify is not connected to this store, so Growzar sees no reminders to these buyers."}
+          {reminderAppConnected
+            ? "Reminders are any Retainify message, or WhatKaBot campaign or playbook send, to the same buyer by phone."
+            : "Neither Retainify nor WhatKaBot is connected to this store, so Growzar sees no reminders to these buyers."}
         </p>
       ) : view.cartJourneys.length ? (
         <ul className="mt-4 space-y-1 text-sm text-gray-700">
@@ -79,8 +79,8 @@ export function CheckoutsPanel({
       )}
       <ul className="mt-3 list-disc space-y-0.5 pl-5 text-xs text-gray-500">
         <li>
-          A reminder is any Retainify message for that checkout, or to the same buyer by email or phone, within 7 days and before an order.
-          Messages sent by other apps are not seen.
+          A reminder is any Retainify message for that checkout, or to the same buyer by email or phone, or a WhatKaBot campaign or playbook
+          send to them, within 7 days and before an order. Messages sent by other apps are not seen.
         </li>
         <li>
           Value is what was in the {form ? "form, from Preventify" : "checkout, from Retainify"}; recovered means a reminder, then an order

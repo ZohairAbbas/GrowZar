@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { consentView, parseConsent, parseConsentEvent, reachableByCustomer, type ConsentContact } from "./consent";
+import { consentView, parseConsent, parseConsentEvent, parseWhatKaBotConsent, parseWhatKaBotConsentEvent, reachableByCustomer, type ConsentContact } from "./consent";
 
 const contact = (id: string, customerId: string | null, reachable: Partial<ConsentContact["reachable"]> = {}) => ({
   contactId: id, phoneE164: null, phoneRaw: null, customerId, reachable: { email: false, whatsapp: false, push: false, ...reachable },
@@ -46,5 +46,25 @@ describe("consentView", () => {
 
   it("lists the channels each buyer may be messaged on", () => {
     expect(reachableByCustomer([contact("a", "c1", { push: true }), contact("b", "c1", { email: true })]).get("c1")).toEqual(["email", "push"]);
+  });
+});
+
+describe("WhatKaBot's WhatsApp consent", () => {
+  it("reads marketing as WhatsApp reachability, and keeps order updates apart", () => {
+    const c = parseWhatKaBotConsent({ id: "k1", channel: "whatsapp", phone: "+923000001234", phoneRaw: "03000001234", marketing: null, marketingState: "unknown", utility: true, utilityState: "opted_in" });
+    expect(c).toMatchObject({ contactId: "whatkabot:k1", reachable: { email: false, whatsapp: false, push: false }, whatsappOptOut: false, utilityIn: true });
+  });
+
+  it("lets a WhatKaBot opt-out win over a Retainify WhatsApp opt-in for the same buyer", () => {
+    const retainify = contact("r", "c1", { whatsapp: true, email: true });
+    const wkb = { ...contact("whatkabot:k", "c1"), whatsappOptOut: true };
+    expect(consentView({ contacts: [retainify, wkb], events: [], buyers: 1 }).reachableBuyers).toMatchObject({ whatsapp: 0, email: 1, any: 1 });
+    expect(reachableByCustomer([retainify, wkb]).get("c1")).toEqual(["email"]);
+  });
+
+  it("reads its marketing changes as WhatsApp opt-ins and opt-outs, skipping the baseline", () => {
+    expect(parseWhatKaBotConsentEvent({ consentId: "k", channel: "whatsapp", field: "marketing", from: "opted_in", to: "opted_out", source: "stop_keyword", at: "2026-10-10T12:00:00Z" })).toMatchObject({ channel: "whatsapp", from: "subscribed", to: "unsubscribed" });
+    expect(parseWhatKaBotConsentEvent({ field: "marketing", to: "opted_in", source: "baseline", at: "2026-10-10T12:00:00Z" })).toBeNull();
+    expect(parseWhatKaBotConsentEvent({ field: "utility", to: "opted_out", source: "stop_keyword", at: "2026-10-10T12:00:00Z" })).toBeNull();
   });
 });

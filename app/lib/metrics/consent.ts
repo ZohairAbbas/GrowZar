@@ -5,7 +5,12 @@
  * Retainify owns consent; Growzar only shows it. A buyer may be messaged on a
  * channel when Retainify says subscribed and not suppressed. Buyers are
  * matched to the store's customers by phone (Growzar's customers have no
- * email identity yet). WhatKaBot's consent is not read.
+ * email identity yet).
+ *
+ * WhatKaBot's WhatsApp consent joins it (G-GZR5-14): WhatKaBot sends the
+ * store's WhatsApp, so its marketing opt-out wins over a Retainify opt-in on
+ * that channel. Its utility consent (order updates) is reported apart: it
+ * allows order messages, not marketing.
  */
 
 export type ConsentChannel = "email" | "whatsapp" | "push";
@@ -17,7 +22,39 @@ export type ConsentContact = {
   phoneRaw: string | null;
   /** Channels this contact may be messaged on today. */
   reachable: Record<ConsentChannel, boolean>;
+  /** WhatKaBot says this number opted out of WhatsApp marketing. */
+  whatsappOptOut?: boolean;
 };
+
+export type WhatKaBotConsentSummary = { numbers: number; marketingIn: number; marketingOut: number; marketingUnknown: number; utilityIn: number };
+
+/** WhatKaBot's `MessagingConsent` row as a contact: WhatsApp only, marketing decides. */
+export function parseWhatKaBotConsent(p: unknown): (ConsentContact & { utilityIn: boolean; marketingState: string }) | null {
+  const r = obj(p);
+  const id = str(r.id);
+  if (!id) return null;
+  const marketingState = str(r.marketingState) ?? (r.marketing === true ? "opted_in" : r.marketing === false ? "opted_out" : "unknown");
+  return {
+    contactId: `whatkabot:${id}`,
+    phoneE164: str(r.phone),
+    phoneRaw: str(r.phoneRaw),
+    reachable: { email: false, whatsapp: marketingState === "opted_in", push: false },
+    whatsappOptOut: marketingState === "opted_out",
+    utilityIn: r.utility === true || r.utilityState === "opted_in",
+    marketingState,
+  };
+}
+
+/** WhatKaBot's consent history, marketing changes only, in the shape of Retainify's. */
+export function parseWhatKaBotConsentEvent(p: unknown): ConsentEvent | null {
+  const r = obj(p);
+  if (r.field !== "marketing" || r.source === "baseline") return null;
+  const at = typeof r.at === "string" && !Number.isNaN(Date.parse(r.at)) ? new Date(r.at) : null;
+  const state = (v: unknown) => (v === "opted_in" || v === true ? "subscribed" : v === "opted_out" || v === false ? "unsubscribed" : null);
+  const to = state(r.to);
+  if (!at || !to) return null;
+  return { channel: "whatsapp", from: state(r.from), to, reason: str(r.source), createdAt: at };
+}
 
 export type ConsentEvent = {
   channel: ConsentChannel;
@@ -64,6 +101,8 @@ export type ConsentView = {
   reachableBuyers: Record<ConsentChannel | "any", number>;
   /** Of all contacts, how many may be messaged on each channel. */
   reachableContacts: Record<ConsentChannel, number>;
+  /** WhatKaBot's WhatsApp consent, when it has any for the store. */
+  whatkabot: WhatKaBotConsentSummary | null;
   /** Changes in the period: opted in or out, per channel, with the reasons for opting out. */
   changes: Array<{ channel: ConsentChannel; optedIn: number; optedOut: number; reasons: Array<{ reason: string; count: number }> }>;
 };
@@ -74,14 +113,19 @@ export function consentView(input: {
   contacts: ReadonlyArray<ConsentContact & { customerId: string | null }>;
   events: readonly ConsentEvent[];
   buyers: number;
+  whatkabot?: WhatKaBotConsentSummary | null;
 }): ConsentView {
   const byCustomer = new Map<string, Record<ConsentChannel, boolean>>();
+  const whatsappOut = new Set<string>();
   for (const c of input.contacts) {
     if (!c.customerId) continue;
+    if (c.whatsappOptOut) whatsappOut.add(c.customerId);
     const prev = byCustomer.get(c.customerId) ?? { email: false, whatsapp: false, push: false };
     // A buyer with two contacts (two emails, one phone) may be messaged if either may.
     byCustomer.set(c.customerId, { email: prev.email || c.reachable.email, whatsapp: prev.whatsapp || c.reachable.whatsapp, push: prev.push || c.reachable.push });
   }
+  // WhatKaBot's WhatsApp opt-out wins on its own channel.
+  for (const id of whatsappOut) byCustomer.get(id)!.whatsapp = false;
   const reached = [...byCustomer.values()];
   const count = (pred: (r: Record<ConsentChannel, boolean>) => boolean) => reached.filter(pred).length;
 
@@ -100,6 +144,7 @@ export function consentView(input: {
 
   return {
     contacts: input.contacts.length,
+    whatkabot: input.whatkabot ?? null,
     matchedBuyers: byCustomer.size,
     buyers: input.buyers,
     reachableBuyers: {
@@ -120,11 +165,14 @@ export function consentView(input: {
 /** Channels each customer may be messaged on, for the buyers table. */
 export function reachableByCustomer(contacts: ReadonlyArray<ConsentContact & { customerId: string | null }>): Map<string, ConsentChannel[]> {
   const m = new Map<string, Set<ConsentChannel>>();
+  const out = new Set<string>();
   for (const c of contacts) {
     if (!c.customerId) continue;
+    if (c.whatsappOptOut) out.add(c.customerId);
     const s = m.get(c.customerId) ?? new Set<ConsentChannel>();
     for (const ch of CONSENT_CHANNELS) if (c.reachable[ch]) s.add(ch);
     m.set(c.customerId, s);
   }
+  for (const id of out) m.get(id)?.delete("whatsapp");
   return new Map([...m.entries()].map(([k, s]) => [k, CONSENT_CHANNELS.filter((ch) => s.has(ch))]));
 }

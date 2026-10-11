@@ -58,6 +58,8 @@ async function load(storeId: string): Promise<Loaded> {
       OR: [
         { app: "FINANCIFY", entity: "ORDER" },
         { app: "COURIERIFY", entity: { in: ["PARCEL", "CONFIRMATION"] } },
+        // WhatKaBot's COD checks: rule #25's fallback where Courierify has none.
+        { app: "WHATKABOT", entity: "CONFIRMATION" },
       ],
     },
     select: { app: true, entity: true, externalId: true, sourceUpdatedAt: true, payload: true },

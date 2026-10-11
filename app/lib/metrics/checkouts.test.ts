@@ -88,7 +88,7 @@ describe("COD-form abandonments (Preventify)", () => {
       journeys: [{ id: "j", name: "Abandoned Cart", kind: "flow", trigger: "cart_abandoned", status: "paused" }],
       lastSentByJourney: new Map(), now: new Date("2026-10-20T00:00:00Z"),
     });
-    expect(unfollowedCheckoutsFinding(v, "cod_form", false)).toMatchObject({ source: "cod_form", retainifyConnected: false, pausedJourney: null, notFollowedUp: 25 });
+    expect(unfollowedCheckoutsFinding(v, "cod_form", false)).toMatchObject({ source: "cod_form", reminderAppConnected: false, pausedJourney: null, notFollowedUp: 25 });
     expect(unfollowedCheckoutsFinding(null, "cod_form", false)).toMatchObject({ status: "not_enough_data", reason: expect.stringMatching(/Preventify/) });
   });
 });

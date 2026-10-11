@@ -403,7 +403,7 @@ function UnfollowedCheckoutsCard({ f, period, id, canManage }: { f: UnfollowedCh
           ? `${n(f.settled)} buyers filled in your COD form and left (Preventify), did not order within the hour, and their 7 days to come back are over. `
           : `${n(f.settled)} checkouts were started and never became an order within the hour, and their 7 days to come back are over. `}
         <strong>
-          {n(f.notFollowedUp)} got no message from Retainify{f.retainifyConnected ? "" : ", which is not connected to this store"}
+          {n(f.notFollowedUp)} got no reminder{f.reminderAppConnected ? " from Retainify or a WhatKaBot campaign" : ": neither Retainify nor WhatKaBot is connected to this store"}
         </strong>
         {f.notFollowedUpValue.length ? <> (carts worth <MoneyList values={f.notFollowedUpValue} />)</> : null}.{" "}
         {n(f.recovered)} came back after a reminder; {n(f.cameBack)} came back on their own.
@@ -416,7 +416,7 @@ function UnfollowedCheckoutsCard({ f, period, id, canManage }: { f: UnfollowedCh
       ) : null}
       <Leaves
         items={[
-          "Only Retainify's messages are seen: a reminder sent by WhatsApp from another app counts as none.",
+          "Reminders seen: any Retainify message, and WhatKaBot's campaign and playbook sends. Order updates and replies in a chat don't count, nor does a reminder from another app.",
           f.source === "cod_form"
             ? "Value is what was in the form, from Preventify (on stores selling in several currencies it may be in the buyer's), not what a reminder would bring back."
             : "Cart value is what was in the checkout, not what a reminder would bring back.",
@@ -1025,7 +1025,7 @@ function summaryOf(f: Finding, period: string): Summary {
         next: f.pausedJourney
           ? `Turn Retainify's “${f.pausedJourney.name}” journey back on.`
           : f.source === "cod_form"
-            ? f.retainifyConnected
+            ? f.reminderAppConnected
               ? "Remind COD-form leavers from Retainify or WhatKaBot."
               : "Connect Retainify or WhatKaBot to remind COD-form leavers."
             : "Turn on a cart reminder in Retainify.",

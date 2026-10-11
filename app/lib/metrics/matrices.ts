@@ -349,6 +349,8 @@ const CONFIRMATION_GROUP: Record<string, string> = {
   declined: "declined",
   cancelled: "declined",
   timed_out: "no_answer",
+  // WhatKaBot's COD-check state for an unreachable buyer (rule #25's fallback).
+  no_answer: "no_answer",
   expired: "no_answer",
   ambiguous: "unclear",
   sent: "awaiting",

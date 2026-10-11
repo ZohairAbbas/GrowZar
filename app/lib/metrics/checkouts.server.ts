@@ -50,7 +50,7 @@ async function abandonmentsSection(
 
   const first = Math.min(...parsed.map((c) => c.startedAt.getTime()));
   const last = Math.max(...parsed.map((c) => c.startedAt.getTime())) + RECOVERY_MS;
-  const [messageRows, journeyRows, lastSent] = await Promise.all([
+  const [messageRows, journeyRows, lastSent, wkbRows] = await Promise.all([
     prisma.$queryRaw<Payload[]>`
       SELECT payload FROM raw_records
       WHERE "storeId" = ${storeId} AND app = 'RETAINIFY' AND entity = 'MESSAGE' AND "deletedAt" IS NULL
@@ -62,6 +62,16 @@ async function abandonmentsSection(
       SELECT payload->>'journeyId' AS "journeyId", MAX(payload->>'sentAt') AS "lastSent" FROM raw_records
       WHERE "storeId" = ${storeId} AND app = 'RETAINIFY' AND entity = 'MESSAGE' AND "deletedAt" IS NULL AND payload->>'sentAt' IS NOT NULL
       GROUP BY 1`,
+    // WhatKaBot's own proactive sends. Only campaigns and playbooks are
+    // reminders: its "notification" messages are order updates (COD
+    // confirmations, review requests) and "system" mixes in Courierify's.
+    prisma.$queryRaw<Array<{ phone: string | null; phoneRaw: string | null; createdAt: string }>>`
+      SELECT payload->'customer'->>'phone' AS phone, payload->'customer'->>'phoneRaw' AS "phoneRaw", payload->>'createdAt' AS "createdAt"
+      FROM raw_records
+      WHERE "storeId" = ${storeId} AND app = 'WHATKABOT' AND entity = 'MESSAGE' AND "deletedAt" IS NULL
+        AND payload->>'direction' = 'outbound' AND payload->>'author' IN ('campaign', 'playbook')
+        AND payload->>'deliveryStatus' IS DISTINCT FROM 'failed'
+        AND payload->>'createdAt' >= ${new Date(first).toISOString()} AND payload->>'createdAt' <= ${new Date(last).toISOString()}`,
   ]);
   const messages = messageRows
     .map((r) => ({ m: parseMessage(r.payload), raw: r.payload as Record<string, unknown> }))
@@ -70,6 +80,7 @@ async function abandonmentsSection(
   const customerOf = await customersByPhone(storeId, [
     ...parsed.map((c) => buyerPhone(c.phoneE164, c.phoneRaw, store.country)),
     ...messages.map(({ m }) => buyerPhone(m.phoneE164, m.phoneRaw, store.country)),
+    ...wkbRows.map((r) => buyerPhone(r.phone, r.phoneRaw, store.country)),
   ]);
   const customer = (e164: string | null, raw: string | null) => {
     const p = buyerPhone(e164, raw, store.country);
@@ -88,15 +99,20 @@ async function abandonmentsSection(
 
   return checkoutsView({
     checkouts,
-    messages: messages.map(({ m, raw }) => {
-      const buyer = (raw.buyer && typeof raw.buyer === "object" ? raw.buyer : {}) as Record<string, unknown>;
-      return {
-        checkoutToken: typeof raw.checkoutToken === "string" ? raw.checkoutToken : null,
-        email: normalizeEmail(typeof buyer.email === "string" ? buyer.email : null),
-        customerId: customer(m.phoneE164, m.phoneRaw),
-        sentAt: m.sentAt!,
-      };
-    }),
+    messages: [
+      ...messages.map(({ m, raw }) => {
+        const buyer = (raw.buyer && typeof raw.buyer === "object" ? raw.buyer : {}) as Record<string, unknown>;
+        return {
+          checkoutToken: typeof raw.checkoutToken === "string" ? raw.checkoutToken : null,
+          email: normalizeEmail(typeof buyer.email === "string" ? buyer.email : null),
+          customerId: customer(m.phoneE164, m.phoneRaw),
+          sentAt: m.sentAt!,
+        };
+      }),
+      ...wkbRows
+        .filter((r) => !Number.isNaN(Date.parse(r.createdAt)))
+        .map((r) => ({ checkoutToken: null, email: null, customerId: customer(r.phone, r.phoneRaw), sentAt: new Date(r.createdAt) })),
+    ],
     orderTimes,
     // Retainify's cart journeys answer Shopify checkouts, not COD forms.
     journeys: entity === "CHECKOUT" ? journeyRows.map((r) => parseJourney(r.payload)).filter((j): j is NonNullable<typeof j> => j !== null) : [],

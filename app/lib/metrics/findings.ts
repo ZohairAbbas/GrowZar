@@ -389,8 +389,8 @@ export type FindingsInput = {
   checkouts?: CheckoutsView | null;
   /** I6 on COD forms: the period's Preventify form abandonments and their follow-up. */
   formAbandonments?: CheckoutsView | null;
-  /** Whether Retainify, the only reminder sender Growzar reads, is connected. */
-  retainifyConnected?: boolean;
+  /** Whether an app Growzar reads reminders from (Retainify, WhatKaBot) is connected. */
+  reminderAppConnected?: boolean;
   /** I9: Preventify's form orders by offer, with outcomes, when Preventify is connected. */
   offers?: OffersView | null;
   /** I5 per store: the period's orders by the buyer's earlier history (D-51). */

@@ -50,7 +50,7 @@ export async function detectorInput(
   const viaCourierify = s.rows.filter((o) => o.parcelCount > 0).map((o) => o.orderId);
   const [connections, lastParcel, payers, awaiting, perProduct, returnCost, parcels, statements] = await Promise.all([
     prisma.appConnection.findMany({
-      where: { storeId: s.store.id, status: "CONNECTED", app: { in: ["COURIERIFY", "FINANCIFY", "INVENTORIFY", "RETAINIFY", "PREVENTIFY"] } },
+      where: { storeId: s.store.id, status: "CONNECTED", app: { in: ["COURIERIFY", "FINANCIFY", "INVENTORIFY", "RETAINIFY", "PREVENTIFY", "WHATKABOT"] } },
       select: { app: true },
     }),
     prisma.orderGrain.findFirst({
@@ -105,7 +105,7 @@ export async function detectorInput(
       inventory,
       checkouts,
       formAbandonments,
-      retainifyConnected: connected.has("RETAINIFY"),
+      reminderAppConnected: connected.has("RETAINIFY") || connected.has("WHATKABOT"),
       offers,
       buyerHistory,
     },
@@ -190,7 +190,7 @@ export type InboxView = {
   canManage: boolean;
 };
 
-const APP_NAMES: Record<App, string> = { COURIERIFY: "Courierify", FINANCIFY: "Financify", INVENTORIFY: "Inventorify", RETAINIFY: "Retainify", PREVENTIFY: "Preventify" };
+const APP_NAMES: Record<App, string> = { COURIERIFY: "Courierify", FINANCIFY: "Financify", INVENTORIFY: "Inventorify", RETAINIFY: "Retainify", PREVENTIFY: "Preventify", WHATKABOT: "WhatKaBot" };
 
 export async function inboxView(
   s: StoreSummary,
