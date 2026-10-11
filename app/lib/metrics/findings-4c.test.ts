@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deductionFindings, notReceivedFinding, stuckFinding, type FindingsInput } from "./findings";
+import { deductionFindings, matchesFilter, notReceivedFinding, orderFilterQuery, parseOrderFilter, stuckFinding, type FindingsInput } from "./findings";
 import { bucketOf, type RollupOrder } from "./rollups";
 import type { Statement } from "./settlements";
 import type { ParcelFacts } from "./returns";
@@ -32,6 +32,22 @@ describe("stuck parcels", () => {
   });
   it("says nothing under the threshold", () => {
     expect(stuckFinding(input([order({ outcome: "booked", delivered: null, outcomeTiming: old })]))).toMatchObject({ status: "nothing_found" });
+  });
+  it("counts the stuck parcels whose buyer wrote in on WhatKaBot after ordering, and lists them with stuck=wrote (I7)", () => {
+    const rows = [
+      order({ outcome: "booked", delivered: null, outcomeTiming: old, customerId: "c1" }),
+      order({ outcome: "booked", delivered: null, outcomeTiming: old, customerId: "c2" }),
+      ...times(3, () => order({ outcome: "in_transit", delivered: null, outcomeTiming: old })),
+    ];
+    // c1 wrote on day 3; c2 only within the first day, which is the COD confirmation.
+    const contact = { since: new Date("2026-09-01T00:00:00Z"), byCustomer: new Map([["c1", [new Date("2026-09-23T00:00:00Z")]], ["c2", [new Date("2026-09-20T06:00:00Z")]]]) };
+    const test = { wrote: { decided: 40, returned: 12, rate: 30 }, silent: { decided: 400, returned: 40, rate: 10 }, z: 3.6, significant: true };
+    const f = stuckFinding(input(rows, { buyerContact: { contact, test } }));
+    expect(f).toMatchObject({ kind: "stuck_parcels", wroteIn: { orders: 1, test: { significant: true } } });
+    const filter = parseOrderFilter(new URLSearchParams("stuck=wrote"))!;
+    expect(orderFilterQuery(filter)).toBe("stuck=wrote");
+    expect(rows.filter((o) => matchesFilter(o, filter, "PKR", { asOf, contact })).map((o) => o.customerId)).toEqual(["c1"]);
+    expect(stuckFinding(input(rows))).toMatchObject({ wroteIn: null });
   });
 });
 

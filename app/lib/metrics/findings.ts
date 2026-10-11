@@ -28,6 +28,7 @@ import type { StockoutFinding } from "./stockout";
 import type { CheckoutsView, UnfollowedCheckoutsFinding } from "./checkouts";
 import type { OfferReturnsFinding, OffersView } from "./offers";
 import type { BuyerHistoryView, ReturnersFinding } from "./buyer-history";
+import { wroteAfterOrdering, type BuyerContact, type BuyerContactSection, type ContactReturnTest } from "./buyer-contact";
 
 /** A variant needs this many delivered-or-returned orders to be compared. */
 export const MIN_DECIDED_PER_VARIANT = 30;
@@ -97,8 +98,8 @@ export type OrderFilter =
   | { kind: "city"; city: string }
   /** D4's payout ageing cell: unpaid delivered COD of one courier, of one age. */
   | { kind: "unpaid"; courier: string; age: AgeFilter }
-  /** Courierify parcels with no status change for STUCK_DAYS (Phase 4c, A3). */
-  | { kind: "stuck" };
+  /** Courierify parcels with no status change for STUCK_DAYS (Phase 4c, A3); `wrote`: only those whose buyer wrote in (I7). */
+  | { kind: "stuck"; wrote?: true };
 
 export type MarginFinding = {
   kind: "margin";
@@ -306,6 +307,12 @@ export type StuckFinding = {
   placed: Money | null;
   byCourier: Array<{ courier: string; orders: number }>;
   oldestDays: number;
+  /**
+   * I7: of the stuck parcels, those whose buyer wrote to the store on
+   * WhatKaBot after ordering, and whether writing in has meant a return at
+   * this store. Null when WhatKaBot has no conversations for the store.
+   */
+  wroteIn: { orders: number; test: ContactReturnTest } | null;
 };
 
 /** Returns the merchant has not confirmed back in Courierify (Phase 4c, A5 on Home). */
@@ -395,6 +402,8 @@ export type FindingsInput = {
   offers?: OffersView | null;
   /** I5 per store: the period's orders by the buyer's earlier history (D-51). */
   buyerHistory?: BuyerHistoryView | null;
+  /** I7: buyers' WhatKaBot messages and what writing in has meant here, when it has any. */
+  buyerContact?: BuyerContactSection | null;
 };
 
 const DECIDED: Outcome[] = ["delivered", "returned"];
@@ -998,6 +1007,9 @@ export function stuckFinding(input: FindingsInput): StuckFinding | Skip {
     placed: cur ? pick(sumByCurrency(stuck.map((o) => o.placed)), cur) : null,
     byCourier: [...by.entries()].map(([courier, orders]) => ({ courier, orders })).sort((a, b) => b.orders - a.orders),
     oldestDays: Math.floor(Math.max(...stuck.map((o) => (asOf.getTime() - o.outcomeTiming!.at.getTime()) / 86_400_000))),
+    wroteIn: input.buyerContact
+      ? { orders: stuck.filter((o) => wroteAfterOrdering(input.buyerContact!.contact, o.customerId, o.createdAt, asOf)).length, test: input.buyerContact.test }
+      : null,
   };
 }
 
@@ -1078,6 +1090,7 @@ export function parseOrderFilter(params: URLSearchParams): OrderFilter | null {
   if (params.get("disagree") === "1") return { kind: "disagree" };
   if (params.get("feeMissing") === "1") return { kind: "fee_missing" };
   if (params.get("stuck") === "1") return { kind: "stuck" };
+  if (params.get("stuck") === "wrote") return { kind: "stuck", wrote: true };
   const unpaid = params.get("unpaid");
   const age = params.get("age");
   if (unpaid && /^[a-z0-9_-]{1,40}$/.test(unpaid)) {
@@ -1119,7 +1132,7 @@ export function orderFilterQuery(filter: OrderFilter): string {
     case "city":
       return `city=${encodeURIComponent(filter.city)}`;
     case "stuck":
-      return "stuck=1";
+      return filter.wrote ? "stuck=wrote" : "stuck=1";
     case "unpaid":
       return filter.age === "any" ? `unpaid=${filter.courier}` : `unpaid=${filter.courier}&age=${filter.age}`;
   }
@@ -1133,7 +1146,7 @@ export function matchesFilter(
   o: RollupOrder,
   filter: OrderFilter,
   currency: string | null,
-  ctx?: { payers?: PayerHistory[]; asOf?: Date },
+  ctx?: { payers?: PayerHistory[]; asOf?: Date; contact?: BuyerContact | null },
 ): boolean {
   switch (filter.kind) {
     case "variant":
@@ -1150,8 +1163,10 @@ export function matchesFilter(
       return o.currency === currency && inCityRoute(o, filter.city, filter);
     case "city":
       return o.currency === currency && o.city === filter.city;
-    case "stuck":
-      return isStuck(o, ctx?.asOf ?? new Date());
+    case "stuck": {
+      const asOf = ctx?.asOf ?? new Date();
+      return isStuck(o, asOf) && (!filter.wrote || (!!ctx?.contact && wroteAfterOrdering(ctx.contact, o.customerId, o.createdAt, asOf)));
+    }
     case "unpaid":
       return (
         o.outcome === "delivered" &&

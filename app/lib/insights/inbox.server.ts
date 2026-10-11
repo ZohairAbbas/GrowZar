@@ -6,6 +6,7 @@ import { inventorySection } from "../metrics/inventory.server";
 import { checkoutsSection, formAbandonmentsSection } from "../metrics/checkouts.server";
 import { offersSection } from "../metrics/offers.server";
 import { buyerHistorySection } from "../metrics/buyer-history.server";
+import { buyerContactSection } from "../metrics/buyer-contact.server";
 import { sumByCurrency } from "../metrics/money";
 import { localDayOf } from "../metrics/order-grain";
 import { periodFrom } from "../metrics/screens.server";
@@ -80,6 +81,8 @@ export async function detectorInput(
   const formAbandonments = connected.has("PREVENTIFY") ? await formAbandonmentsSection(s.store.id, s.period, now) : null;
   const offers = connected.has("PREVENTIFY") ? await offersSection(s.store.id, s.period) : null;
   const buyerHistory = await buyerHistorySection(s.store.id, s.period);
+  // I7 reads buyers' messages whatever the period, like the stuck parcels it joins.
+  const buyerContact = connected.has("WHATKABOT") ? await buyerContactSection(s.store.id) : null;
   const ads = s.adSpend;
   const complete = ads && ads.daysFetched === ads.daysInPeriod;
   return {
@@ -108,6 +111,7 @@ export async function detectorInput(
       reminderAppConnected: connected.has("RETAINIFY") || connected.has("WHATKABOT"),
       offers,
       buyerHistory,
+      buyerContact,
     },
   };
 }
