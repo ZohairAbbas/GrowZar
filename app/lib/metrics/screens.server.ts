@@ -62,6 +62,8 @@ import {
 import { loadStatements } from "./settlements.server";
 import { loadSettledHistory } from "./summaries.server";
 import { loadBuyerContact } from "./buyer-contact.server";
+import { highRiskBuyers } from "./buyer-network.server";
+import { OPEN_DAYS, OPEN_OUTCOMES } from "./buyer-network";
 import {
   courierPerformance,
   outcomesByDay,
@@ -443,13 +445,20 @@ export async function ordersView(
     const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { currency: true } });
     // Cash held is today's state (I4): any order date, so no period here.
     const cashFilter = filter.kind === "awaiting_payout" || filter.kind === "unpaid";
+    // Open orders by network risk are today's too: the last 30 days, whatever the period.
+    const networkFilter = filter.kind === "network_high";
     const all = await prisma.orderGrain.findMany({
-      where: cashFilter ? { storeId, outcome: "delivered", uncollectedAmount: { not: null }, ...scopeWhere(scope) } : where,
+      where: cashFilter
+        ? { storeId, outcome: "delivered", uncollectedAmount: { not: null }, ...scopeWhere(scope) }
+        : networkFilter
+          ? { storeId, outcome: { in: [...OPEN_OUTCOMES] }, createdAt: { gte: new Date(Date.now() - OPEN_DAYS * 86_400_000) }, ...scopeWhere(scope) }
+          : where,
       orderBy: [{ createdAt: "desc" }, { orderId: "desc" }],
     });
     const ctx = {
       payers: filter.kind === "awaiting_payout" ? await loadPayerHistories(storeId) : [],
       contact: filter.kind === "stuck" && filter.wrote ? await loadBuyerContact(storeId) : null,
+      highRisk: filter.kind === "network_high" ? await highRiskBuyers(storeId) : undefined,
       asOf: new Date(),
     };
     const hit = all.filter((r) => matchesFilter(toRollupOrder(r), filter, store.currency, ctx));

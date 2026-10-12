@@ -28,6 +28,7 @@ import type { StockoutFinding } from "./stockout";
 import type { CheckoutsView, UnfollowedCheckoutsFinding } from "./checkouts";
 import type { OfferReturnsFinding, OffersView } from "./offers";
 import type { BuyerHistoryView, ReturnersFinding } from "./buyer-history";
+import { OPEN_DAYS, OPEN_OUTCOMES } from "./buyer-network";
 import { wroteAfterOrdering, type BuyerContact, type BuyerContactSection, type ContactReturnTest } from "./buyer-contact";
 
 /** A variant needs this many delivered-or-returned orders to be compared. */
@@ -99,7 +100,9 @@ export type OrderFilter =
   /** D4's payout ageing cell: unpaid delivered COD of one courier, of one age. */
   | { kind: "unpaid"; courier: string; age: AgeFilter }
   /** Courierify parcels with no status change for STUCK_DAYS (Phase 4c, A3); `wrote`: only those whose buyer wrote in (I7). */
-  | { kind: "stuck"; wrote?: true };
+  | { kind: "stuck"; wrote?: true }
+  /** Open orders (last 30 days) from buyers Courierify's network rates high (G-GZR5-16). */
+  | { kind: "network_high" };
 
 export type MarginFinding = {
   kind: "margin";
@@ -1091,6 +1094,7 @@ export function parseOrderFilter(params: URLSearchParams): OrderFilter | null {
   if (params.get("feeMissing") === "1") return { kind: "fee_missing" };
   if (params.get("stuck") === "1") return { kind: "stuck" };
   if (params.get("stuck") === "wrote") return { kind: "stuck", wrote: true };
+  if (params.get("network") === "high") return { kind: "network_high" };
   const unpaid = params.get("unpaid");
   const age = params.get("age");
   if (unpaid && /^[a-z0-9_-]{1,40}$/.test(unpaid)) {
@@ -1133,6 +1137,8 @@ export function orderFilterQuery(filter: OrderFilter): string {
       return `city=${encodeURIComponent(filter.city)}`;
     case "stuck":
       return filter.wrote ? "stuck=wrote" : "stuck=1";
+    case "network_high":
+      return "network=high";
     case "unpaid":
       return filter.age === "any" ? `unpaid=${filter.courier}` : `unpaid=${filter.courier}&age=${filter.age}`;
   }
@@ -1146,7 +1152,7 @@ export function matchesFilter(
   o: RollupOrder,
   filter: OrderFilter,
   currency: string | null,
-  ctx?: { payers?: PayerHistory[]; asOf?: Date; contact?: BuyerContact | null },
+  ctx?: { payers?: PayerHistory[]; asOf?: Date; contact?: BuyerContact | null; highRisk?: ReadonlySet<string> },
 ): boolean {
   switch (filter.kind) {
     case "variant":
@@ -1166,6 +1172,16 @@ export function matchesFilter(
     case "stuck": {
       const asOf = ctx?.asOf ?? new Date();
       return isStuck(o, asOf) && (!filter.wrote || (!!ctx?.contact && wroteAfterOrdering(ctx.contact, o.customerId, o.createdAt, asOf)));
+    }
+    case "network_high": {
+      const asOf = ctx?.asOf ?? new Date();
+      return (
+        !!o.customerId &&
+        !!ctx?.highRisk?.has(o.customerId) &&
+        (OPEN_OUTCOMES as readonly string[]).includes(o.outcome) &&
+        !!o.createdAt &&
+        asOf.getTime() - o.createdAt.getTime() <= OPEN_DAYS * 86_400_000
+      );
     }
     case "unpaid":
       return (

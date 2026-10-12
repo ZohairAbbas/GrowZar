@@ -80,6 +80,7 @@ model Store {
   adSpend        AdSpend[]
   profitSettings StoreProfitSettings?
   insights       Insight[]
+  buyerNetwork   BuyerNetwork[]
 
   @@index([organizationId])
   @@map("stores")
@@ -965,4 +966,34 @@ model FxRate {
 
   @@id([base, currency, day])
   @@map("fx_rates")
+}
+
+/// Courierify's buyer network answer for one of the store's buyers
+/// (G-GZR5-16; D-53, D-54), as of `fetchedAt`. Courierify's network and risk
+/// rule are its own (D-54): Growzar stores and shows them, labelled as
+/// Courierify's, and never rescores them. Figures are today's totals, so they
+/// are never used to judge a past order (that needs G-CFY5-3's cut-off).
+model BuyerNetwork {
+  storeId    String
+  /// The surviving customer (merges resolved) the phone was asked for.
+  customerId String
+  /// The E.164 phone Growzar asked with: the customer's most recently seen.
+  phone      String
+  /// ok | not_your_customer | invalid_phone
+  status     String
+  /// Courierify's figures at this store, as sent (orders, delivered, returned, …).
+  storeFigures Json?
+  /// Other stores' figures, as sent; Courierify nulls them under 2 other stores.
+  network      Json?
+  otherStores  Int?
+  /// Courierify's label (insufficient_data | low | medium | high) and its stated basis.
+  riskLevel  String?
+  riskBasis  String?
+  fetchedAt  DateTime
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@id([storeId, customerId])
+  @@index([storeId, riskLevel])
+  @@map("buyer_network")
 }

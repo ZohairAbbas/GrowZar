@@ -10,6 +10,7 @@ import {
   extractUpdatedAt,
   feedOffered,
   feedsFor,
+  readsCapabilities,
   reportsPurge,
   type EntityFeed,
 } from "./entities";
@@ -610,7 +611,7 @@ export async function syncFeed(options: {
 
 /**
  * The connection's capabilities, re-asked from the app at most hourly, and
- * only for apps with capability-gated feeds. A failed or "not installed"
+ * only for apps with capability-gated feeds or lookups. A failed or "not installed"
  * answer keeps what is stored: deciding a disconnect is not the sync's job.
  */
 async function currentCapabilities(
@@ -618,7 +619,7 @@ async function currentCapabilities(
   shopDomain: string,
   now = new Date(),
 ): Promise<string[]> {
-  if (!feedsFor(connection.app).some((f) => f.capability)) return connection.capabilities;
+  if (!readsCapabilities(connection.app)) return connection.capabilities;
   if (now.getTime() - connection.updatedAt.getTime() < CAPABILITY_REFRESH_MS) return connection.capabilities;
 
   const result = await fetchAppStatus(connection.app, shopDomain);
