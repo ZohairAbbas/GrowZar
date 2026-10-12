@@ -140,8 +140,6 @@ export type HomeView = {
   funnel: Array<{ label: string; count: number | null; note?: string }>;
   deliveryRate: DeliveryRate;
   coverage: Coverage;
-  /** Delivered orders per local day the order was placed on, oldest first. */
-  daily: Array<{ day: string; delivered: number }>;
   /** Null for a role that may not see Finance: Home then shows counts only. */
   money: {
     deliveredRevenue: Money[];
@@ -150,7 +148,7 @@ export type HomeView = {
   /** The store's currency (it leads), and what happened to orders in others. */
   base: string | null;
   fx: StoreSummary["fx"];
-  compare: { delivered: Headline; deliveryRate: Headline; profit: Headline | null };
+  compare: { delivered: Headline; deliveryRate: Headline; profit: Headline | null; orders: Headline };
 };
 
 /**
@@ -205,20 +203,8 @@ export async function owedToday(storeId: string): Promise<Owed> {
   };
 }
 
-function eachDay(from: string, to: string): string[] {
-  const days: string[] = [];
-  for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${to}T00:00:00Z`); t += 86_400_000) {
-    days.push(new Date(t).toISOString().slice(0, 10));
-  }
-  return days;
-}
-
 export function homeView(s: StoreSummary, prev: StoreSummary, canSeeMoney: boolean): HomeView {
   const rows = s.rows;
-  const deliveredByDay = new Map<string, number>();
-  for (const r of rows) {
-    if (r.outcome === "delivered" && r.localDay) deliveredByDay.set(r.localDay, (deliveredByDay.get(r.localDay) ?? 0) + 1);
-  }
   const anyConfirmation = rows.some((r) => r.confirmation);
   return {
     funnel: [
@@ -235,7 +221,6 @@ export function homeView(s: StoreSummary, prev: StoreSummary, canSeeMoney: boole
     ],
     deliveryRate: s.orders.deliveryRate,
     coverage: coverage(s),
-    daily: eachDay(s.period.from, s.period.to).map((day) => ({ day, delivered: deliveredByDay.get(day) ?? 0 })),
     money: canSeeMoney
       ? {
           deliveredRevenue: s.orders.deliveredRevenue,
@@ -250,8 +235,24 @@ export function homeView(s: StoreSummary, prev: StoreSummary, canSeeMoney: boole
         : headline(settled(countDelta(s.orders.deliveryRate.delivered, prev.orders.deliveryRate.delivered), s, prev), dailyCount(rows, s.period.from, s.period.to, (o) => o.outcome === "delivered")),
       deliveryRate: headline(rateDelta(s.orders.deliveryRate, prev.orders.deliveryRate), weeklyRate(rows, s.period.from, s.period.to)),
       profit: canSeeMoney && s.profit ? headline(settled(moneyDelta(profitMoney(s), profitMoney(prev), s.store.currency), s, prev), null) : null,
+      // Placed orders do not wait on outcomes, so this compares at once.
+      orders: headline(countDelta(rows.length, prev.rows.length), dailyCount(rows, s.period.from, s.period.to, () => true)),
     },
   };
+}
+
+/**
+ * Home's two compact cards: the same data as Finance's "Where the cash is"
+ * and Shipping's "What happened to each day's orders", computed the same
+ * way, so Home and those sections never disagree. Cash only for a role that
+ * may see Finance.
+ */
+export async function homeCards(storeId: string, s: StoreSummary, canSeeMoney: boolean) {
+  const cur = s.store.currency;
+  const cash = canSeeMoney && cur
+    ? cashTimeline(s.rows, cur, trackedPayers((await loadStatements(storeId)).map((x) => x.payer)), new Date())
+    : null;
+  return { cash, outcomes: outcomesByDay(s.rows, s.period.from, s.period.to) };
 }
 
 const maturity = (s: StoreSummary) => ({ orders: s.orders.orders, stillOpen: s.orders.deliveryRate.stillOpen });

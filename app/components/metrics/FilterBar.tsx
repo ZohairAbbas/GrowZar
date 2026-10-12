@@ -33,6 +33,7 @@ export function FilterBar({
   scope,
   options,
   keep,
+  compact = false,
 }: {
   section: string;
   stores: { activeId: string | null; list: Array<{ id: string; name: string }>; returnTo: string };
@@ -48,6 +49,8 @@ export function FilterBar({
   options: { couriers: Option[]; cities: Option[] } | null;
   /** Other query parameters to carry (a finding filter, an outcome). */
   keep: string;
+  /** Home: the period only, with what it is compared with as hover text. */
+  compact?: boolean;
 }) {
   const query = (o: { days?: number; courier?: string | null; city?: string | null }) => {
     const q = withPeriod(new URLSearchParams(keep), o.days ? `days=${o.days}` : period.query);
@@ -58,10 +61,13 @@ export function FilterBar({
     return `?${q.toString()}`;
   };
   const select = "rounded-full border-0 bg-white py-1.5 pl-3.5 pr-8 text-sm font-semibold text-gray-700 focus:ring-2 focus:ring-mint";
+  const compared = historyFrom
+    ? `History starts ${shortDay(historyFrom)}, so there is no full previous ${period.days} days to compare with`
+    : `Compared with ${shortDay(previous.from)}–${shortDay(previous.to)}`;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {stores.list.length > 1 ? (
+      {stores.list.length > 1 && !compact ? (
         <Form method="post" action="/switch" className="contents">
           <input type="hidden" name="intent" value="switch-store" />
           <input type="hidden" name="returnTo" value={`${stores.returnTo}?${period.query}`} />
@@ -81,7 +87,7 @@ export function FilterBar({
         </Form>
       ) : null}
 
-      <nav aria-label="Period" className="inline-flex items-center rounded-full bg-white p-1 text-sm font-semibold">
+      <nav aria-label="Period" title={compact ? compared : undefined} className="inline-flex items-center rounded-full bg-white p-1 text-sm font-semibold">
         {periods.map((d) => {
           const on = !period.custom && d === period.days;
           return (
@@ -136,12 +142,12 @@ export function FilterBar({
         </Link>
       ) : null}
 
-      <span className="text-xs text-gray-500">
-        {historyFrom
-          ? `History starts ${shortDay(historyFrom)}, so there is no full previous ${period.days} days to compare with`
-          : `Compared with ${shortDay(previous.from)}–${shortDay(previous.to)}`}
-        {(scope.courier || scope.city) && (section === "finance" || section === "home") ? " · ad spend is store-wide, so it is left out while filtered" : ""}
-      </span>
+      {compact ? null : (
+        <span className="text-xs text-gray-500">
+          {compared}
+          {(scope.courier || scope.city) && (section === "finance" || section === "home") ? " · ad spend is store-wide, so it is left out while filtered" : ""}
+        </span>
+      )}
     </div>
   );
 }

@@ -265,6 +265,43 @@ export function PeriodPicker({ period, options, keep = "" }: { period: PickedPer
  * numbers are incomplete, and a link to the page that says why. The body of
  * a screen carries no hedges of its own; this replaces them.
  */
+/**
+ * Home's data chip: one dot for whether every source behind the numbers is
+ * complete, with the gaps and any currency note behind it, instead of
+ * sentences above the page. Uses <details>, so it opens without scripts.
+ */
+export function DataHealth({ gaps, fx, period }: { gaps: Array<{ key: string; text: string }>; fx: FxReportView | null; period: string }) {
+  const unconverted = fx?.unconverted.length ?? 0;
+  const issues = gaps.length + unconverted;
+  return (
+    <details className="group relative">
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 [&::-webkit-details-marker]:hidden">
+        <span className={`h-2 w-2 rounded-full ${issues ? "bg-coral" : "bg-mint-600"}`} aria-hidden="true" />
+        {issues ? `${issues} data gap${issues === 1 ? "" : "s"}` : "All data complete"}
+      </summary>
+      <div className="absolute right-0 z-20 mt-2 w-[min(24rem,calc(100vw-2rem))] space-y-3 rounded-2xl bg-white p-4 text-sm shadow-lg">
+        <p className="font-semibold text-gray-900">Behind these numbers</p>
+        {gaps.length ? (
+          <ul className="space-y-1.5 text-gray-700">
+            {gaps.map((g) => (
+              <li key={g.key} className="flex gap-2">
+                <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-coral" aria-hidden="true" />
+                {g.text}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-gray-600">Every source behind these numbers is complete for this period.</p>
+        )}
+        <FxNotice fx={fx} />
+        <Link to={`/settings/coverage?${period}`} className="inline-block font-semibold text-accent-600 hover:underline">
+          See data coverage →
+        </Link>
+      </div>
+    </details>
+  );
+}
+
 export function CoverageLine({ gaps, period }: { gaps: Array<{ key: string; text: string }>; period: string }) {
   const link = (
     <Link to={`/settings/coverage?${period}`} className="font-semibold text-accent-600 hover:underline">

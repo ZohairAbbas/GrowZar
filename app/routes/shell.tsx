@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { Form, Link, NavLink, Outlet, useLocation } from "react-router";
 import {
   BarChart3,
@@ -14,6 +15,7 @@ import {
   Truck,
   Users,
   Wallet,
+  Lightbulb,
 } from "lucide-react";
 
 import type { Route } from "./+types/shell";
@@ -223,8 +225,8 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
               const to = item.section === "settings" ? "/settings" : `/${item.section}`;
 
               return (
+                <Fragment key={item.section}>
                 <NavLink
-                  key={item.section}
                   to={to}
                   className={({ isActive }) =>
                     cn(
@@ -255,6 +257,22 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
                     </span>
                   ) : null}
                 </NavLink>
+                {/* Every finding, under Home, which shows only what needs action. */}
+                {item.section === "home" ? (
+                  <NavLink
+                    to="/insights"
+                    className={({ isActive }) =>
+                      cn(
+                        "group flex items-center gap-3 rounded-full px-3.5 py-2.5 text-sm transition",
+                        isActive ? "active bg-navy font-semibold text-white" : "font-medium text-gray-700 hover:bg-field",
+                      )
+                    }
+                  >
+                    <Lightbulb className="h-[18px] w-[18px] flex-shrink-0 group-[.active]:text-mint" />
+                    <span className="flex-1 truncate">Insights</span>
+                  </NavLink>
+                ) : null}
+                </Fragment>
               );
             })}
           </nav>

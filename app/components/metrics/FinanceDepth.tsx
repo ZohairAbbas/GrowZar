@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 
 import type { FinanceDepth } from "~/lib/metrics/screens.server";
 import { STUCK_DAYS } from "~/lib/metrics/cash";
+import { sumByCurrency } from "~/lib/metrics/money";
 import { formatAmount } from "./Metrics";
 import { scopeLabel } from "./FilterBar";
 
@@ -69,16 +70,31 @@ export function MoneyBreakdown({ lines, period, scope }: { lines: FinanceDepth["
   );
 }
 
+/**
+ * Home's version: the same bar, and the stages summed into the groups the
+ * bar's colours already draw (Finance colours every not-yet-delivered stage
+ * alike), with the full card one click away.
+ */
+const COMPACT_GROUPS: Array<{ label: string; keys: string[]; tone: string }> = [
+  { label: "Paid by courier", keys: ["paid"], tone: "bg-mint-600" },
+  { label: "Delivered, not yet paid", keys: ["awaiting", "untracked"], tone: "bg-mint" },
+  { label: "Not yet delivered", keys: ["not_dispatched", "booked", "with_courier"], tone: "bg-data-700/40" },
+  { label: "Returned", keys: ["returned"], tone: "bg-coral" },
+  { label: "Outcome not known", keys: ["unknown"], tone: "bg-data-700/40" },
+];
+
 export function CashTimelineCard({
   cash,
   period,
   scope,
   payment = null,
+  compact = false,
 }: {
   cash: FinanceDepth["cash"];
   period: string;
   scope: string;
   payment?: FinanceDepth["payment"];
+  compact?: boolean;
 }) {
   const q = (extra: string) => `/orders?${period}&${extra}${scope ? `&${scope}` : ""}`;
   const to: Record<string, string> = {
@@ -96,6 +112,43 @@ export function CashTimelineCard({
   };
   const total = cash.stages.reduce((n, s) => n + s.orders, 0) || 1;
   const stuck = cash.stuck.booked + cash.stuck.inTransit;
+  const bar = (
+    <div className={`${compact ? "mt-3" : "mt-4"} flex h-3 w-full gap-[2px] overflow-hidden rounded-sm`} aria-hidden="true">
+      {cash.stages.map((s) => (
+        <span key={s.key} className={tone[s.key] ?? "bg-data-700/40"} style={{ width: `${(100 * s.orders) / total}%` }} />
+      ))}
+    </div>
+  );
+  if (compact) {
+    const groups = COMPACT_GROUPS.map((g) => {
+      const parts = cash.stages.filter((s) => g.keys.includes(s.key));
+      // One currency per card (the store's), so this is one total.
+      const [sum] = sumByCurrency(parts.map((s) => s.amount));
+      return { ...g, orders: parts.reduce((n, s) => n + s.orders, 0), sum };
+    }).filter((g) => g.orders > 0 || g.keys.includes("paid"));
+    return (
+      <div className="rounded-2xl bg-white p-5">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="font-display text-lg font-bold text-gray-900">Where the cash is</h2>
+          <Link to={`/finance?${period}`} className="whitespace-nowrap text-sm font-semibold text-accent-600 hover:underline">
+            See Finance →
+          </Link>
+        </div>
+        {bar}
+        <ul className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-600">
+          {groups.map((g) => (
+            <li key={g.label} className="inline-flex items-center gap-1.5">
+              <span className={`inline-block h-2 w-2 rounded-full ${g.tone}`} aria-hidden="true" />
+              {g.label}{" "}
+              <span className="font-semibold tabular-nums text-gray-900">
+                {g.sum ? `${g.sum.currency} ${whole(g.sum.amount)}` : `${cash.stages[0]?.amount.currency ?? ""} 0`}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
   return (
     <div className="rounded-2xl bg-white p-5">
       <h2 className="font-display text-lg font-bold text-gray-900">Where the cash is</h2>
@@ -105,11 +158,7 @@ export function CashTimelineCard({
           ? ` ${((100 * payment.cod) / payment.orders).toFixed(1)}% cash on delivery, ${((100 * payment.prepaid) / payment.orders).toFixed(1)}% prepaid${payment.unknown ? `, ${payment.unknown} unknown` : ""} (${payment.orders.toLocaleString()} orders).`
           : ""}
       </p>
-      <div className="mt-4 flex h-3 w-full gap-[2px] overflow-hidden rounded-sm" aria-hidden="true">
-        {cash.stages.map((s) => (
-          <span key={s.key} className={tone[s.key] ?? "bg-data-700/40"} style={{ width: `${(100 * s.orders) / total}%` }} />
-        ))}
-      </div>
+      {bar}
       <dl className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
         {cash.stages.map((s) => (
           <div key={s.key}>
