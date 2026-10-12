@@ -14,7 +14,8 @@ import {
 } from "~/lib/sync/queue.server";
 import { processEvent } from "~/lib/events/process.server";
 import { describeSweep, sweepStrandedEvents } from "~/lib/events/sweep.server";
-import { rebuildOrderGrain } from "~/lib/metrics/order-grain.server";
+import { rebuildOrderGrain, updateOrderGrain } from "~/lib/metrics/order-grain.server";
+import type { CityAlias } from "~/lib/metrics/city-aliases";
 import { evaluateStore } from "~/lib/insights/inbox.server";
 import { refreshFxRates } from "~/lib/metrics/fx.server";
 import { refreshAdSpend } from "~/lib/metrics/ad-spend.server";
@@ -44,8 +45,18 @@ const connection = new IORedis(process.env.REDIS_URL ?? "redis://127.0.0.1:6379"
 /** When this process last refreshed exchange rates (all stores share them). */
 let fxRefreshedAt = 0;
 
-/** Stores whose grain this process has rebuilt; see the rebuild below. */
-const grainRebuiltSinceStart = new Set<string>();
+/**
+ * Per store, since this process started: when its grain was last rebuilt in
+ * full, and the city aliases that rebuild learned (the incremental path
+ * needs them). No entry means the next cycle rebuilds in full.
+ */
+const grainState = new Map<string, { cityAliases: Map<string, CityAlias>; fullAt: number }>();
+/** When each store's insights were last evaluated by this process. */
+const evaluatedAt = new Map<string, number>();
+const FULL_REBUILD_EVERY_MS = 60 * 60 * 1000;
+const EVALUATE_EVERY_MS = 15 * 60 * 1000;
+/** Above this many touched orders or parcels, a full rebuild is the cheaper path. */
+const MAX_INCREMENTAL = 500;
 
 export const syncWorker = new Worker<SyncJob>(
   SYNC_QUEUE,
@@ -96,33 +107,64 @@ export const syncWorker = new Worker<SyncJob>(
       `[sync] store=${storeId} feeds=${results.length} written=${totals.written} dup=${totals.duplicates} tomb=${totals.tombstoned} skipped=${totals.skipped} snapshots=${totals.snapshots} errors=${totals.errors}`,
     );
 
-    // The order grain is derived from what was just synced (G-GZR2-2), so
-    // it is rebuilt whenever a cycle wrote anything, and once per store after
-    // the worker starts. The second condition is what carries a change to
-    // the grain's *code* into stored rows: without it, the G-GZR2-3 deploy
-    // left every store's grain on the old builder until new orders happened
-    // to arrive. A failed rebuild leaves the previous grain in place (it is
-    // one transaction) and is logged as a failure, not swallowed.
-    if (totals.written > 0 || !grainRebuiltSinceStart.has(storeId)) {
-      try {
+    // The order grain is derived from what was just synced (G-GZR2-2).
+    //
+    // A full rebuild once per store after the worker starts (that is what
+    // carries a change to the grain's *code* into stored rows), after a
+    // deletion, when a cycle touched very many orders, and at least hourly
+    // as the net under the incremental path. Otherwise only the orders this
+    // cycle touched are rebuilt: for the largest store a full rebuild took
+    // 9-28 s every cycle for ~5 changed orders.
+    //
+    // Insights read the grain and the other feeds (G-GZR3-3). They are
+    // evaluated after a full rebuild, and otherwise at most every 15 minutes
+    // when anything was written. Home and /insights compute their own view
+    // on each request; this paces only the stored new/resolved record.
+    //
+    // Each step has its own try: a failed rebuild leaves the previous grain
+    // in place (one transaction), and a detector failing must not look like
+    // a grain failure, nor stop the rest of the cycle.
+    const changes = {
+      orderIds: [...new Set(results.flatMap((r) => r.grain.orderIds))],
+      shipmentIds: [...new Set(results.flatMap((r) => r.grain.shipmentIds))],
+    };
+    const state = grainState.get(storeId);
+    const now = Date.now();
+    const full =
+      !state ||
+      results.some((r) => r.grain.full) ||
+      now - state.fullAt > FULL_REBUILD_EVERY_MS ||
+      changes.orderIds.length + changes.shipmentIds.length > MAX_INCREMENTAL;
+    let grainChanged = false;
+    try {
+      if (full) {
         const grain = await rebuildOrderGrain(storeId);
-        grainRebuiltSinceStart.add(storeId);
+        grainState.set(storeId, { cityAliases: grain.cityAliases, fullAt: now });
+        grainChanged = true;
         console.log(
           `[grain] store=${storeId} orders=${grain.orders} parcelsOnly=${grain.fromParcelsOnly} withCustomer=${grain.withCustomer} ms=${grain.ms}`,
         );
-        // Insights read the grain, so they are evaluated when it changes
-        // (G-GZR3-3). Its own try: a detector failing must not look like a
-        // grain failure, nor stop the rest of the cycle.
-        try {
-          const e = await evaluateStore(storeId);
-          console.log(
-            `[insights] store=${storeId} found=${e.found} new=${e.created} resolved=${e.resolved} reappeared=${e.reappeared} ms=${e.ms}`,
-          );
-        } catch (error) {
-          console.error(`[insights] store=${storeId} evaluation FAILED:`, error instanceof Error ? error.message : error);
-        }
+      } else if (changes.orderIds.length || changes.shipmentIds.length) {
+        const grain = await updateOrderGrain(storeId, changes, state.cityAliases);
+        grainChanged = grain.considered > 0;
+        console.log(`[grain] store=${storeId} incremental considered=${grain.considered} written=${grain.written} ms=${grain.ms}`);
+      }
+    } catch (error) {
+      // The next cycle starts over with a full rebuild.
+      grainState.delete(storeId);
+      console.error(`[grain] store=${storeId} rebuild FAILED:`, error instanceof Error ? error.message : error);
+    }
+
+    const lastEvaluated = evaluatedAt.get(storeId) ?? 0;
+    if ((full && grainChanged) || ((grainChanged || totals.written > 0) && now - lastEvaluated >= EVALUATE_EVERY_MS)) {
+      try {
+        const e = await evaluateStore(storeId);
+        evaluatedAt.set(storeId, now);
+        console.log(
+          `[insights] store=${storeId} found=${e.found} new=${e.created} resolved=${e.resolved} reappeared=${e.reappeared} ms=${e.ms}`,
+        );
       } catch (error) {
-        console.error(`[grain] store=${storeId} rebuild FAILED:`, error instanceof Error ? error.message : error);
+        console.error(`[insights] store=${storeId} evaluation FAILED:`, error instanceof Error ? error.message : error);
       }
     }
 

@@ -1,6 +1,7 @@
 import type { Prisma, SuiteApp, SyncEntity } from "@prisma/client";
 
 import { prisma } from "../db.server";
+import { isGrainInput } from "../metrics/order-grain.server";
 import { appRequest } from "../apps/client.server";
 import { getAppCredentials } from "../apps/registry.server";
 import { fetchAppStatus } from "../apps/status.server";
@@ -82,6 +83,12 @@ export type FeedRunResult = {
   unparseablePhones: number;
   finished: boolean;
   error?: string;
+  /**
+   * What this run changed that the order grain reads (`isGrainInput`): the
+   * orders written, the parcels new courier events belong to, and whether a
+   * deletion means only a full rebuild will do.
+   */
+  grain: { orderIds: string[]; shipmentIds: string[]; full: boolean };
 };
 
 /**
@@ -217,8 +224,11 @@ async function writePage(options: {
   customers: number;
   unparseablePhones: number;
   maxUpdatedAt: Date | null;
+  grain: { orderIds: string[]; shipmentIds: string[]; full: boolean };
 }> {
   const { storeId, app, feed, page, defaultRegion } = options;
+  const feedsGrain = isGrainInput(app, feed.entity);
+  const grainOrders = new Set<string>();
 
   let written = 0;
   let duplicates = 0;
@@ -296,6 +306,11 @@ async function writePage(options: {
     });
 
     written += 1;
+
+    if (feedsGrain) {
+      const orderId = feed.entity === "ORDER" ? externalId : (row as Record<string, unknown>)?.orderId;
+      if (typeof orderId === "string") grainOrders.add(orderId);
+    }
 
     // Order-grain snapshots are what the late-settling COD money needs
     // (G-GZR-4). Only order rows produce them; a parcel is not an order
@@ -378,6 +393,8 @@ async function writePage(options: {
     customers,
     unparseablePhones,
     maxUpdatedAt,
+    // A deletion is not followed to its order here; the grain rebuilds whole.
+    grain: { orderIds: [...grainOrders], shipmentIds: [], full: feedsGrain && tombstoned > 0 },
   };
 }
 
@@ -433,6 +450,9 @@ async function writeShipmentEventsPage(options: {
   return {
     written: count,
     duplicates: events.length - count,
+    // Insert-or-ignore cannot say which rows were new, so a page that added
+    // any names all its parcels; the grain rebuilds just those orders.
+    grain: { orderIds: [], shipmentIds: count ? [...new Set(events.map((e) => e.shipmentId))] : [], full: false },
     skipped: [...rejected.values()].reduce((a, b) => a + b, 0),
     tombstoned: 0,
     snapshots: 0,
@@ -465,6 +485,7 @@ export async function syncFeed(options: {
     customers: 0,
     unparseablePhones: 0,
     finished: false,
+    grain: { orderIds: [], shipmentIds: [], full: false },
   };
 
   const credentials = getAppCredentials(app);
@@ -527,6 +548,7 @@ export async function syncFeed(options: {
           data: { deletedAt: new Date() },
         });
         base.tombstoned += count;
+        if (count && isGrainInput(app, feed.entity)) base.grain.full = true;
         console.warn(`[sync] ${app}/${feed.entity} reports a purge for store ${storeId}; ${count} rows marked deleted`);
       }
 
@@ -555,6 +577,9 @@ export async function syncFeed(options: {
       base.snapshots += result.snapshots;
       base.customers += result.customers;
       base.unparseablePhones += result.unparseablePhones;
+      base.grain.orderIds.push(...result.grain.orderIds);
+      base.grain.shipmentIds.push(...result.grain.shipmentIds);
+      base.grain.full ||= result.grain.full;
 
       if (result.maxUpdatedAt && (!highWater || result.maxUpdatedAt > highWater)) {
         highWater = result.maxUpdatedAt;
