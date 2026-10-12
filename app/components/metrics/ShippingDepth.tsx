@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 
 import type { ShippingDepth } from "~/lib/metrics/screens.server";
 import { MIN_ATTEMPT_REPORTING } from "~/lib/metrics/returns";
@@ -20,10 +21,13 @@ const SEG = [
   { key: "other", label: "Cancelled or not known", fill: "#C3D3D1" },
 ] as const;
 
-export function OutcomesChart({ days }: { days: ShippingDepth["outcomes"] }) {
+/** `compact` (Home): heading and a link to Shipping, no subtitle, a shorter chart. */
+export function OutcomesChart({ days, compact = false, period = "" }: { days: ShippingDepth["outcomes"]; compact?: boolean; period?: string }) {
   const w = 720;
-  const h = 180;
-  const pad = { l: 36, r: 8, t: 8, b: 26 };
+  const h = compact ? 140 : 180;
+  // Compact: no axis text, so the bars can stretch to the card's width at a
+  // fixed height without distorting any lettering.
+  const pad = compact ? { l: 0, r: 0, t: 2, b: 2 } : { l: 36, r: 8, t: 8, b: 26 };
   const bw = (w - pad.l - pad.r) / Math.max(1, days.length);
   const weekly = days.length && days[0]!.from !== days[0]!.to;
   const label = (d: (typeof days)[number]) => {
@@ -33,20 +37,33 @@ export function OutcomesChart({ days }: { days: ShippingDepth["outcomes"] }) {
   const every = Math.ceil(days.length / 8);
   return (
     <div className="rounded-2xl bg-white p-5">
-      <h2 className="font-display text-lg font-bold text-gray-900">What happened to each {weekly ? "week's" : "day's"} orders</h2>
-      <p className="mt-1 text-sm text-gray-600">
-        Orders by the {weekly ? "week" : "day"} they were placed, split by outcome. Recent {weekly ? "weeks" : "days"} are mostly still
-        open, not failing.
-      </p>
-      <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 h-auto w-full" role="img" aria-label="Share of orders delivered, returned and still open, by order date">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="font-display text-lg font-bold text-gray-900">What happened to each {weekly ? "week's" : "day's"} orders</h2>
+        {compact ? (
+          <Link to={`/shipping?${period}`} className="whitespace-nowrap text-sm font-semibold text-accent-600 hover:underline">
+            See Shipping →
+          </Link>
+        ) : null}
+      </div>
+      {compact ? null : (
+        <p className="mt-1 text-sm text-gray-600">
+          Orders by the {weekly ? "week" : "day"} they were placed, split by outcome. Recent {weekly ? "weeks" : "days"} are mostly still
+          open, not failing.
+        </p>
+      )}
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio={compact ? "none" : undefined}
+        className={compact ? "mt-3 h-32 w-full sm:h-36" : "mt-3 h-auto w-full"}
+        role="img" aria-label="Share of orders delivered, returned and still open, by order date">
         {[0, 50, 100].map((t) => {
           const y = pad.t + ((100 - t) / 100) * (h - pad.t - pad.b);
           return (
             <g key={t}>
-              <line x1={pad.l} x2={w - pad.r} y1={y} y2={y} stroke="#E7EFEE" />
-              <text x={pad.l - 6} y={y + 3} textAnchor="end" className="fill-gray-500 text-[10px]">
+              <line x1={pad.l} x2={w - pad.r} y1={y} y2={y} stroke="#E7EFEE" vectorEffect="non-scaling-stroke" />
+              {compact ? null : <text x={pad.l - 6} y={y + 3} textAnchor="end" className="fill-gray-500 text-[10px]">
                 {t}%
-              </text>
+              </text>}
             </g>
           );
         })}
@@ -65,7 +82,7 @@ export function OutcomesChart({ days }: { days: ShippingDepth["outcomes"] }) {
                     return n ? <rect key={sg.key} x={x} y={y} width={Math.max(1, bw - 2)} height={Math.max(0, hh - (hh > 2 ? 1 : 0))} fill={sg.fill} rx="1" /> : null;
                   })
                 : null}
-              {i % every === 0 || (i === days.length - 1 && i % every >= every / 2) ? (
+              {!compact && (i % every === 0 || (i === days.length - 1 && i % every >= every / 2)) ? (
                 <text x={x + bw / 2} y={h - 8} textAnchor="middle" className="fill-gray-500 text-[10px]">
                   {label(d)}
                 </text>

@@ -20,7 +20,7 @@ import {
   homeView,
   ordersView,
   parseOutcome,
-  owedToday,
+  homeCards,
   periodFrom,
   shippingView,
   marketingView,
@@ -37,7 +37,7 @@ import {
   OrdersPanel,
   ShippingPanel,
 } from "~/components/metrics/SectionPanels";
-import { CoverageLine } from "~/components/metrics/Metrics";
+import { CoverageLine, DataHealth } from "~/components/metrics/Metrics";
 import { InventoryPanel } from "~/components/metrics/InventoryPanel";
 import { inventorySection } from "~/lib/metrics/inventory.server";
 import { messagingSection } from "~/lib/metrics/messaging.server";
@@ -106,24 +106,6 @@ export async function loader({ request, url }: Route.LoaderArgs) {
 
   const state = sectionState(definition, connections);
 
-  // Home is the one section with something real to show in Phase 1: the
-  // stores, and whether their apps are talking.
-  const homeStores =
-    section === "home"
-      ? await Promise.all(
-          stores.map(async (store) => ({
-            id: store.id,
-            shopDomain: store.shopDomain,
-            displayName: store.displayName,
-            currency: store.currency,
-            connections: await prisma.appConnection.findMany({
-              where: { storeId: store.id },
-              select: { app: true, status: true, lastSyncedAt: true },
-              orderBy: { app: "asc" },
-            }),
-          })),
-        )
-      : [];
 
   const customerCount =
     section === "customers" && active
@@ -161,14 +143,10 @@ export async function loader({ request, url }: Route.LoaderArgs) {
       asOf: state.kind === "reconnect" ? (state.asOf?.toISOString() ?? null) : null,
     },
     storeName: active?.displayName ?? active?.shopDomain ?? null,
-    homeStores: homeStores.map((store) => ({
-      ...store,
-      connections: store.connections.map((c) => ({
-        app: c.app,
-        status: c.status,
-        lastSyncedAt: c.lastSyncedAt?.toISOString() ?? null,
-      })),
-    })),
+    storeCount: stores.length,
+    // Home greets by the store's own clock, worked out here so the page
+    // does not change after it loads.
+    greeting: section === "home" ? greetingAt(active?.timezone ?? null) : null,
     customerCount,
     metrics,
     filterStores: {
@@ -238,7 +216,7 @@ async function buildMetrics(
         ...base,
         kind: "home" as const,
         view: compared(homeView(summary, prev!, viewer.canSeeMoney)),
-        owed: viewer.canSeeMoney ? await owedToday(storeId) : null,
+        cards: await homeCards(storeId, summary, viewer.canSeeMoney),
         inbox: await inboxView(summary, period.days, viewer),
       };
     }
@@ -316,9 +294,57 @@ async function buildMetrics(
   }
 }
 
+function greetingAt(timezone: string | null, at = new Date()): string {
+  const hour = Number(new Intl.DateTimeFormat("en-GB", { hour: "numeric", hourCycle: "h23", timeZone: timezone ?? "UTC" }).format(at));
+  return hour < 5 ? "Good evening" : hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+}
+
+const periodWords = (p: { days: number; custom: boolean; from: string; to: string }) =>
+  p.custom ? `from ${p.from} to ${p.to}` : `over the last ${p.days} days`;
+
 export default function SectionPage({ loaderData }: Route.ComponentProps) {
-  const { label, blurb, preview, state, section, homeStores, customerCount, metrics, storeName, filterStores } =
+  const { label, blurb, preview, state, section, storeCount, greeting, customerCount, metrics, storeName, filterStores } =
     loaderData;
+
+  if (metrics?.kind === "home") {
+    // Home: what needs the merchant, then how the store is doing. Filters,
+    // coverage and currency notes sit behind the period picker and the
+    // data chip; the detail is one click away in each section.
+    return (
+      <div>
+        <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="font-display text-3xl font-bold tracking-tight text-gray-900">{greeting ?? label}</h1>
+            <p className="mt-1 text-gray-600">
+              Here&apos;s {storeName ?? "your store"} {periodWords(metrics.period)}.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {storeCount >= 2 ? (
+              <Link to={`/compare?${metrics.period.query}`} className="px-2 text-sm font-semibold text-accent-600 hover:underline">
+                Compare stores
+              </Link>
+            ) : null}
+            <FilterBar
+              section={section}
+              stores={filterStores}
+              period={metrics.period}
+              firstDay={metrics.firstDay}
+              periods={metrics.periods}
+              previous={metrics.previous}
+              historyFrom={metrics.historyFrom}
+              scope={metrics.scope}
+              options={null}
+              keep=""
+              compact
+            />
+            <DataHealth gaps={metrics.coverage.gaps} fx={metrics.view.fx} period={metrics.period.query} />
+          </div>
+        </header>
+        <HomePanel view={metrics.view} inbox={metrics.inbox} cards={metrics.cards} period={metrics.period} />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -348,7 +374,6 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             keep={metrics.keepForScope}
           />
           <CoverageLine gaps={metrics.coverage.gaps} period={metrics.period.query} />
-          {metrics.kind === "home" ? <HomePanel view={metrics.view} owed={metrics.owed} inbox={metrics.inbox} period={metrics.period} /> : null}
           {metrics.kind === "finance" ? <FinancePanel view={metrics.view} ageing={metrics.ageing} depth={metrics.depth} period={metrics.period.query} scope={scopeQuery(metrics.scope)} /> : null}
           {metrics.kind === "marketing" ? <MarketingPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} /> : null}
           {metrics.kind === "marketing" && metrics.checkouts ? <CheckoutsPanel view={metrics.checkouts} canSeeMoney={metrics.canSeeMoney} /> : null}
@@ -432,60 +457,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
       ) : null}
 
       {state.kind === "open" && section === "home" ? (
-        <section className="space-y-3">
-          {homeStores.length >= 2 ? (
-            <div className="flex items-center justify-between">
-              <h2 className="font-display text-lg font-bold text-gray-900">Your stores</h2>
-              <Link to={`/compare?${metrics?.period.query ?? "days=30"}`} className="text-sm font-semibold text-accent-600 hover:underline">
-                Compare stores side by side →
-              </Link>
-            </div>
-          ) : null}
-          {homeStores.length === 0 ? (
-            <p className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-600">
-              Nothing to show yet.
-            </p>
-          ) : (
-            homeStores.map((store) => (
-              <Link
-                key={store.id}
-                to={`/stores/${store.id}`}
-                className="block rounded-2xl bg-white p-5 transition hover:shadow-md"
-              >
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="font-medium text-gray-900">
-                    {store.displayName ?? store.shopDomain}
-                  </span>
-                  <span className="text-sm text-gray-500">
-                    {/* From the app, never defaulted (rule #4). */}
-                    {store.currency ?? "currency not reported yet"}
-                  </span>
-                </div>
-                <p className="mt-1 truncate text-sm text-gray-500">
-                  {store.shopDomain}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {store.connections.length === 0 ? (
-                    <span className="text-xs text-gray-500">No apps connected</span>
-                  ) : (
-                    store.connections.map((connection) => (
-                      <span
-                        key={connection.app}
-                        className={
-                          connection.status === "CONNECTED"
-                            ? "rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700"
-                            : "rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700"
-                        }
-                      >
-                        {APP_LABELS[connection.app as keyof typeof APP_LABELS]}
-                      </span>
-                    ))
-                  )}
-                </div>
-              </Link>
-            ))
-          )}
-        </section>
+        <p className="rounded-2xl bg-white p-8 text-center text-sm text-gray-600">Nothing to show yet.</p>
       ) : null}
 
       {state.kind === "open" && section !== "home" && !metrics ? (

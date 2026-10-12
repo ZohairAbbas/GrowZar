@@ -8,7 +8,6 @@ import type {
   ShippingDepth,
   HomeView,
   MarketingView,
-  Owed,
   OrdersView,
   ShippingView,
 } from "~/lib/metrics/screens.server";
@@ -24,7 +23,7 @@ import {
   outcomeLabel,
   Stat,
 } from "./Metrics";
-import { InboxCards } from "./FindingCards";
+import { AttentionList } from "./FindingCards";
 import { scopeLabel } from "./FilterBar";
 import { CohortGrid, RepeatCurve } from "./Retention";
 import { CashTimelineCard, CourierDeductions, MoneyBreakdown } from "./FinanceDepth";
@@ -46,140 +45,115 @@ import type { InboxView } from "~/lib/insights/inbox.server";
 
 export function HomePanel({
   view,
-  owed,
   inbox,
+  cards,
   period,
 }: {
   view: HomeView;
-  owed: Owed | null;
   inbox: InboxView;
+  cards: { cash: FinanceDepth["cash"] | null; outcomes: ShippingDepth["outcomes"] };
   period: { from: string; to: string; query: string };
 }) {
   return (
     <section className="space-y-6">
-      <HomeMetrics view={view} owed={owed} />
-      <FxNotice fx={view.fx} />
-      <InboxCards inbox={inbox} from={period.from} to={period.to} period={period.query} />
+      <AttentionList inbox={inbox} period={period.query} />
+      <HomeTiles view={view} period={period.query} />
+      {cards.cash ? <CashTimelineCard cash={cards.cash} period={period.query} scope="" compact /> : null}
+      <OutcomesChart days={cards.outcomes} period={period.query} compact />
     </section>
   );
 }
 
-/** One amount large, any other currencies under it, never added (rule #4). */
-function BigMoney({ values, base, empty = "—" }: { values: { amount: string; currency: string }[]; base: string | null; empty?: string }) {
-  // The store's currency leads; anything left in another is unconverted (rule #4).
+/** One amount, whole units, store currency first; others noted, never added (rule #4). */
+function TileMoney({ values, base }: { values: { amount: string; currency: string }[]; base: string | null }) {
   const [first, ...rest] = baseFirst(values, base);
-  if (!first) return <span>{empty}</span>;
+  if (!first) return <>—</>;
   return (
     <span className="flex flex-col">
       <span className="tabular-nums">
-        <span className="mr-1.5 text-[0.55em] font-semibold opacity-80">{first.currency}</span>
+        <span className="mr-1 text-[0.6em] font-semibold text-gray-500">{first.currency}</span>
         {formatAmount(first.amount).replace(/\.\d+$/, "")}
       </span>
-      {rest.map((m) => (
-        <span key={m.currency} className="mt-1 font-sans text-sm font-semibold tabular-nums opacity-80">
-          + {formatAmount(m.amount)} {m.currency}, not converted
+      {rest.length ? (
+        <span className="font-sans text-xs font-semibold text-gray-500">
+          + {rest.map((m) => `${formatAmount(m.amount)} ${m.currency}`).join(" + ")}, not converted
         </span>
-      ))}
+      ) : null}
     </span>
   );
 }
 
-/**
- * The headline row: one big figure, two beside it, and what is owed to the
- * merchant in coral. Without Finance permission the same places hold counts.
- */
-function HomeMetrics({ view, owed }: { view: HomeView; owed: Owed | null }) {
-  const rate = view.deliveryRate;
-  const peak = Math.max(1, ...view.daily.map((d) => d.delivered));
-  const money = view.money;
-  const delivered = view.funnel.find((f) => f.label === "Delivered")?.count ?? rate.delivered;
+function Tile({ label, to, children, foot }: { label: string; to: string; children: React.ReactNode; foot: React.ReactNode }) {
   return (
-    <div className="grid gap-3.5 lg:grid-cols-[1.35fr_1fr_1fr]">
-      <div className="flex flex-col gap-2.5 rounded-2xl bg-navy p-6 text-white">
-        <span className="text-sm font-semibold text-navy-muted">{money ? "Delivered revenue" : "Delivered orders"}</span>
-        <span className="font-display text-4xl font-bold leading-none tracking-tight">
-          {money ? <BigMoney values={money.deliveredRevenue} base={view.base} /> : delivered.toLocaleString()}
-        </span>
-        <Change h={view.compare.delivered} kind={money ? "money" : "count"} dark />
-        <div className="mt-3 flex min-h-[3rem] flex-1 items-end gap-[3px]" aria-hidden="true">
-          {view.daily.map((d, i) => (
-            <span
-              key={d.day}
-              title={`${d.day}: ${d.delivered} delivered`}
-              className={`flex-1 rounded-sm ${i === view.daily.length - 1 ? "bg-mint" : "bg-navy-line"}`}
-              style={{ height: `${Math.max(4, (100 * d.delivered) / peak)}%` }}
-            />
-          ))}
-        </div>
-        <span className="text-xs text-navy-muted">
-          {delivered.toLocaleString()} delivered orders, by the day each was placed
-        </span>
-      </div>
+    <Link to={to} className="group flex min-w-0 flex-col gap-1.5 rounded-2xl bg-white p-4 transition hover:shadow-md sm:p-5">
+      <span className="flex items-center justify-between text-sm font-semibold text-gray-700">
+        {label}
+        <ArrowRight className="h-4 w-4 text-gray-300 transition group-hover:text-gray-500" aria-hidden="true" />
+      </span>
+      <span className="font-display text-xl font-bold tracking-tight text-gray-900 sm:text-3xl">{children}</span>
+      <span className="flex flex-col gap-0.5">{foot}</span>
+    </Link>
+  );
+}
 
-      <div className="flex flex-col gap-3.5">
-        <div className="flex flex-1 flex-col gap-1.5 rounded-2xl bg-white p-5">
-          <span className="text-sm font-semibold text-gray-700">Delivery rate</span>
-          <span className="font-display text-3xl font-bold tabular-nums">
-            {rate.rate === null ? "—" : `${(100 * rate.rate).toFixed(1)}%`}
-          </span>
-          <Change h={view.compare.deliveryRate} kind="rate" />
-          <Sparkline trend={view.compare.deliveryRate.trend} />
-          <span className="self-start rounded-full bg-field px-2.5 py-0.5 text-xs font-semibold text-gray-700">
-            {rate.stillOpen.toLocaleString()} still in transit · {(rate.delivered + rate.returned).toLocaleString()} decided
-          </span>
-        </div>
-        <div className="flex flex-1 flex-col gap-1.5 rounded-2xl bg-white p-5">
-          <span className="text-sm font-semibold text-gray-700">{money ? "Profit after returns" : "Returned"}</span>
-          <span className="font-display text-3xl font-bold">
-            {money ? (
-              money.profit ? <BigMoney values={[money.profit]} base={view.base} /> : "—"
-            ) : (
-              rate.returned.toLocaleString()
-            )}
-          </span>
-          {view.compare.profit ? <Change h={view.compare.profit} kind="money" /> : null}
-          {money?.profit ? (
-            <span className="text-xs text-gray-500">Delivered revenue less product cost, courier fees and ads</span>
-          ) : null}
-        </div>
-      </div>
-
-      {owed ? (
-        <div className="flex flex-col gap-2.5 rounded-2xl bg-coral p-6 text-navy">
-          <span className="text-sm font-bold">COD not yet paid, as of today</span>
-          <span className="font-display text-4xl font-bold leading-none tracking-tight">
-            <BigMoney values={owed.amounts} base={view.base} empty="Nothing owed" />
-          </span>
-          <span className="font-medium leading-snug">
-            {owed.orders
-              ? `${owed.orders.toLocaleString()} delivered order${owed.orders === 1 ? "" : "s"}, any order date, from couriers whose payouts Courierify records.`
-              : "Every delivered Courierify order has a courier payout recorded."}
-          </span>
-          {owed.untracked.length === 1 ? (
-            <Link to={`/orders?unpaid=${encodeURIComponent(owed.untracked[0]!.courier)}`} className="text-sm font-medium leading-snug underline-offset-2 hover:underline">
-              Apart: {owed.untracked[0]!.amounts.map((m) => `${formatAmount(m.amount).replace(/\.\d+$/, "")} ${m.currency}`).join(" + ")} delivered by{" "}
-              {owed.untracked[0]!.courier} ({owed.untracked[0]!.orders.toLocaleString()} orders), whose payouts Courierify has never recorded.
-            </Link>
-          ) : owed.untracked.length > 1 ? (
-            <Link to="/finance" className="text-sm font-medium leading-snug underline-offset-2 hover:underline">
-              Apart: {owed.untracked.reduce((n, u) => n + u.orders, 0).toLocaleString()} delivered orders from {owed.untracked.length} couriers
-              whose payouts Courierify has never recorded.
-            </Link>
-          ) : null}
-          <Link
-            to="/finance"
-            className="mt-auto inline-flex items-center gap-2 self-start rounded-full bg-navy px-5 py-3 text-sm font-bold text-white hover:bg-navy-surface"
-          >
-            See Finance <ArrowRight className="h-4 w-4 text-mint" />
-          </Link>
-        </div>
+/**
+ * Four even tiles, each opening its section. Money only for a role that may
+ * see Finance; in its place, counts. A delivery rate always carries what is
+ * still in transit (rule #8).
+ */
+function HomeTiles({ view, period }: { view: HomeView; period: string }) {
+  const rate = view.deliveryRate;
+  const money = view.money;
+  const orders = view.funnel[0]?.count ?? 0;
+  const profit = money?.profit ?? null;
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {money ? (
+        <Tile label="Delivered revenue" to={`/finance?${period}`} foot={<Change h={view.compare.delivered} kind="money" />}>
+          <TileMoney values={money.deliveredRevenue} base={view.base} />
+        </Tile>
       ) : (
-        <div className="flex flex-col gap-2.5 rounded-2xl bg-white p-6">
-          <span className="text-sm font-semibold text-gray-700">Still in transit</span>
-          <span className="font-display text-4xl font-bold">{rate.stillOpen.toLocaleString()}</span>
-          <span className="text-sm text-gray-500">Orders with no final outcome yet.</span>
-        </div>
+        <Tile label="Delivered orders" to={`/shipping?${period}`} foot={<Change h={view.compare.delivered} kind="count" />}>
+          {rate.delivered.toLocaleString()}
+        </Tile>
       )}
+      <Tile
+        label="Delivery rate"
+        to={`/shipping?${period}`}
+        foot={
+          <>
+            <Change h={view.compare.deliveryRate} kind="rate" />
+            <span className="text-xs text-gray-500">{rate.stillOpen.toLocaleString()} still in transit</span>
+          </>
+        }
+      >
+        {rate.rate === null ? "—" : `${(100 * rate.rate).toFixed(1)}%`}
+      </Tile>
+      {money ? (
+        <Tile
+          label="Profit after returns"
+          to={`/finance?${period}`}
+          foot={
+            <>
+              {view.compare.profit ? <Change h={view.compare.profit} kind="money" /> : null}
+              {profit && !profit.complete ? (
+                <span className="text-xs text-gray-500" title={`Not subtracted yet: ${profit.missing.join("; ")}`}>
+                  at most · {profit.missing.length} cost{profit.missing.length === 1 ? "" : "s"} missing
+                </span>
+              ) : null}
+            </>
+          }
+        >
+          {profit ? <TileMoney values={[profit]} base={view.base} /> : "—"}
+        </Tile>
+      ) : (
+        <Tile label="Returned" to={`/shipping?${period}`} foot={<span className="text-xs text-gray-500">orders the courier sent back</span>}>
+          {rate.returned.toLocaleString()}
+        </Tile>
+      )}
+      <Tile label="Orders placed" to={`/orders?${period}`} foot={<Change h={view.compare.orders} kind="count" />}>
+        {orders.toLocaleString()}
+      </Tile>
     </div>
   );
 }

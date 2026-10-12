@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useFetcher } from "react-router";
-import { ArrowRight, ChevronLeft, ChevronRight, Database, Lightbulb, Mail, Package, Target, Truck, Undo2, Wallet, X } from "lucide-react";
+import { ArrowRight, Database, Lightbulb, Mail, Package, Target, Truck, Undo2, Wallet, X } from "lucide-react";
 
 import type {
   CashHeldFinding,
@@ -834,38 +834,146 @@ function CityReturnsCard({ f, period, id, canManage }: { f: CityReturnsFinding }
   );
 }
 
-export function InboxCards({ inbox, from, to, period }: { inbox: InboxView; from: string; to: string; period: string }) {
-  const reopen = useFetcher();
+export type InsightsTab = "action" | "info" | "hidden" | "checked";
+
+export const parseInsightsTab = (v: string | null): InsightsTab =>
+  v === "info" || v === "hidden" || v === "checked" ? v : "action";
+
+/**
+ * Home's "Needs your attention": up to three findings ranked specific
+ * (rankInsights), as slim rows. The headline opens the full card in
+ * Details; everything else lives on the Insights page.
+ */
+export function AttentionList({ inbox, period }: { inbox: InboxView; period: string }) {
+  const action = inbox.items.filter((i) => i.insight.rank.group === "specific");
+  const shown = action.slice(0, 3);
+  const total = inbox.items.length + inbox.overflow;
+  const details = useDetails(inbox.items, period, inbox.canManage);
   return (
-    <section className="space-y-3" aria-labelledby="findings-heading">
-      <div>
-        <h2 id="findings-heading" className="font-display text-xl font-bold text-gray-900">
-          What Growzar found{" "}
-          {inbox.items.length ? <span className="font-sans text-base font-semibold text-gray-500">· {n(inbox.items.length)}</span> : null}
+    <section aria-labelledby="attention-heading" className="space-y-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="attention-heading" className="font-display text-xl font-bold text-gray-900">
+          Needs your attention{" "}
+          {action.length ? <span className="font-sans text-base font-semibold text-gray-500">· {n(action.length)}</span> : null}
         </h2>
-        <p className="mt-0.5 text-xs text-gray-500">
-          {from} to {to}, measured from your connected apps. Open Details on a card for the full figures and what they
-          leave out.
-        </p>
+        {total ? (
+          <Link to={`/insights?${period}`} className="whitespace-nowrap text-sm font-semibold text-accent-600 hover:underline">
+            See all {n(total)} insight{total === 1 ? "" : "s"} →
+          </Link>
+        ) : null}
       </div>
-      {inbox.items.length === 0 ? (
-        <p className="rounded-2xl bg-white p-6 text-sm text-gray-600">
-          Nothing to show in this period. What was checked, and why it found nothing, is listed below.
-        </p>
+      {shown.length ? (
+        <ul className="divide-y divide-gray-100 rounded-2xl bg-white px-2">
+          {shown.map((item) => {
+            const s = summaryOf(item.insight.finding, period);
+            const area = AREAS[item.insight.finding.kind];
+            return (
+              <li key={item.id} className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 px-3 py-4 md:grid-cols-[auto_minmax(0,1fr)_auto_auto]">
+                <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${area.tint}`} title={area.label}>
+                  <area.Icon className="h-[18px] w-[18px]" aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => details.open(item)}
+                    className="text-left font-semibold text-gray-900 hover:underline"
+                  >
+                    {s.headline}
+                  </button>
+                  <p className="line-clamp-2 text-sm text-gray-500">{s.next ?? s.why ?? s.note}</p>
+                </div>
+                <p className="col-start-2 font-display text-xl font-bold tabular-nums text-gray-900 md:col-start-auto md:text-right">
+                  {s.figure}
+                </p>
+                <div className="col-start-2 md:col-start-auto md:justify-self-end">
+                  {s.link ? (
+                    <Link
+                      to={via(item.id, s.link.to)}
+                      className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-surface"
+                    >
+                      {s.link.label} <ArrowRight className="h-4 w-4 text-mint" />
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => details.open(item)}
+                      className="rounded-full bg-field px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+                    >
+                      Details
+                    </button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       ) : (
-        <InsightCarousel items={inbox.items} period={period} canManage={inbox.canManage} />
+        <p className="rounded-2xl bg-white px-5 py-4 text-sm text-gray-600">
+          Nothing needs your attention in this period.
+          {total ? " What Growzar found is on the Insights page." : ""}
+        </p>
       )}
-      {inbox.overflow ? (
+      {details.dialog}
+    </section>
+  );
+}
+
+/**
+ * The Insights page: every finding as a compact card, in four tabs. The tab
+ * is a query parameter, so it works before scripts load and can be linked.
+ */
+export function InsightsBoard({ inbox, period, tab }: { inbox: InboxView; period: string; tab: InsightsTab }) {
+  const reopen = useFetcher();
+  const action = inbox.items.filter((i) => i.insight.rank.group === "specific");
+  const info = inbox.items.filter((i) => i.insight.rank.group === "context");
+  const details = useDetails(inbox.items, period, inbox.canManage);
+  const tabs: Array<{ id: InsightsTab; label: string; count: number }> = [
+    { id: "action", label: "Needs action", count: action.length },
+    { id: "info", label: "Good to know", count: info.length },
+    { id: "hidden", label: "Dismissed & snoozed", count: inbox.hidden.length },
+    { id: "checked", label: "Also checked", count: inbox.checked.length },
+  ];
+  const cards = tab === "action" ? action : tab === "info" ? info : [];
+  return (
+    <section className="space-y-4">
+      <nav aria-label="Insight groups" className="flex flex-wrap gap-2 text-sm font-semibold">
+        {tabs.map((t) => (
+          <Link
+            key={t.id}
+            to={`?${period}${t.id === "action" ? "" : `&tab=${t.id}`}`}
+            preventScrollReset
+            aria-current={t.id === tab ? "page" : undefined}
+            className={`rounded-full px-4 py-2 ${t.id === tab ? "bg-navy text-white" : "bg-white text-gray-700 hover:bg-gray-100"}`}
+          >
+            {t.label} <span className="opacity-70">{n(t.count)}</span>
+          </Link>
+        ))}
+      </nav>
+
+      {tab === "action" || tab === "info" ? (
+        cards.length ? (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {cards.map((item) => (
+              <CompactCard key={item.id} item={item} period={period} onDetails={() => details.open(item)} />
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-2xl bg-white p-6 text-sm text-gray-600">
+            {tab === "action" ? "Nothing needs action in this period." : "Nothing else found in this period."}
+          </p>
+        )
+      ) : null}
+      {(tab === "action" || tab === "info") && inbox.overflow ? (
         <p className="text-xs text-gray-500">{n(inbox.overflow)} more found; dismiss or snooze one to see the next.</p>
       ) : null}
-      {inbox.hidden.length ? (
-        <details className="rounded-2xl bg-white px-5 py-4 text-sm">
-          <summary className="cursor-pointer font-semibold text-gray-700">Dismissed and snoozed ({n(inbox.hidden.length)})</summary>
-          <ul className="mt-2 space-y-1.5">
+
+      {tab === "hidden" ? (
+        inbox.hidden.length ? (
+          <ul className="divide-y divide-gray-100 rounded-2xl bg-white px-5">
             {inbox.hidden.map((h) => (
-              <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
+              <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm text-gray-600">
                 <span>
-                  {h.label} ·{" "}
+                  <span className="font-semibold text-gray-900">{h.label}</span> ·{" "}
                   {h.status === "dismissed"
                     ? `dismissed: ${REASONS.find(([v]) => v === h.reason)?.[1] ?? "no reason"}`
                     : `snoozed until ${h.snoozedUntil?.slice(0, 10)}`}
@@ -873,7 +981,7 @@ export function InboxCards({ inbox, from, to, period }: { inbox: InboxView; from
                 {inbox.canManage ? (
                   <reopen.Form method="post" action={`/insights/${h.id}`}>
                     <input type="hidden" name="intent" value="reopen" />
-                    <button type="submit" className="text-primary-600 hover:underline">
+                    <button type="submit" className="rounded-full bg-field px-3.5 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-100">
                       Reopen
                     </button>
                   </reopen.Form>
@@ -881,21 +989,24 @@ export function InboxCards({ inbox, from, to, period }: { inbox: InboxView; from
               </li>
             ))}
           </ul>
-        </details>
+        ) : (
+          <p className="rounded-2xl bg-white p-6 text-sm text-gray-600">Nothing dismissed or snoozed.</p>
+        )
       ) : null}
-      {inbox.checked.length ? (
-        <details className="rounded-2xl bg-white px-5 py-4 text-sm">
-          <summary className="cursor-pointer font-semibold text-gray-700">Also checked ({n(inbox.checked.length)})</summary>
-          <ul className="mt-2 space-y-1.5 text-xs text-gray-600">
-            {inbox.checked.map((c) => (
-              <li key={c.label}>
-                <span className="font-medium text-gray-700">{c.label}</span>:{" "}
-                {c.status === "nothing_found" ? "nothing found" : c.status === "not_enough_data" ? "not enough data" : "locked"} ({c.text}).
-              </li>
-            ))}
-          </ul>
-        </details>
+
+      {tab === "checked" ? (
+        <ul className="divide-y divide-gray-100 rounded-2xl bg-white px-5">
+          {inbox.checked.map((c) => (
+            <li key={c.label} className="flex flex-wrap justify-between gap-x-6 gap-y-1 py-3 text-sm">
+              <span className="font-semibold text-gray-900">{c.label}</span>
+              <span className="text-gray-600">
+                {c.status === "nothing_found" ? "Nothing found" : c.status === "not_enough_data" ? "Not enough data" : "Locked"} · {c.text}
+              </span>
+            </li>
+          ))}
+        </ul>
       ) : null}
+      {details.dialog}
     </section>
   );
 }
@@ -1233,81 +1344,22 @@ function CompactCard({ item, period, onDetails }: { item: InboxItem; period: str
 }
 
 /**
- * Findings as a row of compact cards the merchant pages through, rather than
- * a page of long cards to scroll: three across on a wide screen, one on a
- * phone (swipe, or the arrows). Details opens the full card in a dialog,
- * with snooze and dismiss.
+ * Details: the full card for one finding in a dialog, with snooze and
+ * dismiss. It closes itself once that finding leaves the list.
  */
-function InsightCarousel({ items, period, canManage }: { items: InboxItem[]; period: string; canManage: boolean }) {
-  const track = useRef<HTMLDivElement>(null);
-  const [at, setAt] = useState(0);
-  const [perView, setPerView] = useState(1);
+function useDetails(items: InboxItem[], period: string, canManage: boolean) {
   const [open, setOpen] = useState<InboxItem | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
-
-  const measure = () => {
-    const el = track.current;
-    const card = el?.firstElementChild as HTMLElement | null;
-    if (!el || !card) return;
-    const step = card.offsetWidth + 16;
-    setPerView(Math.max(1, Math.round((el.clientWidth + 16) / step)));
-    setAt(Math.round(el.scrollLeft / step));
-  };
-  useEffect(() => {
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [items.length]);
   useEffect(() => {
     if (open) dialog.current?.showModal();
     else dialog.current?.close();
   }, [open]);
-  // A snooze or dismiss from Details takes the card out of the list: close it.
   useEffect(() => {
     if (open && !items.some((i) => i.id === open.id)) setOpen(null);
   }, [items, open]);
-
-  const pages = Math.max(1, items.length - perView + 1);
-  const go = (to: number) => {
-    const el = track.current;
-    const card = el?.firstElementChild as HTMLElement | null;
-    if (!el || !card) return;
-    el.scrollTo({ left: Math.max(0, Math.min(to, pages - 1)) * (card.offsetWidth + 16), behavior: "smooth" });
-  };
-  const arrow = "flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40";
-
-  return (
-    <div>
-      <div
-        ref={track}
-        onScroll={measure}
-        className="-mx-1 flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {items.map((item) => (
-          <div key={item.id} className="w-[85%] flex-none snap-start sm:w-[calc((100%-1rem)/2)] xl:w-[calc((100%-2rem)/3)]">
-            <CompactCard item={item} period={period} onDetails={() => setOpen(item)} />
-          </div>
-        ))}
-      </div>
-      {pages > 1 ? (
-        <div className="mt-3 flex items-center justify-center gap-3">
-          <button type="button" aria-label="Previous findings" className={arrow} disabled={at <= 0} onClick={() => go(at - 1)}>
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <span className="flex items-center gap-1.5" aria-hidden="true">
-            {Array.from({ length: pages }, (_, i) => (
-              <span key={i} className={`h-2 rounded-full transition-all ${i === at ? "w-5 bg-navy" : "w-2 bg-gray-300"}`} />
-            ))}
-          </span>
-          <span className="sr-only" aria-live="polite">
-            Showing {at + 1} to {Math.min(at + perView, items.length)} of {items.length}
-          </span>
-          <button type="button" aria-label="Next findings" className={arrow} disabled={at >= pages - 1} onClick={() => go(at + 1)}>
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      ) : null}
-
+  return {
+    open: setOpen,
+    dialog: (
       <dialog
         ref={dialog}
         onClose={() => setOpen(null)}
@@ -1328,6 +1380,6 @@ function InsightCarousel({ items, period, canManage }: { items: InboxItem[]; per
           </div>
         ) : null}
       </dialog>
-    </div>
-  );
+    ),
+  };
 }

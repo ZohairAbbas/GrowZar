@@ -60,6 +60,8 @@ export default [
     route("inbox", "routes/section.tsx", { id: "section-inbox" }),
     // Store versus store for multi-store organizations (Phase 4b, D5).
     route("compare", "routes/compare.tsx"),
+    // Every finding, in tabs; Home shows only what needs action.
+    route("insights", "routes/insights._index.tsx"),
   ]),
 
   layout("routes/settings.tsx", [
