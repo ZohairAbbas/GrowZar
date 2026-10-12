@@ -51,7 +51,108 @@ export type BuyerHistoryView = {
   otpEnabled: boolean | null;
   /** Share of the period's orders placed through Preventify's COD form (OTP reaches only these); null without Preventify. */
   formShare: number | null;
+  /** I5 on network history (G-GZR5-17), when Courierify has answered for any order. */
+  network?: NetworkHistory | null;
 };
+
+// ── I5 on network history (G-GZR5-17) ───────────────────────────────────────
+
+/**
+ * Each decided order by Courierify's label for its buyer *when it was
+ * placed* (G-CFY5-3's cut-off), against what the order did. The label is
+ * Courierify's own (D-54); what is measured here is whether it predicts this
+ * store's returns. Over HISTORY_DAYS whatever the period: the labels are
+ * asked once per order, and high-risk orders are few.
+ */
+export type NetworkLevel = "high" | "medium" | "low" | "insufficient_data";
+export const NETWORK_LEVELS: NetworkLevel[] = ["high", "medium", "low", "insufficient_data"];
+
+export type NetworkLabelRow = { level: NetworkLevel; delivered: number; returned: number; rate: number | null };
+
+export type NetworkHistory = {
+  days: number;
+  rows: NetworkLabelRow[];
+  /** Decided Courierify orders in the window, and how many have a label yet. */
+  decided: number;
+  labelled: number;
+  /** Open orders (last 30 days) counted high risk now (`isHighRisk`). */
+  openHigh: number;
+};
+
+export function networkHistory(
+  orders: ReadonlyArray<{ outcome: string; status: string | null; riskLevel: string | null }>,
+  days: number,
+  openHigh: number,
+): NetworkHistory {
+  const rows = new Map<NetworkLevel, NetworkLabelRow>(NETWORK_LEVELS.map((l) => [l, { level: l, delivered: 0, returned: 0, rate: null }]));
+  let decidedN = 0;
+  let labelled = 0;
+  for (const o of orders) {
+    if (!decided(o.outcome)) continue;
+    decidedN += 1;
+    const r = o.status === "ok" && o.riskLevel ? rows.get(o.riskLevel as NetworkLevel) : undefined;
+    if (!r) continue;
+    labelled += 1;
+    if (o.outcome === "delivered") r.delivered += 1;
+    else r.returned += 1;
+  }
+  for (const r of rows.values()) {
+    const d = r.delivered + r.returned;
+    r.rate = d ? Math.round((1000 * r.returned) / d) / 10 : null;
+  }
+  return { days, rows: NETWORK_LEVELS.map((l) => rows.get(l)!), decided: decidedN, labelled, openHigh };
+}
+
+export type NetworkRiskFinding = {
+  kind: "network_risk";
+  days: number;
+  decided: number;
+  rate: number;
+  restDecided: number;
+  restRate: number;
+  gapPoints: number;
+  z: number;
+  /** Return rate of orders whose buyer Courierify rated low, when it has orders. */
+  lowRate: number | null;
+  openHigh: number;
+};
+
+/** I5 on network history: orders from buyers Courierify rated high when ordering come back far more often. */
+export function networkRiskFinding(v: BuyerHistoryView | null | undefined): NetworkRiskFinding | Skip {
+  const h = v?.network;
+  if (!h || !h.labelled) return { kind: "skip", status: "not_enough_data", reason: "Courierify has not labelled any decided order of this store yet" };
+  const high = h.rows.find((r) => r.level === "high")!;
+  const rest = h.rows.filter((r) => r.level !== "high");
+  const d = high.delivered + high.returned;
+  const restReturned = rest.reduce((n, r) => n + r.returned, 0);
+  const restDecided = rest.reduce((n, r) => n + r.delivered + r.returned, 0);
+  if (d < MIN_DECIDED || restDecided < MIN_DECIDED) {
+    return { kind: "skip", status: "not_enough_data", reason: `${d} decided orders from buyers Courierify rated high when they ordered, in ${h.days} days; ${MIN_DECIDED} are needed` };
+  }
+  const rate = (100 * high.returned) / d;
+  const restRate = (100 * restReturned) / restDecided;
+  const z = zScore(high.returned, d, restReturned, restDecided);
+  if (rate - restRate < GAP_POINTS || z < MIN_ROUTE_Z) {
+    return {
+      kind: "skip",
+      status: "nothing_found",
+      reason: `Buyers Courierify rated high come back ${rate.toFixed(1)}% of the time against ${restRate.toFixed(1)}% for everyone else: not a clear enough gap`,
+    };
+  }
+  const low = h.rows.find((r) => r.level === "low")!;
+  return {
+    kind: "network_risk",
+    days: h.days,
+    decided: d,
+    rate: Math.round(rate * 10) / 10,
+    restDecided,
+    restRate: Math.round(restRate * 10) / 10,
+    gapPoints: Math.round((rate - restRate) * 10) / 10,
+    z: Math.round(z * 100) / 100,
+    lowRate: low.delivered + low.returned >= MIN_DECIDED ? low.rate : null,
+    openHigh: h.openHigh,
+  };
+}
 
 /** The period's orders (by id) in each band, with what they did. */
 export function buyerHistoryView(input: {

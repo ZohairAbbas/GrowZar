@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bandOrders, buyerHistoryView, returnersFinding, type HistoryOrder } from "./buyer-history";
+import { bandOrders, buyerHistoryView, networkHistory, networkRiskFinding, returnersFinding, type HistoryOrder } from "./buyer-history";
 
 const day = (d: number) => new Date(Date.UTC(2026, 6, 1) + d * 86_400_000);
 const o = (id: string, customerId: string, placed: number, outcome: string, decidedOn: number | null): HistoryOrder => ({
@@ -50,5 +50,27 @@ describe("I5 per store", () => {
     const v = buyerHistoryView({ history: [o("a", "c", 1, "delivered", 2), o("b", "d", 1, "delivered", 2)], periodOrderIds: new Set(["a", "b"]), otpEnabled: false, formOrderIds: new Set(["a"]) });
     expect(v.formShare).toBe(50);
     expect(buyerHistoryView({ history: [], periodOrderIds: new Set(["a"]), otpEnabled: null }).formShare).toBeNull();
+  });
+});
+
+describe("I5 on network history (G-GZR5-17)", () => {
+  // Made-up numbers.
+  const orders = (k: number, outcome: string, riskLevel: string | null, status: string | null = "ok") => Array.from({ length: k }, () => ({ outcome, status, riskLevel }));
+  const view = (rows: ReturnType<typeof orders>) => ({ bands: [], returnsFromReturners: null, otpEnabled: null, formShare: null, network: networkHistory(rows, 180, 4) });
+
+  it("counts decided orders by Courierify's label then, leaving out open and unlabelled ones", () => {
+    const h = networkHistory([...orders(3, "returned", "high"), ...orders(1, "delivered", "high"), ...orders(2, "in_transit", "high"), ...orders(5, "delivered", null, null), ...orders(1, "returned", null, "not_your_customer")], 180, 0);
+    expect(h).toMatchObject({ decided: 10, labelled: 4 });
+    expect(h.rows[0]).toEqual({ level: "high", delivered: 1, returned: 3, rate: 75 });
+  });
+
+  it("fires when high-rated buyers come back far more often, with enough orders", () => {
+    const f = networkRiskFinding(view([...orders(20, "returned", "high"), ...orders(15, "delivered", "high"), ...orders(30, "returned", "low"), ...orders(270, "delivered", "low")]));
+    expect(f).toMatchObject({ kind: "network_risk", decided: 35, rate: 57.1, restDecided: 300, restRate: 10, lowRate: 10, openHigh: 4 });
+  });
+
+  it("waits for 30 decided high-rated orders, and stays quiet without a clear gap", () => {
+    expect(networkRiskFinding(view([...orders(5, "returned", "high"), ...orders(5, "delivered", "high"), ...orders(100, "delivered", "low")]))).toMatchObject({ status: "not_enough_data" });
+    expect(networkRiskFinding(view([...orders(4, "returned", "high"), ...orders(31, "delivered", "high"), ...orders(30, "returned", "low"), ...orders(270, "delivered", "low")]))).toMatchObject({ status: "nothing_found" });
   });
 });

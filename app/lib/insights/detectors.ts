@@ -35,7 +35,7 @@ import {
 import { stockoutFindings } from "../metrics/stockout";
 import { unfollowedCheckoutsFinding } from "../metrics/checkouts";
 import { offerReturnsFindings } from "../metrics/offers";
-import { returnersFinding } from "../metrics/buyer-history";
+import { networkRiskFinding, returnersFinding } from "../metrics/buyer-history";
 
 export type App = "COURIERIFY" | "FINANCIFY" | "INVENTORIFY" | "RETAINIFY" | "PREVENTIFY" | "WHATKABOT";
 
@@ -57,7 +57,8 @@ export type DetectorId =
   | "unfollowed_checkouts"
   | "unfollowed_form_abandonments"
   | "offer_returns"
-  | "returners";
+  | "returners"
+  | "network_risk";
 
 export type Insight = {
   detector: DetectorId;
@@ -338,6 +339,19 @@ export const DETECTORS: readonly Detector[] = [
       return [insight("returners", "store", f, { group: "specific", ordersAffected: f.orders }, false)];
     },
   },
+  {
+    // I5 on network history (G-GZR5-17): Courierify's label for the buyer
+    // when each order was placed, measured against this store's returns.
+    id: "network_risk",
+    needs: ["COURIERIFY"],
+    label: "Buyers Courierify rated high risk, returning",
+    preview: "How often buyers Courierify's network rated high risk when they ordered send the parcel back",
+    run(input) {
+      const f = networkRiskFinding(input.buyerHistory);
+      if (f.kind === "skip") return f;
+      return [insight("network_risk", "store", f, { group: "specific", ordersAffected: f.openHigh }, false)];
+    },
+  },
 ];
 
 export function runDetectors(input: FindingsInput, connected: ReadonlySet<App>): DetectorOutcome[] {
@@ -418,6 +432,8 @@ export function evidenceOf(i: Insight): Record<string, number | string> {
       return { unitemized: f.unitemized.amount, share: f.unitemizedShare, statements: f.statements };
     case "returners":
       return { rate: f.rate, restRate: f.restRate, decided: f.decided, z: f.z };
+    case "network_risk":
+      return { rate: f.rate, restRate: f.restRate, decided: f.decided, z: f.z, openHigh: f.openHigh };
     case "offer_returns":
       return { type: f.type, returnRate: f.returnRate, baselineRate: f.baselineRate, decided: f.decided, valueLift: f.valueLiftPct ?? "" };
     case "unfollowed_checkouts":

@@ -81,6 +81,7 @@ model Store {
   profitSettings StoreProfitSettings?
   insights       Insight[]
   buyerNetwork   BuyerNetwork[]
+  orderNetwork   OrderNetwork[]
 
   @@index([organizationId])
   @@map("stores")
@@ -996,4 +997,29 @@ model BuyerNetwork {
   @@id([storeId, customerId])
   @@index([storeId, riskLevel])
   @@map("buyer_network")
+}
+
+/// Courierify's answer about an order's buyer as it stood when the order was
+/// placed (G-CFY5-3's `before` = the order's createdAt), for I5 on network
+/// history. Nothing after the order counts in it, so it never changes once
+/// asked and judging a decided order with it is not hindsight.
+model OrderNetwork {
+  storeId    String
+  orderId    String
+  /// The E.164 phone asked with.
+  phone      String
+  /// ok | not_your_customer | invalid_phone
+  status     String
+  /// Courierify's label at the time (insufficient_data | low | medium | high).
+  riskLevel  String?
+  /// Other stores' orders and returns at the time; null under 2 other stores.
+  otherStores     Int?
+  networkOrders   Int?
+  networkReturned Int?
+  fetchedAt  DateTime
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@id([storeId, orderId])
+  @@map("order_network")
 }

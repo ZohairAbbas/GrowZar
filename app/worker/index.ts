@@ -19,7 +19,7 @@ import { evaluateStore } from "~/lib/insights/inbox.server";
 import { refreshFxRates } from "~/lib/metrics/fx.server";
 import { refreshAdSpend } from "~/lib/metrics/ad-spend.server";
 import { refreshProfitSettings } from "~/lib/metrics/summaries.server";
-import { refreshBuyerNetwork } from "~/lib/metrics/buyer-network.server";
+import { refreshBuyerNetwork, refreshOrderNetwork } from "~/lib/metrics/buyer-network.server";
 
 /**
  * The sync worker.
@@ -175,6 +175,16 @@ export const syncWorker = new Worker<SyncJob>(
       }
     } catch (error) {
       console.error(`[network] store=${storeId} refresh FAILED:`, error instanceof Error ? error.message : error);
+    }
+
+    // Each order's buyer as of its placement (G-GZR5-17), once per order.
+    try {
+      const net = await refreshOrderNetwork(storeId);
+      if (net.asked || net.problem) {
+        console.log(`[network-orders] store=${storeId} asked=${net.asked} written=${net.written}` + (net.problem ? ` problem: ${net.problem}` : ""));
+      }
+    } catch (error) {
+      console.error(`[network-orders] store=${storeId} refresh FAILED:`, error instanceof Error ? error.message : error);
     }
 
     return totals;

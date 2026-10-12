@@ -27,7 +27,7 @@ export function BuyerNetworkPanel({ view, period }: { view: BuyerNetworkView; pe
 
       <h3 className="mt-5 text-sm font-semibold text-gray-900">
         {view.openHighTotal
-          ? `${n(view.openHighTotal)} open order${view.openHighTotal === 1 ? "" : "s"} from buyers Courierify rates high`
+          ? `${n(view.openHighTotal)} open order${view.openHighTotal === 1 ? "" : "s"} from buyers Courierify rated high when they ordered`
           : "No open order is from a buyer Courierify rates high"}
       </h3>
       {view.openHigh.length ? (
@@ -50,11 +50,11 @@ export function BuyerNetworkPanel({ view, period }: { view: BuyerNetworkView; pe
                     {o.phoneTail ? <span className="ml-1 font-normal text-gray-500">···{o.phoneTail}</span> : null}
                   </td>
                   <td className="py-2 pr-4 text-gray-700">{outcomeLabel(o.outcome)}</td>
-                  <td className="py-2 pr-4 text-gray-700">{o.line.store ? figuresText(o.line.store) : "—"}</td>
+                  <td className="py-2 pr-4 text-gray-700">{o.line?.store ? figuresText(o.line.store) : "—"}</td>
                   <td className="py-2 pr-4 text-gray-700">
-                    {o.line.network ? `${figuresText(o.line.network)} (${n(o.line.network.otherStores)} stores)` : "Fewer than 2 other stores"}
+                    {!o.line ? "—" : o.line.network ? `${figuresText(o.line.network)} (${n(o.line.network.otherStores)} stores)` : "Fewer than 2 other stores"}
                   </td>
-                  <td className="py-2 text-xs text-gray-600">{o.line.riskBasis ?? "—"}</td>
+                  <td className="py-2 text-xs text-gray-600">{o.line?.riskBasis ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -72,12 +72,13 @@ export function BuyerNetworkPanel({ view, period }: { view: BuyerNetworkView; pe
 
       <ul className="mt-4 list-disc space-y-0.5 pl-5 text-xs text-gray-500">
         <li>
-          Risk is Courierify's own label, from the returns across every store it serves, yours included. Growzar shows it and does not rescore it.
+          Risk is Courierify's own label, from the returns across every store it serves, yours included. Growzar shows it and does not rescore it. An
+          open order is listed by the label its buyer had when ordering; the figures beside it are today's.
         </li>
         <li>
           Open orders: placed in the last 30 days and not yet delivered, returned or cancelled.
           {view.openNotShippedHere > 0
-            ? ` ${n(view.openNotShippedHere)} of the ${n(view.openOrders)} are from buyers Courierify has never shipped for at this store, mostly first orders: it gives no figures until one of their parcels is booked here.`
+            ? ` ${n(view.openNotShippedHere)} of the ${n(view.openOrders)} are from buyers Courierify has not yet seen on any of this store's orders or parcels; they are asked again daily.`
             : ""}
           {notYet > 0 ? ` ${n(notYet)} are from buyers not asked about yet; they are asked within the day.` : ""}
         </li>
