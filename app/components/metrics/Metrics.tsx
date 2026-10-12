@@ -370,20 +370,22 @@ export function Change({
     );
   }
   const better = d.direction === "flat" || h.good === "neutral" ? null : d.direction === h.good;
-  const tone =
+  // A pill, tinted by whether the move is good for the merchant: mint when it
+  // is, coral when it is not, grey when it is neither. Solid on a dark card.
+  const pill =
     better === null
-      ? dark ? "text-navy-muted" : "text-gray-500"
+      ? dark ? "bg-navy-surface text-navy-muted" : "bg-field text-gray-600"
       : better
-        ? dark ? "text-mint" : "text-mint-700"
-        : dark ? "text-coral" : "text-coral-700";
-  const arrow = d.direction === "up" ? "▲" : d.direction === "down" ? "▼" : "▬";
+        ? dark ? "bg-mint text-navy" : "bg-mint-100 text-mint-700"
+        : dark ? "bg-coral text-navy" : "bg-coral-100 text-coral-700";
+  const arrow = d.direction === "up" ? "↑" : d.direction === "down" ? "↓" : "→";
   const size = d.unit === "points" ? `${Math.abs(d.change).toFixed(1)} pts` : `${Math.abs(d.change).toFixed(1)}%`;
   return (
-    <span className="text-xs">
-      <span className={`font-bold ${tone}`}>
+    <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
+      <span className={`whitespace-nowrap rounded-full px-2 py-0.5 font-bold ${pill}`}>
         {arrow} {size}
       </span>
-      <span className={dark ? "text-navy-muted" : "text-gray-500"}> vs {was}</span>
+      <span className={dark ? "text-navy-muted" : "text-gray-500"}>vs {was}</span>
     </span>
   );
 }
