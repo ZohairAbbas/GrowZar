@@ -3,8 +3,9 @@
  *
  *   npx tsx --env-file=.env scripts/rebuild-order-grain.ts [<shop-domain>]
  *
- * The worker rebuilds after any cycle that wrote rows and once per store
- * after it starts; this is for doing it by hand.
+ * The worker rebuilds in full once per store after it starts, after a
+ * deletion and hourly, and incrementally in between; this is for doing a
+ * full rebuild by hand.
  */
 import { prisma } from "../app/lib/db.server";
 import { rebuildOrderGrain } from "../app/lib/metrics/order-grain.server";
