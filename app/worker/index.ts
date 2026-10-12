@@ -19,6 +19,7 @@ import { evaluateStore } from "~/lib/insights/inbox.server";
 import { refreshFxRates } from "~/lib/metrics/fx.server";
 import { refreshAdSpend } from "~/lib/metrics/ad-spend.server";
 import { refreshProfitSettings } from "~/lib/metrics/summaries.server";
+import { refreshBuyerNetwork } from "~/lib/metrics/buyer-network.server";
 
 /**
  * The sync worker.
@@ -163,6 +164,17 @@ export const syncWorker = new Worker<SyncJob>(
       }
     } catch (error) {
       console.error(`[settings] store=${storeId} refresh FAILED:`, error instanceof Error ? error.message : error);
+    }
+
+    // Courierify's buyer network (G-GZR5-16): a few batches of due buyers
+    // per cycle, one during the quiet hours. Its own try, like ad spend.
+    try {
+      const net = await refreshBuyerNetwork(storeId);
+      if (net.asked || net.problem) {
+        console.log(`[network] store=${storeId} asked=${net.asked} written=${net.written}` + (net.problem ? ` problem: ${net.problem}` : ""));
+      }
+    } catch (error) {
+      console.error(`[network] store=${storeId} refresh FAILED:`, error instanceof Error ? error.message : error);
     }
 
     return totals;

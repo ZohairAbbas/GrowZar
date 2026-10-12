@@ -517,6 +517,17 @@ export function feedsFor(app: SuiteApp): EntityFeed[] {
   return APP_FEEDS[app] ?? [];
 }
 
+/**
+ * Capabilities Growzar reads for something other than a feed: Courierify's
+ * buyer network (G-GZR5-16) is a lookup, not a synced feed.
+ */
+export const OTHER_CAPABILITIES: Partial<Record<SuiteApp, readonly string[]>> = {
+  COURIERIFY: ["buyer_network:read"],
+};
+
+/** Whether Growzar needs to know what this app declares on `/growzar/status`. */
+export const readsCapabilities = (app: SuiteApp) => feedsFor(app).some((f) => f.capability) || !!OTHER_CAPABILITIES[app]?.length;
+
 /** Whether the app has declared this feed (§11). Pre-capability feeds always are. */
 export function feedOffered(feed: EntityFeed, capabilities: readonly string[]): boolean {
   return !feed.capability || capabilities.includes(feed.capability);

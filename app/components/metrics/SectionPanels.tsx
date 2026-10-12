@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import { ArrowRight } from "lucide-react";
+import { figuresText, riskLabel, type BuyerNetworkLine } from "~/lib/metrics/buyer-network";
 import type {
   CustomersView,
   FinanceView,
@@ -321,6 +322,8 @@ const FILTER_LABEL = (f: NonNullable<OrdersView["filter"]>) =>
           ? `orders shipped to ${f.city} with ${f.courier}${f.via === "direct" ? ", booked directly" : ` through ${f.via}`}`
           : f.kind === "unanswered_waiting"
           ? "orders the buyer never answered on WhatsApp, not yet with the courier"
+          : f.kind === "network_high"
+          ? "open orders from the last 30 days whose buyer Courierify's network rates high risk"
           : f.kind === "stuck" && f.wrote
           ? "parcels with no courier status change for days whose buyer has written to the store on WhatKaBot since ordering"
           : f.kind === "stuck"
@@ -639,11 +642,14 @@ export function CustomersPanel({
   view,
   canSeeMoney = false,
   canMessage,
+  network,
 }: {
   view: CustomersView;
   canSeeMoney?: boolean;
   /** Channels each buyer may be messaged on (Retainify's consent), when Retainify is connected. */
   canMessage?: Record<string, Array<"email" | "whatsapp" | "push">> | null;
+  /** Courierify's network line per top buyer, once Courierify has answered for the store (G-GZR5-16). */
+  network?: Record<string, BuyerNetworkLine | null> | null;
 }) {
   return (
     <section className="space-y-4">
@@ -674,6 +680,7 @@ export function CustomersPanel({
               <th className="px-5 py-3">Delivery</th>
               <th className="px-5 py-3 text-right">Delivered revenue</th>
               {canMessage ? <th className="px-5 py-3">Can message</th> : null}
+              {network ? <th className="px-5 py-3">At other stores (Courierify)</th> : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -694,6 +701,18 @@ export function CustomersPanel({
                         ? canMessage[c.customerId]!.map((ch) => ({ email: "Email", whatsapp: "WhatsApp", push: "Push" })[ch]).join(", ")
                         : "No"
                       : <span className="text-gray-400">Not in Retainify</span>}
+                  </td>
+                ) : null}
+                {network ? (
+                  <td className="px-5 py-3 text-gray-700">
+                    {network[c.customerId]?.network ? (
+                      `${figuresText(network[c.customerId]!.network!)} (${network[c.customerId]!.network!.otherStores} stores)`
+                    ) : network[c.customerId] ? (
+                      <span className="text-gray-400">Fewer than 2 other stores</span>
+                    ) : (
+                      <span className="text-gray-400">Not asked yet</span>
+                    )}
+                    {network[c.customerId]?.riskLevel ? <span className="ml-1 text-xs text-gray-500">· {riskLabel(network[c.customerId]!.riskLevel!)} risk</span> : null}
                   </td>
                 ) : null}
               </tr>

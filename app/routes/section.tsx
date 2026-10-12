@@ -50,6 +50,9 @@ import { consentSection } from "~/lib/metrics/consent.server";
 import { ConsentPanel } from "~/components/metrics/ConsentPanel";
 import { buyerHistorySection } from "~/lib/metrics/buyer-history.server";
 import { BuyerHistoryPanel } from "~/components/metrics/BuyerHistoryPanel";
+import { buyerNetworkSection, loadNetworkAnswers } from "~/lib/metrics/buyer-network.server";
+import { lineOf, type BuyerNetworkLine } from "~/lib/metrics/buyer-network";
+import { BuyerNetworkPanel } from "~/components/metrics/BuyerNetworkPanel";
 import { conversationsSection } from "~/lib/metrics/conversations.server";
 import { ConversationsPanel } from "~/components/metrics/ConversationsPanel";
 import { FilterBar } from "~/components/metrics/FilterBar";
@@ -265,11 +268,19 @@ async function buildMetrics(
     case "customers": {
       // Gross profit in the cohorts only for a role that may see Finance.
       const viewer = await inboxViewer();
+      const view = await customersView(storeId, summary, prev!, viewer.canSeeMoney);
+      // Courierify's network, when it has answered for any buyer (G-GZR5-16).
+      const network = await buyerNetworkSection(storeId, new Set(summary.rows.map((r) => r.customerId).filter((c): c is string => !!c)));
+      const topAnswers = network ? await loadNetworkAnswers(storeId, view.top.map((t) => t.customerId)) : null;
       return {
         ...base,
         kind: "customers" as const,
-        view: compared(await customersView(storeId, summary, prev!, viewer.canSeeMoney)),
+        view: compared(view),
         canSeeMoney: viewer.canSeeMoney,
+        network,
+        topNetwork: topAnswers
+          ? Object.fromEntries(view.top.map((t) => [t.customerId, (topAnswers.get(t.customerId) && lineOf(topAnswers.get(t.customerId)!)) ?? null])) as Record<string, BuyerNetworkLine | null>
+          : null,
         consent: await consentSection(storeId, period),
         buyerHistory: await buyerHistorySection(storeId, period),
       };
@@ -348,7 +359,8 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {metrics.kind === "marketing" && metrics.messaging ? <MessagingPanel view={metrics.messaging} periodDays={metrics.period.days} /> : null}
           {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} depth={metrics.depth} period={metrics.period.query} scope={metrics.scope} /> : null}
-          {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} canSeeMoney={metrics.canSeeMoney} canMessage={metrics.consent?.byCustomer ?? null} /> : null}
+          {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} canSeeMoney={metrics.canSeeMoney} canMessage={metrics.consent?.byCustomer ?? null} network={metrics.topNetwork} /> : null}
+          {metrics.kind === "customers" && metrics.network ? <BuyerNetworkPanel view={metrics.network} period={metrics.period.query} /> : null}
           {metrics.kind === "customers" && metrics.buyerHistory ? <BuyerHistoryPanel view={metrics.buyerHistory} /> : null}
           {metrics.kind === "customers" && metrics.consent ? <ConsentPanel view={metrics.consent.view} periodDays={metrics.period.days} /> : null}
           {metrics.kind === "inbox" && metrics.view ? <ConversationsPanel view={metrics.view} periodDays={metrics.period.days} whatkabotUrl={metrics.whatkabotUrl} /> : null}
