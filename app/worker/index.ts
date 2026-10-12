@@ -189,7 +189,21 @@ export const syncWorker = new Worker<SyncJob>(
 
     return totals;
   },
-  { connection, prefix: PREFIX, concurrency: 1 },
+  {
+    connection,
+    prefix: PREFIX,
+    concurrency: 1,
+    // BullMQ's default 30 s lock is renewed every 15 s by a timer. A cycle for
+    // the largest store (0dscam-qn, 4,500 orders) takes 20–70 s, and on this
+    // box (swap full, the worker near its MemoryHigh) the event loop has
+    // stalled past 30 s mid-cycle: the lock expired, BullMQ marked the job
+    // stalled and ran the whole cycle a second time beside the first (seen
+    // as "Missing lock for job … moveToFinished" and stalled counts of 1–2).
+    // One worker runs one job at a time, so a long lock cannot overlap
+    // anything; it only delays recovering a job if this process dies
+    // mid-cycle, and the next cycle comes five minutes later regardless.
+    lockDuration: 10 * 60 * 1000,
+  },
 );
 
 syncWorker.on("failed", (job, error) => {
