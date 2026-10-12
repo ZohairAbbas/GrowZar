@@ -53,6 +53,12 @@ describe("pickRefresh", () => {
     expect(pickRefresh([c("1", 5)], fetched, NOW, 10)).toHaveLength(1);
     expect(pickRefresh([c("1", 5), c("2", 5), c("3", 5)], new Map(), NOW, 2)).toHaveLength(2);
   });
+
+  it("asks a not-your-customer buyer again after a day, an ok one only after a week", () => {
+    const at = (status: string) => new Map([["1", { fetchedAt: daysAgo(2), phone: "+923000000001", status }]]);
+    expect(pickRefresh([c("1", 5)], at("not_your_customer"), NOW, 10)).toHaveLength(1);
+    expect(pickRefresh([c("1", 5)], at("ok"), NOW, 10)).toHaveLength(0);
+  });
 });
 
 describe("buyerNetworkView", () => {
@@ -74,9 +80,12 @@ describe("buyerNetworkView", () => {
       ["c", stored("c", "low", false)],
       ["d", { ...stored("d", "high", false), status: "not_your_customer" }],
     ]);
-    const open = (orderId: string, customerId: string) => ({ orderId, orderName: `#${orderId}`, customerId, createdAt: daysAgo(1), outcome: "not_shipped", phoneTail: "1234" });
+    const open = (orderId: string, customerId: string, highAtOrder: boolean | null = null) => ({ orderId, orderName: `#${orderId}`, customerId, createdAt: daysAgo(1), outcome: "not_shipped", phoneTail: "1234", highAtOrder });
     const v = buyerNetworkView({ periodBuyers: new Set(["a", "b", "c", "d", "e"]), answers, openOrders: [open("1", "a"), open("2", "b"), open("3", "c"), open("4", "e")] });
     expect(v).toMatchObject({ buyers: 5, answered: 3, withNetwork: 2, levels: { high: 2, low: 1, medium: 0 }, openHighTotal: 2, openOrders: 4, openAnswered: 3, openNotShippedHere: 0 });
+    // The label when the order was placed wins over today's, either way.
+    const atOrder = buyerNetworkView({ periodBuyers: new Set(), answers, openOrders: [open("1", "a", false), open("3", "c", true)] });
+    expect(atOrder.openHigh.map((o) => o.orderId)).toEqual(["3"]);
     const first = buyerNetworkView({ periodBuyers: new Set(["d"]), answers, openOrders: [open("5", "d")] });
     expect(first).toMatchObject({ answered: 0, openAnswered: 0, openNotShippedHere: 1 });
     expect(v.openHigh.map((o) => o.orderId)).toEqual(["2", "1"]);
@@ -88,17 +97,18 @@ describe("buyerNetworkView", () => {
 
   it("writes exact counts, never a band", () => {
     expect(figuresText({ orders: 50, delivered: 40, returned: 9, active: 1 })).toBe("40 of 50 delivered, 9 returned, 1 on the way");
+    expect(figuresText({ orders: 0, delivered: 0, returned: 0, active: 0 })).toBe("No parcels with you yet");
   });
 });
 
 describe("network=high on the Orders list", () => {
-  const order = (o: Partial<RollupOrder>) => ({ customerId: "a", outcome: "not_shipped", createdAt: daysAgo(3), ...o }) as RollupOrder;
-  it("keeps open orders of the last 30 days from high-risk buyers", () => {
+  const order = (o: Partial<RollupOrder>) => ({ orderId: "o1", customerId: "a", outcome: "not_shipped", createdAt: daysAgo(3), ...o }) as RollupOrder;
+  it("keeps open orders of the last 30 days counted high risk", () => {
     const filter = parseOrderFilter(new URLSearchParams("network=high"))!;
     expect(orderFilterQuery(filter)).toBe("network=high");
-    const ctx = { asOf: NOW, highRisk: new Set(["a"]) };
+    const ctx = { asOf: NOW, highRisk: new Set(["o1"]) };
     expect(matchesFilter(order({}), filter, "PKR", ctx)).toBe(true);
-    expect(matchesFilter(order({ customerId: "b" }), filter, "PKR", ctx)).toBe(false);
+    expect(matchesFilter(order({ orderId: "o2" }), filter, "PKR", ctx)).toBe(false);
     expect(matchesFilter(order({ outcome: "delivered" }), filter, "PKR", ctx)).toBe(false);
     expect(matchesFilter(order({ createdAt: daysAgo(31) }), filter, "PKR", ctx)).toBe(false);
   });

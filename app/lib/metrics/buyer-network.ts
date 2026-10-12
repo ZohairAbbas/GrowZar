@@ -21,6 +21,18 @@ export type RiskLevel = (typeof RISK_LEVELS)[number];
 export const BATCH_SIZE = 100;
 /** An answer older than this is asked again, new order or not: other stores keep shipping. */
 export const STALE_MS = 7 * 86_400_000;
+/**
+ * A "not your customer" answer is asked again after a day: since G-CFY5-3
+ * Courierify also counts a buyer on one of the store's Shopify orders, so the
+ * answer usually changes as soon as Courierify has seen the order.
+ */
+export const MISS_RETRY_MS = 86_400_000;
+/**
+ * Orders asked about as of their own placement (G-GZR5-17): this far back,
+ * 200 a request (with cut-offs a 200-item batch took under 1 s).
+ */
+export const HISTORY_DAYS = 180;
+export const ORDER_BATCH_SIZE = 200;
 /** Buyers kept fresh: those with an order in this many days. */
 export const ACTIVE_DAYS = 90;
 /** Batches per worker cycle, outside and during the quiet hours (05:00–15:00 UTC). */
@@ -93,13 +105,14 @@ export type RefreshCandidate = { customerId: string; phone: string; lastOrderAt:
  */
 export function pickRefresh(
   candidates: readonly RefreshCandidate[],
-  fetched: ReadonlyMap<string, { fetchedAt: Date; phone: string }>,
+  fetched: ReadonlyMap<string, { fetchedAt: Date; phone: string; status?: string }>,
   now: Date,
   limit: number,
 ): RefreshCandidate[] {
   const due = candidates.filter((c) => {
     const f = fetched.get(c.customerId);
-    return !f || f.phone !== c.phone || f.fetchedAt < c.lastOrderAt || now.getTime() - f.fetchedAt.getTime() > STALE_MS;
+    const age = f ? now.getTime() - f.fetchedAt.getTime() : 0;
+    return !f || f.phone !== c.phone || f.fetchedAt < c.lastOrderAt || age > STALE_MS || (f.status !== undefined && f.status !== "ok" && age > MISS_RETRY_MS);
   });
   const rank = (c: RefreshCandidate) => (c.hasOpenOrder ? 0 : fetched.has(c.customerId) ? 2 : 1);
   return due
@@ -146,7 +159,23 @@ export function lineOf(a: StoredAnswer): BuyerNetworkLine | null {
   };
 }
 
-export type OpenOrder = { orderId: string; orderName: string | null; customerId: string; createdAt: Date | null; outcome: string; phoneTail: string | null };
+export type OpenOrder = {
+  orderId: string;
+  orderName: string | null;
+  customerId: string;
+  createdAt: Date | null;
+  outcome: string;
+  phoneTail: string | null;
+  /** Courierify's label for the buyer when the order was placed was high; null until asked (G-GZR5-17). */
+  highAtOrder: boolean | null;
+};
+
+/**
+ * An open order counts as high risk by Courierify's label when it was placed,
+ * the label I5 measured against returns; until that is asked, by the buyer's
+ * label today.
+ */
+export const isHighRisk = (o: Pick<OpenOrder, "highAtOrder">, current: RiskLevel | null) => o.highAtOrder ?? current === "high";
 
 export type BuyerNetworkView = {
   /** The period's buyers, and how many Courierify has answered for. */
@@ -157,13 +186,12 @@ export type BuyerNetworkView = {
   /** Courierify's label for the answered buyers. */
   levels: Record<RiskLevel, number>;
   /** Open orders whose buyer Courierify rates high, most returns across the network first. */
-  openHigh: Array<OpenOrder & { line: BuyerNetworkLine }>;
+  openHigh: Array<OpenOrder & { line: BuyerNetworkLine | null }>;
   openHighTotal: number;
   /**
    * Open orders in all; of them, those whose buyer Courierify has figures
-   * for, and those it answered "not your customer" for: it counts a buyer as
-   * the store's only once it has shipped a parcel for them there, so a first
-   * order not yet booked gets no figures.
+   * for, and those it answered "not your customer" for (not yet on any of the
+   * store's parcels or Shopify orders in Courierify).
    */
   openOrders: number;
   openAnswered: number;
@@ -174,6 +202,8 @@ export type BuyerNetworkView = {
 
 /** Open orders listed on the panel; the rest are behind the Orders link. */
 export const OPEN_HIGH_SHOWN = 15;
+
+const returnsOf = (l: BuyerNetworkLine | null) => (l?.network?.returned ?? 0) + (l?.store?.returned ?? 0);
 
 export function buyerNetworkView(input: {
   periodBuyers: ReadonlySet<string>;
@@ -198,8 +228,8 @@ export function buyerNetworkView(input: {
     return { ...o, status: a?.status ?? null, line: a ? lineOf(a) : null };
   });
   const high = open
-    .filter((o): o is OpenOrder & { status: string; line: BuyerNetworkLine } => o.line?.riskLevel === "high")
-    .sort((a, b) => (b.line.network?.returned ?? 0) + (b.line.store?.returned ?? 0) - ((a.line.network?.returned ?? 0) + (a.line.store?.returned ?? 0)) || a.orderId.localeCompare(b.orderId));
+    .filter((o) => isHighRisk(o, o.line?.riskLevel ?? null))
+    .sort((a, b) => returnsOf(b.line) - returnsOf(a.line) || a.orderId.localeCompare(b.orderId));
   return {
     buyers: input.periodBuyers.size,
     answered,
@@ -224,5 +254,7 @@ export const riskLabel = (l: RiskLevel) => LEVEL_LABEL[l];
 
 /** "3 of 5 delivered, 1 returned": counts, as D-53 asks, never a band. */
 export function figuresText(f: Figures): string {
+  // A buyer Courierify knows only from a Shopify order (G-CFY5-3's gate).
+  if (!f.orders) return "No parcels with you yet";
   return `${f.delivered} of ${f.orders} delivered${f.returned ? `, ${f.returned} returned` : ""}${f.active ? `, ${f.active} on the way` : ""}`;
 }

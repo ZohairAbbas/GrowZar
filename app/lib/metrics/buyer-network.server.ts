@@ -5,6 +5,11 @@ import { appRequest } from "../apps/client.server";
 import { isQuietHours } from "../sync/sync.server";
 import {
   ACTIVE_DAYS,
+  HISTORY_DAYS,
+  MISS_RETRY_MS,
+  ORDER_BATCH_SIZE,
+  isHighRisk,
+  type RiskLevel,
   BATCHES_PER_CYCLE,
   BATCH_SIZE,
   OPEN_DAYS,
@@ -57,7 +62,7 @@ export async function refreshBuyerNetwork(storeId: string, now = new Date()): Pr
         WHERE i."customerId" = a."customerId" AND i.kind = 'PHONE'
         ORDER BY i."lastSeenAt" DESC, i.value LIMIT 1
       ) p ON true`,
-    prisma.buyerNetwork.findMany({ where: { storeId }, select: { customerId: true, fetchedAt: true, phone: true } }),
+    prisma.buyerNetwork.findMany({ where: { storeId }, select: { customerId: true, fetchedAt: true, phone: true, status: true } }),
   ]);
 
   const batches = isQuietHours(now) ? BATCHES_PER_CYCLE.quiet : BATCHES_PER_CYCLE.open;
@@ -113,15 +118,97 @@ export async function refreshBuyerNetwork(storeId: string, now = new Date()): Pr
 }
 
 /**
- * Buyers Courierify rates high, with every customer id that resolves to them,
- * so an order still carrying a merged-away id is found too.
+ * Open orders of the last 30 days that count as high risk (`isHighRisk`): by
+ * the label at order time, else by the buyer's label today.
  */
-export async function highRiskBuyers(storeId: string): Promise<Set<string>> {
-  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
-    SELECT c.id FROM customers c
-    JOIN buyer_network b ON b."storeId" = c."storeId" AND b."customerId" = COALESCE(c."mergedIntoId", c.id)
-    WHERE c."storeId" = ${storeId} AND b.status = 'ok' AND b."riskLevel" = 'high'`;
-  return new Set(rows.map((r) => r.id));
+export async function highRiskOrders(storeId: string, now = new Date()): Promise<Set<string>> {
+  const rows = await openOrdersWithLabels(storeId, now);
+  return new Set(rows.filter((o) => isHighRisk(o, (o.currentLevel ?? null) as RiskLevel | null)).map((o) => o.orderId));
+}
+
+/** Open orders of the last 30 days, with the buyer's label at order time and today. */
+async function openOrdersWithLabels(storeId: string, now: Date) {
+  const rows = await prisma.$queryRaw<
+    Array<{ orderId: string; orderName: string | null; customerId: string; createdAt: Date | null; outcome: string; phone: string | null; atOrder: string | null; atOrderStatus: string | null; currentLevel: string | null }>
+  >`
+    SELECT g."orderId", g."orderName", COALESCE(c."mergedIntoId", c.id) AS "customerId", g."createdAt", g.outcome, b.phone,
+           n."riskLevel" AS "atOrder", n.status AS "atOrderStatus", CASE WHEN b.status = 'ok' THEN b."riskLevel" END AS "currentLevel"
+    FROM order_grain g
+    JOIN customers c ON c.id = g."customerId"
+    LEFT JOIN buyer_network b ON b."storeId" = g."storeId" AND b."customerId" = COALESCE(c."mergedIntoId", c.id)
+    LEFT JOIN order_network n ON n."storeId" = g."storeId" AND n."orderId" = g."orderId"
+    WHERE g."storeId" = ${storeId} AND g.outcome = ANY(${[...OPEN_OUTCOMES]}) AND g."createdAt" >= ${new Date(now.getTime() - OPEN_DAYS * DAY_MS)}`;
+  return rows.map((o) => ({
+    ...o,
+    // Asked and answered: the label then decides; "not your customer" then says nothing.
+    highAtOrder: o.atOrderStatus === "ok" ? o.atOrder === "high" : null,
+  }));
+}
+
+/**
+ * I5 on network history (G-GZR5-17): ask Courierify about each recent order's
+ * buyer as of the moment the order was placed (G-CFY5-3's `before`), once per
+ * order. Open orders first, newest first; a "not your customer" answer on an
+ * order of the last 30 days is asked again after a day.
+ */
+export async function refreshOrderNetwork(storeId: string, now = new Date()): Promise<NetworkRefresh> {
+  const connection = await prisma.appConnection.findFirst({
+    where: { storeId, app: "COURIERIFY", status: "CONNECTED" },
+    select: { capabilities: true, store: { select: { shopDomain: true } } },
+  });
+  if (!connection) return { asked: 0, written: 0, skipped: "Courierify not connected" };
+  if (!connection.capabilities.includes(BUYER_NETWORK_CAPABILITY)) return { asked: 0, written: 0, skipped: "Courierify does not list buyer_network:read" };
+
+  const limit = (isQuietHours(now) ? BATCHES_PER_CYCLE.quiet : BATCHES_PER_CYCLE.open) * ORDER_BATCH_SIZE;
+  const due = await prisma.$queryRaw<Array<{ orderId: string; createdAt: Date; phone: string }>>`
+    SELECT g."orderId", g."createdAt", p.value AS phone
+    FROM order_grain g
+    JOIN customers c ON c.id = g."customerId"
+    JOIN LATERAL (
+      SELECT i.value FROM customer_identities i
+      WHERE i."customerId" = COALESCE(c."mergedIntoId", c.id) AND i.kind = 'PHONE'
+      ORDER BY i."lastSeenAt" DESC, i.value LIMIT 1
+    ) p ON true
+    LEFT JOIN order_network n ON n."storeId" = g."storeId" AND n."orderId" = g."orderId"
+    WHERE g."storeId" = ${storeId} AND g."createdAt" >= ${new Date(now.getTime() - HISTORY_DAYS * DAY_MS)}
+      AND (n."orderId" IS NULL
+        OR (n.status <> 'ok' AND n."fetchedAt" < ${new Date(now.getTime() - MISS_RETRY_MS)} AND g."createdAt" >= ${new Date(now.getTime() - OPEN_DAYS * DAY_MS)}))
+    ORDER BY (g.outcome = ANY(${[...OPEN_OUTCOMES]})) DESC, g."createdAt" DESC, g."orderId"
+    LIMIT ${limit}`;
+
+  let asked = 0;
+  let written = 0;
+  for (let i = 0; i < due.length; i += ORDER_BATCH_SIZE) {
+    const batch = due.slice(i, i + ORDER_BATCH_SIZE);
+    const res = await appRequest<{ data?: unknown[] }>("COURIERIFY", {
+      method: "POST",
+      pathWithQuery: PATH,
+      shopDomain: connection.store.shopDomain,
+      body: { phones: batch.map((o) => ({ phone: o.phone, before: o.createdAt.toISOString() })) },
+    });
+    if (!res.ok) return { asked, written, problem: `${res.reason}${res.status ? ` ${res.status}` : ""}` };
+    asked += batch.length;
+    // Answers come back in the order asked; two orders of one buyer share a phone, so match by position.
+    const items = res.data.data ?? [];
+    const fetchedAt = new Date();
+    const writes = batch.flatMap((o, k) => {
+      const a = parseAnswer(items[k]);
+      if (!a || a.phone !== o.phone) return [];
+      const data = {
+        phone: a.phone,
+        status: a.status,
+        riskLevel: a.riskLevel,
+        otherStores: a.otherStores,
+        networkOrders: a.network?.orders ?? null,
+        networkReturned: a.network?.returned ?? null,
+        fetchedAt,
+      };
+      return [prisma.orderNetwork.upsert({ where: { storeId_orderId: { storeId, orderId: o.orderId } }, create: { storeId, orderId: o.orderId, ...data }, update: data })];
+    });
+    await prisma.$transaction(writes);
+    written += writes.length;
+  }
+  return { asked, written };
 }
 
 /** Courierify's stored answers for the given buyers. */
@@ -141,17 +228,20 @@ export async function loadNetworkAnswers(storeId: string, customerIds?: readonly
 export async function buyerNetworkSection(storeId: string, periodBuyers: ReadonlySet<string>, now = new Date()): Promise<BuyerNetworkView | null> {
   const answers = await loadNetworkAnswers(storeId);
   if (!answers.size) return null;
-  const open = await prisma.$queryRaw<Array<{ orderId: string; orderName: string | null; customerId: string; createdAt: Date | null; outcome: string; phone: string | null }>>`
-    SELECT g."orderId", g."orderName", COALESCE(c."mergedIntoId", c.id) AS "customerId", g."createdAt", g.outcome, b.phone
-    FROM order_grain g
-    JOIN customers c ON c.id = g."customerId"
-    LEFT JOIN buyer_network b ON b."storeId" = g."storeId" AND b."customerId" = COALESCE(c."mergedIntoId", c.id)
-    WHERE g."storeId" = ${storeId} AND g.outcome = ANY(${[...OPEN_OUTCOMES]}) AND g."createdAt" >= ${new Date(now.getTime() - OPEN_DAYS * DAY_MS)}`;
+  const open = await openOrdersWithLabels(storeId, now);
   return buyerNetworkView({
     periodBuyers,
     answers,
     openOrders: open.map(
-      (o): OpenOrder => ({ orderId: o.orderId, orderName: o.orderName, customerId: o.customerId, createdAt: o.createdAt, outcome: o.outcome, phoneTail: o.phone ? o.phone.replace(/\D/g, "").slice(-4) : null }),
+      (o): OpenOrder => ({
+        orderId: o.orderId,
+        orderName: o.orderName,
+        customerId: o.customerId,
+        createdAt: o.createdAt,
+        outcome: o.outcome,
+        phoneTail: o.phone ? o.phone.replace(/\D/g, "").slice(-4) : null,
+        highAtOrder: o.highAtOrder,
+      }),
     ),
   });
 }

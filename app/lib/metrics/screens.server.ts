@@ -62,7 +62,7 @@ import {
 import { loadStatements } from "./settlements.server";
 import { loadSettledHistory } from "./summaries.server";
 import { loadBuyerContact } from "./buyer-contact.server";
-import { highRiskBuyers } from "./buyer-network.server";
+import { highRiskOrders } from "./buyer-network.server";
 import { OPEN_DAYS, OPEN_OUTCOMES } from "./buyer-network";
 import {
   courierPerformance,
@@ -458,7 +458,7 @@ export async function ordersView(
     const ctx = {
       payers: filter.kind === "awaiting_payout" ? await loadPayerHistories(storeId) : [],
       contact: filter.kind === "stuck" && filter.wrote ? await loadBuyerContact(storeId) : null,
-      highRisk: filter.kind === "network_high" ? await highRiskBuyers(storeId) : undefined,
+      highRisk: filter.kind === "network_high" ? await highRiskOrders(storeId) : undefined,
       asOf: new Date(),
     };
     const hit = all.filter((r) => matchesFilter(toRollupOrder(r), filter, store.currency, ctx));

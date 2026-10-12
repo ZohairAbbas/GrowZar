@@ -27,7 +27,7 @@ import type { InventoryView } from "./inventory";
 import type { StockoutFinding } from "./stockout";
 import type { CheckoutsView, UnfollowedCheckoutsFinding } from "./checkouts";
 import type { OfferReturnsFinding, OffersView } from "./offers";
-import type { BuyerHistoryView, ReturnersFinding } from "./buyer-history";
+import type { BuyerHistoryView, NetworkRiskFinding, ReturnersFinding } from "./buyer-history";
 import { OPEN_DAYS, OPEN_OUTCOMES } from "./buyer-network";
 import { wroteAfterOrdering, type BuyerContact, type BuyerContactSection, type ContactReturnTest } from "./buyer-contact";
 
@@ -101,7 +101,7 @@ export type OrderFilter =
   | { kind: "unpaid"; courier: string; age: AgeFilter }
   /** Courierify parcels with no status change for STUCK_DAYS (Phase 4c, A3); `wrote`: only those whose buyer wrote in (I7). */
   | { kind: "stuck"; wrote?: true }
-  /** Open orders (last 30 days) from buyers Courierify's network rates high (G-GZR5-16). */
+  /** Open orders (last 30 days) whose buyer Courierify rated high when ordering, or rates high today if not yet asked (G-GZR5-16/17). */
   | { kind: "network_high" };
 
 export type MarginFinding = {
@@ -343,7 +343,7 @@ export type DeductionsFinding = {
   keptShare: number | null;
 };
 
-export type Finding = ReturnersFinding | OfferReturnsFinding | UnfollowedCheckoutsFinding | StockoutFinding | ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding | StuckFinding | NotReceivedFinding | DeductionsFinding;
+export type Finding = NetworkRiskFinding | ReturnersFinding | OfferReturnsFinding | UnfollowedCheckoutsFinding | StockoutFinding | ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding | StuckFinding | NotReceivedFinding | DeductionsFinding;
 
 /**
  * Why a finding is absent (G-GZR3-3). "Not enough data" and "checked, nothing
@@ -1176,8 +1176,7 @@ export function matchesFilter(
     case "network_high": {
       const asOf = ctx?.asOf ?? new Date();
       return (
-        !!o.customerId &&
-        !!ctx?.highRisk?.has(o.customerId) &&
+        !!ctx?.highRisk?.has(o.orderId) &&
         (OPEN_OUTCOMES as readonly string[]).includes(o.outcome) &&
         !!o.createdAt &&
         asOf.getTime() - o.createdAt.getTime() <= OPEN_DAYS * 86_400_000

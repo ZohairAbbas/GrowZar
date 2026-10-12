@@ -24,7 +24,7 @@ import type {
 import type { StockoutFinding } from "~/lib/metrics/stockout";
 import type { UnfollowedCheckoutsFinding } from "~/lib/metrics/checkouts";
 import type { OfferReturnsFinding } from "~/lib/metrics/offers";
-import type { ReturnersFinding } from "~/lib/metrics/buyer-history";
+import type { NetworkRiskFinding, ReturnersFinding } from "~/lib/metrics/buyer-history";
 import { MIN_DECIDED as MIN_CONTACT_DECIDED } from "~/lib/metrics/buyer-contact";
 import type { InboxItem, InboxView } from "~/lib/insights/inbox.server";
 import { DISMISS_REASONS } from "~/lib/insights/actions";
@@ -54,6 +54,7 @@ const AREAS: Record<Finding["kind"], { label: string; Icon: typeof Wallet; tint:
   unfollowed_checkouts: { label: "Marketing", Icon: Mail, tint: "bg-mint-100 text-mint-700" },
   offer_returns: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
   returners: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
+  network_risk: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
 };
 
 function AreaTag() {
@@ -515,9 +516,37 @@ function ReturnersCard({ f, period, id, canManage }: { f: ReturnersFinding } & C
       </p>
       <Leaves
         items={[
-          "Only your own orders: a buyer's history with other stores is not used.",
+          "Only your own orders: a buyer's history with other stores is measured on its own card, from Courierify's network.",
           "A buyer counts as having returned before only if that return was known when the new order was placed.",
           "No money estimate yet: what verification would save is shown once it has been checked against past orders.",
+        ]}
+      />
+    </Card>
+  );
+}
+
+const networkHeadline = (f: NetworkRiskFinding) => `Buyers Courierify rated high risk when they ordered came back ${pct(f.rate)} of the time`;
+const networkNext = (f: NetworkRiskFinding) =>
+  f.openHigh
+    ? `Confirm the ${n(f.openHigh)} open order${f.openHigh === 1 ? "" : "s"} from such buyers by phone before booking, or ask for payment ahead.`
+    : "Confirm orders from buyers Courierify rates high by phone before booking, or ask for payment ahead.";
+const networkLink = (f: NetworkRiskFinding, period: string) =>
+  f.openHigh ? { to: `/orders?${period}&network=high`, label: `See the ${n(f.openHigh)} open orders` } : { to: `/customers?${period}`, label: "See buyers" };
+
+function NetworkRiskCard({ f, period, id, canManage }: { f: NetworkRiskFinding } & CardProps) {
+  return (
+    <Card id={id} canManage={canManage} title={networkHeadline(f)} link={networkLink(f, period)}>
+      <p>
+        In the last {n(f.days)} days, of {n(f.decided)} delivered or returned orders whose buyer Courierify's network rated high risk when they ordered,{" "}
+        <strong>{pct(f.rate)} came back</strong>, against {pct(f.restRate)} of {n(f.restDecided)} orders from everyone else.
+        {f.lowRate !== null ? <> Buyers it rated low came back {pct(f.lowRate)} of the time.</> : null}{" "}
+        {f.openHigh ? <>{n(f.openHigh)} orders open now are from buyers it rates high.</> : "No open order is from a buyer it rates high right now."}
+      </p>
+      <Leaves
+        items={[
+          "The label is Courierify's own, from returns across every store it serves; Growzar measures it against your returns and does not rescore it.",
+          "Each order is judged by the label its buyer had when the order was placed: nothing that happened after counts.",
+          "No money estimate yet: what confirming these orders would save is shown once it has been checked against past orders.",
         ]}
       />
     </Card>
@@ -910,6 +939,8 @@ function FullCard({ item, period, canManage }: { item: InboxItem; period: string
         return <UnfollowedCheckoutsCard f={f} {...props} />;
       case "offer_returns":
         return <OfferReturnsCard f={f} {...props} />;
+      case "network_risk":
+        return <NetworkRiskCard f={f} {...props} />;
       case "returners":
         return <ReturnersCard f={f} {...props} />;
     }
@@ -1041,6 +1072,15 @@ function summaryOf(f: Finding, period: string): Summary {
         why: "Growzar takes the courier's answer, through Courierify.",
         affects: `${n(f.total)} orders`,
         link: { to: `/orders?${period}&disagree=1`, label: "See orders" },
+      };
+    case "network_risk":
+      return {
+        headline: networkHeadline(f),
+        figure: pct(f.rate),
+        note: `came back, against ${pct(f.restRate)} for everyone else`,
+        next: networkNext(f),
+        affects: `${n(f.openHigh)} open orders`,
+        link: networkLink(f, period),
       };
     case "returners":
       return {
