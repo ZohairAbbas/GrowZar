@@ -137,6 +137,9 @@ function toRow(storeId: string, g: OrderGrain): Prisma.OrderGrainCreateManyInput
  * Build every order of one store, without writing anything. The reconciliation
  * script uses this directly, so what it checks is exactly what gets stored.
  */
+/** Orders built between yields to the event loop (see the loop below). */
+const YIELD_EVERY = 250;
+
 export async function computeOrderGrain(
   storeId: string,
 ): Promise<{ grain: OrderGrain[]; fromFinancify: number }> {
@@ -187,7 +190,13 @@ export async function computeOrderGrain(
   const cityAliases = learnCityAliases(pairs);
 
   const grain: OrderGrain[] = [];
+  let built = 0;
   for (const orderId of orderIds) {
+    // Building a store's grain is one long synchronous run (thousands of
+    // payloads parsed, phones normalized). Yield now and then so the worker's
+    // timers, its queue lock renewal among them, and the event relay keep
+    // running while a large store rebuilds.
+    if (++built % YIELD_EVERY === 0) await new Promise((resolve) => setImmediate(resolve));
     const order = orders.get(orderId) ?? null;
     const parcels = (parcelsByOrder.get(orderId) ?? []).map((row) => ({
       row,
