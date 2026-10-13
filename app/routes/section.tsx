@@ -12,7 +12,7 @@ import {
   sectionState,
 } from "~/lib/sections";
 import { readStoreCookie } from "~/lib/store-cookie.server";
-import { storeSummary } from "~/lib/metrics/summaries.server";
+import { loadSettledHistory, storeSummary } from "~/lib/metrics/summaries.server";
 import {
   PERIODS,
   customersView,
@@ -27,6 +27,7 @@ import {
   storePayoutAgeing,
   financeDepth,
   shippingDepth,
+  productProfit,
 } from "~/lib/metrics/screens.server";
 import { confirmationFunnel, isConfirmationGroup } from "~/lib/metrics/matrices";
 import {
@@ -290,8 +291,17 @@ async function buildMetrics(
         whatkabotUrl: `https://admin.shopify.com/store/${store.shopDomain.replace(/\.myshopify\.com$/, "")}/apps/whatkabot`,
       };
     }
-    case "inventory":
-      return { ...base, kind: "inventory" as const, view: await inventorySection(storeId, period, summary.store.currency, undefined, stock) };
+    case "inventory": {
+      // Profit by variant only for a role that may see Finance.
+      const viewer = await inboxViewer();
+      const [history, profit] = await Promise.all([loadSettledHistory(storeId, period.today), viewer.canSeeMoney ? productProfit(storeId, summary) : null]);
+      return {
+        ...base,
+        kind: "inventory" as const,
+        view: await inventorySection(storeId, period, summary.store.currency, undefined, stock, { history, profit }),
+        canSeeMoney: viewer.canSeeMoney,
+      };
+    }
     default:
       return null;
   }
@@ -395,7 +405,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {metrics.kind === "inbox" && !metrics.view ? (
             <section className="rounded-2xl bg-white p-8 text-sm text-gray-600">WhatKaBot is connected; its conversations arrive with the next sync.</section>
           ) : null}
-          {metrics.kind === "inventory" ? <InventoryPanel view={metrics.view} periodDays={metrics.period.days} period={metrics.period.query} /> : null}
+          {metrics.kind === "inventory" ? <InventoryPanel view={metrics.view} periodDays={metrics.period.days} period={metrics.period.query} canSeeMoney={metrics.canSeeMoney} /> : null}
         </div>
       ) : null}
 

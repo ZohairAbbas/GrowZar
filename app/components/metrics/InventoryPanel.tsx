@@ -19,6 +19,9 @@ export type InventoryPanelView = {
   untracked: number;
   stockValue: Money | null;
   uncosted: number;
+  stuck: { value: Money | null; variants: number; uncosted: number };
+  hasOutcomes: boolean;
+  hasProfit: boolean;
   rows: Array<{
     variantId: string;
     title: string;
@@ -35,13 +38,20 @@ export type InventoryPanelView = {
     daysSnapshotted: number;
     soldAtZeroDays: number;
     state: StockState;
+    deliveryRate: number | null;
+    rateSource: "variant" | "store" | null;
+    netPerDay: number | null;
+    netDaysOfCover: number | null;
+    reorderUnits: number | null;
+    profit: Money | null;
+    topProfit: boolean;
   }>;
   hiddenRows: number;
   state: StockState | null;
   byState: Array<{ state: StockState; count: number }>;
   receivedOrders: number;
   reordersInInventorify: boolean;
-  openOrders: Array<{ id: string; poNumber: string; status: string; supplierName: string | null; expected: string | null; units: number; variants: number }>;
+  openOrders: Array<{ id: string; poNumber: string; status: string; supplierName: string | null; expected: string | null; daysLate: number | null; units: number; variants: number }>;
 };
 
 const STATE: Record<StockState, { text: string; className: string }> = {
@@ -56,7 +66,20 @@ const STATE: Record<StockState, { text: string; className: string }> = {
 
 const shortDay = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
-export function InventoryPanel({ view, periodDays, period }: { view: InventoryPanelView; periodDays: number; period: string }) {
+/** Days a reorder should last once it arrives (`COVER_AFTER_ARRIVAL` in metrics/inventory.ts). */
+const COVER_AFTER_ARRIVAL = 30;
+
+export function InventoryPanel({
+  view,
+  periodDays,
+  period,
+  canSeeMoney,
+}: {
+  view: InventoryPanelView;
+  periodDays: number;
+  period: string;
+  canSeeMoney: boolean;
+}) {
   if (view.variants === 0) {
     return (
       <section className="rounded-2xl bg-white p-8 text-sm text-gray-600">
@@ -65,6 +88,8 @@ export function InventoryPanel({ view, periodDays, period }: { view: InventoryPa
     );
   }
   const rate = `${shortDay(view.rateWindow.from)}–${shortDay(view.rateWindow.to)}`;
+  const showProfit = canSeeMoney && view.hasProfit;
+  const late = view.openOrders.filter((po) => po.daysLate);
   return (
     <section className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -80,8 +105,19 @@ export function InventoryPanel({ view, periodDays, period }: { view: InventoryPa
         >
           {view.stockValue ? <MoneyList values={[view.stockValue]} /> : <span className="text-gray-400">currency not reported yet</span>}
         </Stat>
-        <Stat label="Variants" note={`${view.selling.toLocaleString()} selling, ${(view.variants - view.selling).toLocaleString()} with no sale in 90 days`}>
-          {view.variants.toLocaleString()}
+        <Stat
+          label="Stock that is not selling"
+          note={
+            <>
+              At cost, {view.stuck.variants.toLocaleString()} {view.stuck.variants === 1 ? "variant" : "variants"} in stock with no sale in 30 days
+              {view.stuck.uncosted ? `, ${view.stuck.uncosted.toLocaleString()} without a cost not counted` : ""}.{" "}
+              <Link to={`/inventory?${period}&stock=slow`} preventScrollReset className="font-semibold text-navy hover:underline">
+                See them
+              </Link>
+            </>
+          }
+        >
+          {view.stuck.value ? <MoneyList values={[view.stuck.value]} /> : <span className="text-gray-400">currency not reported yet</span>}
         </Stat>
       </div>
 
@@ -98,6 +134,14 @@ export function InventoryPanel({ view, periodDays, period }: { view: InventoryPa
         <p className="mt-1 text-sm text-gray-600">
           Days of cover = on hand ÷ units a day, sold {rate}. Lead time is the supplier's measured time from order to delivery once it has 3 received purchase orders, otherwise the variant's setting in Inventorify. Days out of stock count
           the days in this period that opened with an empty shelf.
+          {view.hasOutcomes ? (
+            <>
+              {" "}Delivered is the share of decided orders with the variant delivered, over the last 90 days (the store's own rate until the variant has 20);
+              cover net of returns assumes returned parcels go back on the shelf.
+            </>
+          ) : null}{" "}
+          Order now covers the lead time plus {COVER_AFTER_ARRIVAL} days, at the net rate where there is one, less what is on hand and on order.
+          {showProfit ? ` Profit is the period's, as Finance's product table has it; “Top” marks the variants that make 80% of it, listed first in their state.` : ""}
         </p>
         <nav aria-label="Filter by state" className="mt-4 flex flex-wrap gap-2 text-sm font-semibold">
           {[{ state: null, count: view.variants }, ...view.byState].map((s) => {
@@ -128,8 +172,11 @@ export function InventoryPanel({ view, periodDays, period }: { view: InventoryPa
                 <th className="py-2 pr-4 text-right">Sold, {periodDays} days</th>
                 <th className="py-2 pr-4 text-right">A day</th>
                 <th className="py-2 pr-4 text-right">Days of cover</th>
+                {view.hasOutcomes ? <th className="py-2 pr-4 text-right">Delivered</th> : null}
                 <th className="py-2 pr-4 text-right">Lead time</th>
                 <th className="py-2 pr-4 text-right">On order</th>
+                <th className="py-2 pr-4 text-right">Order now</th>
+                {showProfit ? <th className="py-2 pr-4 text-right">Profit, {periodDays} days</th> : null}
                 <th className="py-2 text-right">Days out of stock</th>
               </tr>
             </thead>
@@ -137,7 +184,14 @@ export function InventoryPanel({ view, periodDays, period }: { view: InventoryPa
               {view.rows.map((r) => (
                 <tr key={r.variantId}>
                   <td className="max-w-xs py-2 pr-4">
-                    <span className="block truncate font-medium text-gray-900" title={r.title}>{r.title}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate font-medium text-gray-900" title={r.title}>{r.title}</span>
+                      {showProfit && r.topProfit ? (
+                        <span className="shrink-0 rounded-full bg-mint px-2 py-0.5 text-[10px] font-bold text-navy" title="Among the variants that make 80% of the period's profit">
+                          Top
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="block truncate text-xs text-gray-500">{[r.variantTitle, r.sku].filter(Boolean).join(" · ") || " "}</span>
                   </td>
                   <td className="py-2 pr-4">
@@ -151,9 +205,26 @@ export function InventoryPanel({ view, periodDays, period }: { view: InventoryPa
                   <td className="py-2 pr-4 text-right tabular-nums text-gray-900">{r.stock.toLocaleString()}</td>
                   <td className="py-2 pr-4 text-right tabular-nums text-gray-700">{r.soldInPeriod.toLocaleString()}</td>
                   <td className="py-2 pr-4 text-right tabular-nums text-gray-700">{r.perDay ? r.perDay.toFixed(1) : r.daysOfCover !== null && r.stock > 0 ? "<0.1" : "—"}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums text-gray-900">{r.daysOfCover === null ? "—" : r.daysOfCover.toLocaleString()}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums text-gray-900">
+                    {r.daysOfCover === null ? "—" : r.daysOfCover.toLocaleString()}
+                    {r.netDaysOfCover !== null && r.netDaysOfCover !== r.daysOfCover ? (
+                      <span className="block text-xs text-gray-500">{r.netDaysOfCover.toLocaleString()} net of returns</span>
+                    ) : null}
+                  </td>
+                  {view.hasOutcomes ? (
+                    <td className="py-2 pr-4 text-right tabular-nums text-gray-700">
+                      {r.deliveryRate === null ? "—" : `${r.deliveryRate}%`}
+                      {r.rateSource === "store" ? <span className="block text-xs text-gray-500">store</span> : null}
+                    </td>
+                  ) : null}
                   <td className="py-2 pr-4 text-right tabular-nums text-gray-700">{r.leadTimeDays === null ? "—" : `${r.leadTimeDays}d${r.leadSource === "measured" ? " (measured)" : ""}`}</td>
                   <td className="py-2 pr-4 text-right tabular-nums text-gray-700">{r.onOrder ? r.onOrder.toLocaleString() : "—"}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums font-semibold text-gray-900">{r.reorderUnits ? r.reorderUnits.toLocaleString() : "—"}</td>
+                  {showProfit ? (
+                    <td className={`py-2 pr-4 text-right tabular-nums ${r.profit?.amount.startsWith("-") ? "text-red-700" : "text-gray-700"}`}>
+                      {r.profit ? <MoneyList values={[r.profit]} /> : "—"}
+                    </td>
+                  ) : null}
                   <td className="py-2 text-right tabular-nums text-gray-700">
                     {r.daysSnapshotted ? `${r.daysOut} of ${r.daysSnapshotted}` : <span className="text-gray-400">no record</span>}
                   </td>
@@ -172,6 +243,11 @@ export function InventoryPanel({ view, periodDays, period }: { view: InventoryPa
 
       <div className="rounded-2xl bg-white p-5">
         <h2 className="font-display text-lg font-bold text-gray-900">Stock on the way</h2>
+        {late.length ? (
+          <p className="mt-1 text-sm text-red-700">
+            {late.length.toLocaleString()} {late.length === 1 ? "order is" : "orders are"} past {late.length === 1 ? "its" : "their"} expected date and not received.
+          </p>
+        ) : null}
         {view.openOrders.length ? (
           <ul className="mt-3 divide-y divide-gray-100 text-sm">
             {view.openOrders.map((po) => (
@@ -183,6 +259,11 @@ export function InventoryPanel({ view, periodDays, period }: { view: InventoryPa
                 <span className="tabular-nums text-gray-700">
                   {po.units.toLocaleString()} units, {po.variants} {po.variants === 1 ? "variant" : "variants"} · {po.status.replace(/_/g, " ")}
                   {po.expected ? ` · expected ${shortDay(po.expected)}` : ""}
+                  {po.daysLate ? (
+                    <span className="ml-2 whitespace-nowrap rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700">
+                      {po.daysLate} {po.daysLate === 1 ? "day" : "days"} late
+                    </span>
+                  ) : null}
                 </span>
               </li>
             ))}
