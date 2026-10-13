@@ -6,6 +6,7 @@ import { inventorySection } from "../metrics/inventory.server";
 import { checkoutsSection, formAbandonmentsSection } from "../metrics/checkouts.server";
 import { offersSection } from "../metrics/offers.server";
 import { buyerHistorySection } from "../metrics/buyer-history.server";
+import { loadAcquisition } from "../metrics/campaign-acquisition.server";
 import { buyerContactSection } from "../metrics/buyer-contact.server";
 import { sumByCurrency } from "../metrics/money";
 import { localDayOf } from "../metrics/order-grain";
@@ -85,6 +86,8 @@ export async function detectorInput(
   const buyerContact = connected.has("WHATKABOT") ? await buyerContactSection(s.store.id) : null;
   const ads = s.adSpend;
   const complete = ads && ads.daysFetched === ads.daysInPeriod;
+  // I10: each new buyer's first order and the campaign that brought them.
+  const acquisition = connected.has("FINANCIFY") ? await loadAcquisition(s.store.id, s.period, !!complete) : null;
   return {
     connected,
     input: {
@@ -112,6 +115,7 @@ export async function detectorInput(
       offers,
       buyerHistory,
       buyerContact,
+      acquisition,
     },
   };
 }

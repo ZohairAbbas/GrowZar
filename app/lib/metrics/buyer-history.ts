@@ -1,4 +1,5 @@
-import { MIN_ROUTE_Z, zScore } from "./findings";
+import { MIN_ROUTE_Z, returnsCost, zScore, type CostEstimate } from "./findings";
+import type { ReturnCost } from "./return-cost";
 
 /**
  * I5, is buyer verification worth turning on (Phase 5, G-GZR5-11), with
@@ -115,10 +116,12 @@ export type NetworkRiskFinding = {
   /** Return rate of orders whose buyer Courierify rated low, when it has orders. */
   lowRate: number | null;
   openHigh: number;
+  excessReturns: number;
+  cost: CostEstimate | null;
 };
 
 /** I5 on network history: orders from buyers Courierify rated high when ordering come back far more often. */
-export function networkRiskFinding(v: BuyerHistoryView | null | undefined): NetworkRiskFinding | Skip {
+export function networkRiskFinding(v: BuyerHistoryView | null | undefined, returnCost?: ReturnCost | null): NetworkRiskFinding | Skip {
   const h = v?.network;
   if (!h || !h.labelled) return { kind: "skip", status: "not_enough_data", reason: "Courierify has not labelled any decided order of this store yet" };
   const high = h.rows.find((r) => r.level === "high")!;
@@ -151,6 +154,7 @@ export function networkRiskFinding(v: BuyerHistoryView | null | undefined): Netw
     z: Math.round(z * 100) / 100,
     lowRate: low.delivered + low.returned >= MIN_DECIDED ? low.rate : null,
     openHigh: h.openHigh,
+    ...excess(high.returned, d, restRate, returnCost),
   };
 }
 
@@ -198,12 +202,15 @@ export type ReturnersFinding = {
   returnsFromReturners: number | null;
   otpEnabled: boolean | null;
   formShare: number | null;
+  /** Returns above everyone else's rate, at the store's median courier charge per return. */
+  excessReturns: number;
+  cost: CostEstimate | null;
 };
 
 type Skip = { kind: "skip"; status: "not_enough_data" | "nothing_found"; reason: string };
 
 /** I5 (per store): buyers who returned before come back far more often than everyone else. */
-export function returnersFinding(v: BuyerHistoryView | null | undefined): ReturnersFinding | Skip {
+export function returnersFinding(v: BuyerHistoryView | null | undefined, returnCost?: ReturnCost | null): ReturnersFinding | Skip {
   if (!v) return { kind: "skip", status: "not_enough_data", reason: "No orders with a known buyer in this period" };
   const r = v.bands.find((b) => b.band === "returned_before")!;
   const rest = v.bands.filter((b) => b.band !== "returned_before");
@@ -235,5 +242,12 @@ export function returnersFinding(v: BuyerHistoryView | null | undefined): Return
     returnsFromReturners: v.returnsFromReturners,
     otpEnabled: v.otpEnabled,
     formShare: v.formShare,
+    ...excess(r.returned, d, restRate, returnCost),
   };
+}
+
+/** Returns above the comparison rate, and their courier charges at the store's median (the I8 method). */
+function excess(returned: number, decided: number, restRate: number, returnCost: ReturnCost | null | undefined) {
+  const excessReturns = Math.max(0, returned - Math.round((decided * restRate) / 100));
+  return { excessReturns, cost: returnsCost(excessReturns, returnCost) };
 }
