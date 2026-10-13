@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useFetcher } from "react-router";
-import { ArrowRight, Database, Lightbulb, Mail, Package, Target, Truck, Undo2, Wallet, X } from "lucide-react";
+import { ExternalLink, ArrowRight, Database, Lightbulb, Mail, Package, Target, Truck, Undo2, Wallet, X } from "lucide-react";
 
 import type {
   CashHeldFinding,
@@ -29,6 +29,7 @@ import type { CampaignReturnsFinding } from "~/lib/metrics/campaign-acquisition"
 import { MIN_DECIDED as MIN_CONTACT_DECIDED } from "~/lib/metrics/buyer-contact";
 import type { InboxItem, InboxView } from "~/lib/insights/inbox.server";
 import { DISMISS_REASONS } from "~/lib/insights/actions";
+import { actionFor, type ScreenKey } from "~/lib/apps/app-links";
 import { formatAmount, MoneyList, outcomeLabel } from "./Metrics";
 
 /**
@@ -36,6 +37,39 @@ import { formatAmount, MoneyList, outcomeLabel } from "./Metrics";
  * title. Set per card by InboxCards, so the cards themselves stay unchanged.
  */
 const Area = createContext<Finding["kind"] | null>(null);
+/** The store's connected apps, for the button into the app that fixes a card (G-GZR6-2). */
+const Connected = createContext<ReadonlySet<string>>(new Set());
+
+/**
+ * The app screen that acts on each finding. Kinds not listed have no app fix
+ * to offer yet (form abandonments wait for WhatKaBot's confirmed admin links).
+ */
+const ACTION_SCREEN: Partial<Record<Finding["kind"], ScreenKey>> = {
+  unfollowed_checkouts: "retainify_flows",
+  unconfirmed_returns: "courierify_confirmations",
+  stuck_parcels: "courierify_ndr",
+  returners: "preventify_verification",
+  network_risk: "preventify_verification",
+  offer_returns: "preventify_offers",
+};
+
+/** "Set up … in <app>" when the app is connected, "Install <app>" when it isn't; through the act route, which records it. */
+function AppActionLink({ id, kind, variant }: { id: string; kind: Finding["kind"]; variant: "button" | "text" }) {
+  const connected = useContext(Connected);
+  const screen = ACTION_SCREEN[kind];
+  const action = screen ? actionFor(screen, connected) : null;
+  if (!action) return null;
+  const href = `/insights/${id}/act?screen=${action.screen}`;
+  const cls =
+    variant === "button"
+      ? `inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold ${action.install ? "bg-mint-50 text-mint-700 hover:bg-mint-100" : "bg-field text-gray-800 hover:bg-gray-100"}`
+      : "inline-flex items-center gap-1 text-sm font-semibold text-accent-600 hover:underline";
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={cls}>
+      {action.label} <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+    </a>
+  );
+}
 
 const AREAS: Record<Finding["kind"], { label: string; Icon: typeof Wallet; tint: string }> = {
   cash_held: { label: "Money owed", Icon: Wallet, tint: "bg-coral-100 text-coral-700" },
@@ -887,7 +921,15 @@ export const parseInsightsTab = (v: string | null): InsightsTab =>
  * (rankInsights), as slim rows. The headline opens the full card in
  * Details; everything else lives on the Insights page.
  */
-export function AttentionList({ inbox, period }: { inbox: InboxView; period: string }) {
+export function AttentionList(props: { inbox: InboxView; period: string }) {
+  return (
+    <Connected.Provider value={new Set(props.inbox.connected)}>
+      <AttentionListInner {...props} />
+    </Connected.Provider>
+  );
+}
+
+function AttentionListInner({ inbox, period }: { inbox: InboxView; period: string }) {
   const action = inbox.items.filter((i) => i.insight.rank.group === "specific");
   const shown = action.slice(0, 3);
   const total = inbox.items.length + inbox.overflow;
@@ -924,6 +966,7 @@ export function AttentionList({ inbox, period }: { inbox: InboxView; period: str
                     {s.headline}
                   </button>
                   <p className="line-clamp-2 text-sm text-gray-500">{s.next ?? s.why ?? s.note}</p>
+                  <AppActionLink id={item.id} kind={item.insight.finding.kind} variant="text" />
                 </div>
                 <p className="col-start-2 font-display text-xl font-bold tabular-nums text-gray-900 md:col-start-auto md:text-right">
                   {s.figure}
@@ -965,7 +1008,15 @@ export function AttentionList({ inbox, period }: { inbox: InboxView; period: str
  * The Insights page: every finding as a compact card, in four tabs. The tab
  * is a query parameter, so it works before scripts load and can be linked.
  */
-export function InsightsBoard({ inbox, period, tab }: { inbox: InboxView; period: string; tab: InsightsTab }) {
+export function InsightsBoard(props: { inbox: InboxView; period: string; tab: InsightsTab }) {
+  return (
+    <Connected.Provider value={new Set(props.inbox.connected)}>
+      <InsightsBoardInner {...props} />
+    </Connected.Provider>
+  );
+}
+
+function InsightsBoardInner({ inbox, period, tab }: { inbox: InboxView; period: string; tab: InsightsTab }) {
   const reopen = useFetcher();
   const action = inbox.items.filter((i) => i.insight.rank.group === "specific");
   const info = inbox.items.filter((i) => i.insight.rank.group === "context");
@@ -1101,7 +1152,14 @@ function FullCard({ item, period, canManage }: { item: InboxItem; period: string
         return <ReturnersCard f={f} {...props} />;
     }
   })();
-  return <Area.Provider value={f.kind}>{card}</Area.Provider>;
+  return (
+    <Area.Provider value={f.kind}>
+      {card}
+      <div className="mt-3 flex justify-end">
+        <AppActionLink id={id} kind={f.kind} variant="button" />
+      </div>
+    </Area.Provider>
+  );
 }
 
 /**
@@ -1398,6 +1456,9 @@ function CompactCard({ item, period, onDetails }: { item: InboxItem; period: str
         >
           Details
         </button>
+      </div>
+      <div className="pt-3">
+        <AppActionLink id={id} kind={f.kind} variant="text" />
       </div>
     </article>
   );
