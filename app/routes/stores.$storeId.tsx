@@ -5,6 +5,7 @@ import type { Route } from "./+types/stores.$storeId";
 import { Forbidden, can, requireStore } from "~/lib/authorize.server";
 import { readFormData } from "~/lib/form.server";
 import { prisma } from "~/lib/db.server";
+import { APP_LABELS } from "~/lib/sections";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   return [
@@ -224,6 +225,12 @@ const shortDateTime = (iso: string) =>
     minute: "2-digit",
   });
 
+/** "REINSTALL_NEEDED" → "Reinstall needed": a status as a reader would write it. */
+const sentence = (status: string) => {
+  const words = status.toLowerCase().replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
 export default function StoreDetail({
   loaderData,
   actionData,
@@ -247,43 +254,43 @@ export default function StoreDetail({
       <p className="mt-1 text-sm text-gray-600">{store.shopDomain}</p>
 
       <dl className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+        <div className="rounded-2xl bg-white p-5">
+          <dt className="text-sm font-semibold text-gray-700">
             Currency
           </dt>
           {/* Both come from the owning app, never a default (rules #4, #5). */}
-          <dd className="mt-1 text-sm font-semibold text-gray-900">
+          <dd className="mt-1 font-display text-xl font-bold text-gray-900">
             {store.currency ?? "Not reported yet"}
           </dd>
         </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+        <div className="rounded-2xl bg-white p-5">
+          <dt className="text-sm font-semibold text-gray-700">
             Timezone
           </dt>
-          <dd className="mt-1 text-sm font-semibold text-gray-900">
+          <dd className="mt-1 font-display text-xl font-bold text-gray-900">
             {store.timezone ?? "Not reported yet"}
           </dd>
         </div>
       </dl>
 
       {actionData?.error ? (
-        <div className="mt-6 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mt-6 flex items-start gap-2 rounded-2xl bg-coral-100 px-4 py-3 text-sm text-coral-700">
           <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
           <span>{actionData.error}</span>
         </div>
       ) : null}
 
       {actionData && "ok" in actionData && actionData.ok ? (
-        <div className="mt-6 flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+        <div className="mt-6 flex items-center gap-2 rounded-2xl bg-mint-100 px-4 py-3 text-sm text-mint-700">
           <Check className="h-5 w-5 flex-shrink-0" />
           <span>{actionData.ok}</span>
         </div>
       ) : null}
 
       {canDecide && accessRequests.length > 0 ? (
-        <section className="mt-8 rounded-2xl border border-amber-200 bg-amber-50/50 p-5">
+        <section className="mt-8 rounded-2xl bg-coral-50 p-5">
           <h2 className="flex items-center gap-2 font-display text-base font-bold text-gray-900">
-            <UserPlus className="h-5 w-5 text-amber-600" />
+            <UserPlus className="h-5 w-5 text-coral-600" />
             Access requests
           </h2>
           <p className="mt-1 text-sm text-gray-600">
@@ -295,7 +302,7 @@ export default function StoreDetail({
             {accessRequests.map((accessRequest) => (
               <li
                 key={accessRequest.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-white p-4"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-gray-900">
@@ -317,7 +324,7 @@ export default function StoreDetail({
                     <button
                       type="submit"
                       disabled={navigation.state === "submitting"}
-                      className="flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-50 disabled:opacity-50"
+                      className="flex items-center gap-1 rounded-full bg-field px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-100 disabled:opacity-50"
                     >
                       <X className="h-3.5 w-3.5" />
                       Decline
@@ -352,19 +359,15 @@ export default function StoreDetail({
           {connections.map((connection) => (
             <li key={connection.app} className="px-5 py-3">
               <div className="flex items-center justify-between gap-4">
-                <span className="text-sm font-medium capitalize text-gray-900">
-                  {connection.app.toLowerCase()}
+                <span className="text-sm font-semibold text-gray-900">
+                  {APP_LABELS[connection.app as keyof typeof APP_LABELS] ?? connection.app}
                 </span>
                 <span
-                  className={
-                    connection.status === "CONNECTED"
-                      ? "text-xs font-medium uppercase tracking-wide text-green-700"
-                      : "text-xs font-medium uppercase tracking-wide text-amber-700"
-                  }
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                    connection.status === "CONNECTED" ? "bg-mint-100 text-mint-700" : "bg-coral-100 text-coral-700"
+                  }`}
                 >
-                  {connection.status === "DISCONNECTED"
-                    ? "Reconnect needed"
-                    : connection.status.toLowerCase().replace(/_/g, " ")}
+                  {connection.status === "DISCONNECTED" ? "Reconnect needed" : sentence(connection.status)}
                 </span>
               </div>
 
@@ -374,7 +377,7 @@ export default function StoreDetail({
                 last true, and it goes on a schedule rather than vanishing.
               */}
               {connection.status === "DISCONNECTED" ? (
-                <p className="mt-1.5 text-xs leading-relaxed text-amber-800">
+                <p className="mt-1.5 text-xs leading-relaxed text-coral-700">
                   Showing data as of{" "}
                   <strong>{shortDate(connection.lastSyncedAt ?? connection.disconnectedAt)}</strong>
                   . Nothing has been deleted
@@ -421,19 +424,19 @@ export default function StoreDetail({
                     : ""}
                 </p>
                 {event.lastError ? (
-                  <p className="mt-0.5 text-xs text-red-600">{event.lastError}</p>
+                  <p className="mt-0.5 text-xs text-coral-700">{event.lastError}</p>
                 ) : null}
               </div>
               <span
-                className={`text-xs font-medium uppercase tracking-wide ${
+                className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                   event.status === "FAILED"
-                    ? "text-red-600"
+                    ? "bg-coral-100 text-coral-700"
                     : event.status === "PROCESSED"
-                      ? "text-green-700"
-                      : "text-gray-500"
+                      ? "bg-mint-100 text-mint-700"
+                      : "bg-field text-gray-600"
                 }`}
               >
-                {event.status.toLowerCase()}
+                {sentence(event.status)}
               </span>
             </li>
           ))}

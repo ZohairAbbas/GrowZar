@@ -42,7 +42,7 @@ import { previousPeriod } from "./compare";
 import { convertDated } from "./fx";
 import { loadFxSource } from "./fx.server";
 import { storeSummary, type StoreSummary } from "./summaries.server";
-import { formatAmount, parseAmount, sumByCurrency, type Money } from "./money";
+import { formatAmount, parseAmount, type Money } from "./money";
 import { matchesFilter, orderFilterQuery, type OrderFilter } from "./findings";
 import { toRollupOrder } from "./rollups.server";
 import { loadPayerHistories } from "./settlements.server";
@@ -150,58 +150,6 @@ export type HomeView = {
   fx: StoreSummary["fx"];
   compare: { delivered: Headline; deliveryRate: Headline; profit: Headline | null; orders: Headline };
 };
-
-/**
- * COD a courier still owes as of today, whatever the order date: delivered
- * Courierify parcels no settlement covers yet. The same rows I4 reads, before
- * it judges which payers are late, so Home and the insight never disagree on
- * what is outstanding.
- */
-export type Owed = {
-  amounts: Money[];
-  orders: number;
-  /** Couriers with no settlement ever recorded: their delivered COD, apart, never owed. */
-  untracked: Array<{ courier: string; amounts: Money[]; orders: number }>;
-};
-
-/**
- * Only couriers whose payouts Courierify records count as owing: for one
- * with no settlement ever, "not paid" and "paid, never recorded" look the
- * same (`outcome-sources.ts`).
- */
-export async function owedToday(storeId: string): Promise<Owed> {
-  const [groups, payers] = await Promise.all([
-    prisma.orderGrain.groupBy({
-      by: ["courier", "fulfilledVia", "uncollectedCurrency"],
-      where: { storeId, outcome: "delivered", parcelCount: { gt: 0 }, uncollectedAmount: { gt: 0 } },
-      _sum: { uncollectedAmount: true },
-      _count: { _all: true },
-    }),
-    loadPayerHistories(storeId),
-  ]);
-  const tracked = trackedPayers(payers.map((p) => p.payer));
-  // The payer, as I4 has it: the 3PL that booked the parcel, else the courier.
-  const payer = (g: { courier: string | null; fulfilledVia: string | null }) => (g.fulfilledVia ?? g.courier ?? "unknown").toLowerCase();
-  const isTracked = (g: { courier: string | null; fulfilledVia: string | null }) => tracked.has(payer(g));
-  const amounts = (list: typeof groups) =>
-    sumByCurrency(
-      list
-        .filter((g) => g.uncollectedCurrency && g._sum.uncollectedAmount)
-        .map((g) => ({ amount: formatAmount(parseAmount(g._sum.uncollectedAmount!.toFixed(6))!), currency: g.uncollectedCurrency! })),
-    );
-  const owing = groups.filter(isTracked);
-  const apart = new Map<string, typeof groups>();
-  for (const g of groups.filter((x) => !isTracked(x))) apart.set(payer(g), [...(apart.get(payer(g)) ?? []), g]);
-  return {
-    amounts: amounts(owing),
-    orders: owing.reduce((n, g) => n + g._count._all, 0),
-    untracked: [...apart.entries()].map(([courier, list]) => ({
-      courier,
-      amounts: amounts(list),
-      orders: list.reduce((n, g) => n + g._count._all, 0),
-    })),
-  };
-}
 
 export function homeView(s: StoreSummary, prev: StoreSummary, canSeeMoney: boolean): HomeView {
   const rows = s.rows;
@@ -719,7 +667,7 @@ export async function storeRetention(
 
 /**
  * Delivered Courierify COD no settlement covers yet, by courier and age, as
- * of today and whatever the order date: the rows `owedToday` and I4 read.
+ * of today and whatever the order date: the rows I4 reads.
  */
 export async function storePayoutAgeing(storeId: string, currency: string | null, scope: Scope): Promise<PayoutAgeing | null> {
   if (!currency) return null;
