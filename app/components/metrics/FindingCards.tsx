@@ -51,6 +51,7 @@ const ACTION_SCREEN: Partial<Record<Finding["kind"], ScreenKey>> = {
   returners: "preventify_verification",
   network_risk: "preventify_verification",
   offer_returns: "preventify_offers",
+  stockout: "inventorify_reorder",
 };
 
 /** "Set up … in <app>" when the app is connected, "Install <app>" when it isn't; through the act route, which records it. */

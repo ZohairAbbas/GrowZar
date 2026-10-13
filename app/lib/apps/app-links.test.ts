@@ -11,6 +11,8 @@ describe("app links (G-GZR6-2)", () => {
   it("uses the admin handle, which can differ from the App Store slug", () => {
     expect(actionHref("retainify_flows", new Set(["RETAINIFY"]), "example-shop.myshopify.com")).toBe("https://admin.shopify.com/store/example-shop/apps/retainify-1/app/flows");
     expect(actionHref("retainify_flows", new Set(), "example-shop.myshopify.com")).toBe("https://apps.shopify.com/retainify");
+    expect(actionHref("inventorify_reorder", new Set(["INVENTORIFY"]), "example-shop.myshopify.com")).toBe("https://admin.shopify.com/store/example-shop/apps/inventorify-5/app/purchase-orders/new");
+    expect(actionHref("inventorify_reorder", new Set(), "example-shop.myshopify.com")).toBe("https://apps.shopify.com/inventorify-8");
   });
 
   it("refuses unknown screens and malformed shops rather than guessing a link", () => {

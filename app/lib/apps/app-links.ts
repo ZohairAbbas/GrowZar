@@ -30,8 +30,8 @@ export const SUITE_APPS: Record<LinkedApp, AppEntry> = {
   // Admin handles confirmed from the merchant's own admin URL (2026-10-13).
   WHATKABOT: { name: "WhatKaBot", listing: "https://apps.shopify.com/whatkabot", adminHandle: "whatkabot" },
   FINANCIFY: { name: "Financify", listing: "https://apps.shopify.com/financify", adminHandle: "financify" },
-  // Listed as `inventorify-8`; its admin handle is not confirmed yet.
-  INVENTORIFY: { name: "Inventorify", listing: "https://apps.shopify.com/inventorify-8", adminHandle: null },
+  // Listed as `inventorify-8`, but its admin pages live under `inventorify-5`.
+  INVENTORIFY: { name: "Inventorify", listing: "https://apps.shopify.com/inventorify-8", adminHandle: "inventorify-5" },
 };
 
 /** A screen in one app that fixes a finding. `does` finishes "Set up …"/"Open …" labels. */
@@ -41,6 +41,7 @@ export const SCREENS = {
   preventify_offers: { app: "PREVENTIFY", path: "/app/sales-booster", open: "Review offers in Preventify" },
   courierify_confirmations: { app: "COURIERIFY", path: "/app/confirmations", open: "Open confirmations in Courierify" },
   courierify_ndr: { app: "COURIERIFY", path: "/app/ndr", open: "Open delivery problems in Courierify" },
+  inventorify_reorder: { app: "INVENTORIFY", path: "/app/purchase-orders/new", open: "Create a purchase order in Inventorify" },
 } as const satisfies Record<string, { app: LinkedApp; path: string; open: string }>;
 
 export type ScreenKey = keyof typeof SCREENS;
