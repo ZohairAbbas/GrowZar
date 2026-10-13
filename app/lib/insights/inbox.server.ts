@@ -196,6 +196,8 @@ export type InboxView = {
   /** Detectors that found nothing, lacked data, or are locked, and why. */
   checked: Array<{ label: string; status: "nothing_found" | "not_enough_data" | "locked"; text: string }>;
   canManage: boolean;
+  /** The store's connected apps, so a card can offer the app screen that fixes it, or the install (G-GZR6-2). */
+  connected: string[];
 };
 
 const APP_NAMES: Record<App, string> = { COURIERIFY: "Courierify", FINANCIFY: "Financify", INVENTORIFY: "Inventorify", RETAINIFY: "Retainify", PREVENTIFY: "Preventify", WHATKABOT: "WhatKaBot" };
@@ -265,6 +267,7 @@ export async function inboxView(
           ],
     ),
     canManage: viewer.canManage,
+    connected: [...connected],
   };
 }
 
