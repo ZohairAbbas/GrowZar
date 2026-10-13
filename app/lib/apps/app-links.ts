@@ -27,10 +27,11 @@ export const SUITE_APPS: Record<LinkedApp, AppEntry> = {
   COURIERIFY: { name: "Courierify", listing: "https://apps.shopify.com/courierify", adminHandle: "courierify" },
   RETAINIFY: { name: "Retainify", listing: "https://apps.shopify.com/retainify", adminHandle: "retainify-1" },
   PREVENTIFY: { name: "Preventify", listing: "https://apps.shopify.com/preventify", adminHandle: "jaldi-cod-form" },
-  WHATKABOT: { name: "WhatKaBot", listing: "https://apps.shopify.com/whatkabot", adminHandle: null },
-  FINANCIFY: { name: "Financify", listing: "https://apps.shopify.com/financify", adminHandle: null },
-  // Not listed on the App Store, and its admin handle is not confirmed.
-  INVENTORIFY: { name: "Inventorify", listing: null, adminHandle: null },
+  // Admin handles confirmed from the merchant's own admin URL (2026-10-13).
+  WHATKABOT: { name: "WhatKaBot", listing: "https://apps.shopify.com/whatkabot", adminHandle: "whatkabot" },
+  FINANCIFY: { name: "Financify", listing: "https://apps.shopify.com/financify", adminHandle: "financify" },
+  // Listed as `inventorify-8`; its admin handle is not confirmed yet.
+  INVENTORIFY: { name: "Inventorify", listing: "https://apps.shopify.com/inventorify-8", adminHandle: null },
 };
 
 /** A screen in one app that fixes a finding. `does` finishes "Set up …"/"Open …" labels. */
