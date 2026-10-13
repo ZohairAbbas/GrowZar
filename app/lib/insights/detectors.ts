@@ -36,6 +36,7 @@ import { stockoutFindings } from "../metrics/stockout";
 import { unfollowedCheckoutsFinding } from "../metrics/checkouts";
 import { offerReturnsFindings } from "../metrics/offers";
 import { networkRiskFinding, returnersFinding } from "../metrics/buyer-history";
+import { campaignReturnsFinding } from "../metrics/campaign-acquisition";
 
 export type App = "COURIERIFY" | "FINANCIFY" | "INVENTORIFY" | "RETAINIFY" | "PREVENTIFY" | "WHATKABOT";
 
@@ -58,7 +59,8 @@ export type DetectorId =
   | "unfollowed_form_abandonments"
   | "offer_returns"
   | "returners"
-  | "network_risk";
+  | "network_risk"
+  | "campaign_returns";
 
 export type Insight = {
   detector: DetectorId;
@@ -334,9 +336,9 @@ export const DETECTORS: readonly Detector[] = [
     label: "Buyers who returned before, returning again",
     preview: "How often buyers who sent a parcel back before do it again",
     run(input) {
-      const f = returnersFinding(input.buyerHistory);
+      const f = returnersFinding(input.buyerHistory, input.returnCost);
       if (f.kind === "skip") return f;
-      return [insight("returners", "store", f, { group: "specific", ordersAffected: f.orders }, false)];
+      return [insight("returners", "store", f, { group: "specific", ordersAffected: f.orders }, !!f.cost)];
     },
   },
   {
@@ -347,9 +349,22 @@ export const DETECTORS: readonly Detector[] = [
     label: "Buyers Courierify rated high risk, returning",
     preview: "How often buyers Courierify's network rated high risk when they ordered send the parcel back",
     run(input) {
-      const f = networkRiskFinding(input.buyerHistory);
+      const f = networkRiskFinding(input.buyerHistory, input.returnCost);
       if (f.kind === "skip") return f;
-      return [insight("network_risk", "store", f, { group: "specific", ordersAffected: f.openHigh }, false)];
+      return [insight("network_risk", "store", f, { group: "specific", ordersAffected: f.openHigh }, !!f.cost)];
+    },
+  },
+  {
+    // I10 (G-GZR6-1): campaigns whose new buyers send their first parcel
+    // back far more often than the store's other new buyers.
+    id: "campaign_returns",
+    needs: ["FINANCIFY"],
+    label: "Campaigns bringing buyers who don't accept delivery",
+    preview: "Ad spend on campaigns whose new buyers send their first parcel back",
+    run(input) {
+      const f = campaignReturnsFinding(input.acquisition, input.returnCost);
+      if (f.kind === "skip") return f;
+      return [insight("campaign_returns", "store", f, { group: "specific", ordersAffected: f.flagged.reduce((n, c) => n + c.returned, 0) }, true)];
     },
   },
 ];
@@ -395,6 +410,10 @@ export function withoutMoney(insights: readonly Insight[]): Insight[] {
     if (f.kind === "returns_not_received") return [{ ...i, revealsMoney: false, finding: { ...f, productCost: null, value: null } }];
     if (f.kind === "unfollowed_checkouts") return [{ ...i, revealsMoney: false, finding: { ...f, notFollowedUpValue: [] } }];
     if (f.kind === "offer_returns") return [{ ...i, revealsMoney: false, finding: { ...f, avgPlaced: null, baselineAvg: null } }];
+    if (f.kind === "returners" || f.kind === "network_risk") return [{ ...i, revealsMoney: false, finding: { ...f, cost: null } }];
+    if (f.kind === "campaign_returns") {
+      return [{ ...i, revealsMoney: false, finding: { ...f, spendOnReturned: null, spendKnownFor: 0, flagged: f.flagged.map((c) => ({ ...c, spend: null, spendOnReturned: null, returnCharges: null })) } }];
+    }
     if (f.kind === "variant_returns") {
       return [{ ...i, revealsMoney: false, finding: { ...f, flagged: f.flagged.map((v) => ({ ...v, cost: null })) } }];
     }
@@ -434,6 +453,8 @@ export function evidenceOf(i: Insight): Record<string, number | string> {
       return { rate: f.rate, restRate: f.restRate, decided: f.decided, z: f.z };
     case "network_risk":
       return { rate: f.rate, restRate: f.restRate, decided: f.decided, z: f.z, openHigh: f.openHigh };
+    case "campaign_returns":
+      return { campaign: f.flagged[0]!.key, rate: f.flagged[0]!.rate ?? 0, restRate: f.flagged[0]!.restRate, decided: f.flagged[0]!.decided, campaigns: f.flagged.length };
     case "offer_returns":
       return { type: f.type, returnRate: f.returnRate, baselineRate: f.baselineRate, decided: f.decided, valueLift: f.valueLiftPct ?? "" };
     case "unfollowed_checkouts":

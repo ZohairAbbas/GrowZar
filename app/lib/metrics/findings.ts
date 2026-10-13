@@ -28,6 +28,7 @@ import type { StockoutFinding } from "./stockout";
 import type { CheckoutsView, UnfollowedCheckoutsFinding } from "./checkouts";
 import type { OfferReturnsFinding, OffersView } from "./offers";
 import type { BuyerHistoryView, NetworkRiskFinding, ReturnersFinding } from "./buyer-history";
+import type { AcquisitionView, CampaignReturnsFinding } from "./campaign-acquisition";
 import { OPEN_DAYS, OPEN_OUTCOMES } from "./buyer-network";
 import { wroteAfterOrdering, type BuyerContact, type BuyerContactSection, type ContactReturnTest } from "./buyer-contact";
 
@@ -144,7 +145,7 @@ export type VariantRate = {
  */
 export type CostEstimate = { total: Money; perReturn: Money; returns: number; pricedReturns: number };
 
-function returnsCost(n: number, rc: ReturnCost | null | undefined): CostEstimate | null {
+export function returnsCost(n: number, rc: ReturnCost | null | undefined): CostEstimate | null {
   if (!rc || n <= 0) return null;
   return { total: times(rc.perReturn, n), perReturn: rc.perReturn, returns: n, pricedReturns: rc.priced };
 }
@@ -343,7 +344,7 @@ export type DeductionsFinding = {
   keptShare: number | null;
 };
 
-export type Finding = NetworkRiskFinding | ReturnersFinding | OfferReturnsFinding | UnfollowedCheckoutsFinding | StockoutFinding | ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding | StuckFinding | NotReceivedFinding | DeductionsFinding;
+export type Finding = CampaignReturnsFinding | NetworkRiskFinding | ReturnersFinding | OfferReturnsFinding | UnfollowedCheckoutsFinding | StockoutFinding | ProductLossFinding | CityReturnsFinding | CourierCityFinding | UnconfirmedFinding | CashHeldFinding | MissingFeesFinding | MarginFinding | VariantReturnsFinding | DisagreementFinding | CourierifyStoppedFinding | StuckFinding | NotReceivedFinding | DeductionsFinding;
 
 /**
  * Why a finding is absent (G-GZR3-3). "Not enough data" and "checked, nothing
@@ -405,6 +406,8 @@ export type FindingsInput = {
   offers?: OffersView | null;
   /** I5 per store: the period's orders by the buyer's earlier history (D-51). */
   buyerHistory?: BuyerHistoryView | null;
+  /** I10: the period's first orders by the campaign that brought the buyer, when Financify is connected. */
+  acquisition?: AcquisitionView | null;
   /** I7: buyers' WhatKaBot messages and what writing in has meant here, when it has any. */
   buyerContact?: BuyerContactSection | null;
 };

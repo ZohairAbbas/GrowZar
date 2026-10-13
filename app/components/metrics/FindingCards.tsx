@@ -25,6 +25,7 @@ import type { StockoutFinding } from "~/lib/metrics/stockout";
 import type { UnfollowedCheckoutsFinding } from "~/lib/metrics/checkouts";
 import type { OfferReturnsFinding } from "~/lib/metrics/offers";
 import type { NetworkRiskFinding, ReturnersFinding } from "~/lib/metrics/buyer-history";
+import type { CampaignReturnsFinding } from "~/lib/metrics/campaign-acquisition";
 import { MIN_DECIDED as MIN_CONTACT_DECIDED } from "~/lib/metrics/buyer-contact";
 import type { InboxItem, InboxView } from "~/lib/insights/inbox.server";
 import { DISMISS_REASONS } from "~/lib/insights/actions";
@@ -55,6 +56,7 @@ const AREAS: Record<Finding["kind"], { label: string; Icon: typeof Wallet; tint:
   offer_returns: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
   returners: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
   network_risk: { label: "Returns", Icon: Undo2, tint: "bg-mint-100 text-mint-700" },
+  campaign_returns: { label: "Marketing", Icon: Target, tint: "bg-mint-100 text-mint-700" },
 };
 
 function AreaTag() {
@@ -514,11 +516,12 @@ function ReturnersCard({ f, period, id, canManage }: { f: ReturnersFinding } & C
           ? "Preventify is not connected, so no verification is on."
           : `Preventify's OTP verification is ${f.otpEnabled ? "on" : "off"}${f.formShare !== null ? `, and its form took ${pct(f.formShare)} of the period's orders, so OTP reaches only those` : ""}.`}
       </p>
+      {f.cost ? <ReturnsCostLine cost={f.cost} /> : null}
       <Leaves
         items={[
           "Only your own orders: a buyer's history with other stores is measured on its own card, from Courierify's network.",
           "A buyer counts as having returned before only if that return was known when the new order was placed.",
-          "No money estimate yet: what verification would save is shown once it has been checked against past orders.",
+          "Extra returns: those above everyone else's rate. What verification would save is not estimated: it depends on how many it would stop.",
         ]}
       />
     </Card>
@@ -542,11 +545,51 @@ function NetworkRiskCard({ f, period, id, canManage }: { f: NetworkRiskFinding }
         {f.lowRate !== null ? <> Buyers it rated low came back {pct(f.lowRate)} of the time.</> : null}{" "}
         {f.openHigh ? <>{n(f.openHigh)} orders open now are from buyers it rates high.</> : "No open order is from a buyer it rates high right now."}
       </p>
+      {f.cost ? <ReturnsCostLine cost={f.cost} /> : null}
       <Leaves
         items={[
           "The label is Courierify's own, from returns across every store it serves; Growzar measures it against your returns and does not rescore it.",
           "Each order is judged by the label its buyer had when the order was placed: nothing that happened after counts.",
-          "No money estimate yet: what confirming these orders would save is shown once it has been checked against past orders.",
+          "Extra returns: those above everyone else's rate. What confirming these orders would save is not estimated: it depends on how many a call would stop.",
+        ]}
+      />
+    </Card>
+  );
+}
+
+const campaignName = (c: CampaignReturnsFinding["flagged"][number]) => `${c.name ?? c.key}${c.platform ? ` (${c.platform})` : ""}`;
+const campaignHeadline = (f: CampaignReturnsFinding) =>
+  f.flagged.length === 1
+    ? `${campaignName(f.flagged[0]!)} brings buyers who send their first parcel back`
+    : `${n(f.flagged.length)} campaigns bring buyers who send their first parcel back`;
+
+function CampaignReturnsCard({ f, period, id, canManage }: { f: CampaignReturnsFinding } & CardProps) {
+  return (
+    <Card id={id} canManage={canManage} title={campaignHeadline(f)} link={{ to: `/marketing?${period}`, label: "See campaigns" }}>
+      <p>
+        Of the store's new buyers this period, {pct(f.storeRate)} sent their first parcel back. These campaigns' new buyers did so far more
+        often:
+      </p>
+      <ul className="space-y-1.5">
+        {f.flagged.map((c) => (
+          <li key={c.key}>
+            <span className="font-medium">{campaignName(c)}</span>: <strong>{pct(c.rate ?? 0)}</strong> of {n(c.decided)} first orders came back,
+            against {pct(c.restRate)} for other new buyers
+            {c.spendOnReturned && c.spend ? (
+              <>. About <strong>{money(c.spendOnReturned)}</strong> of its {money(c.spend)} spend went on those returned orders</>
+            ) : (
+              <>. Its spend isn't recorded in Financify</>
+            )}
+            {c.returnCharges ? <>, and its {n(c.excessReturns)} extra returns cost about {money(c.returnCharges)} in courier charges</> : null}.
+          </li>
+        ))}
+      </ul>
+      <Leaves
+        items={[
+          "A new buyer is one whose first order with this store Financify ties to the campaign; later orders don't count against it.",
+          "Spend on returned orders: the campaign's spend this period, with platform fees, split evenly over every order Financify ties to it.",
+          "Extra returns: those above the store's other new buyers' rate, at the store's median courier charge per return. Goods that can't be sold again aren't included.",
+          "Spend shows only when every day of the period's ad spend is fetched.",
         ]}
       />
     </Card>
@@ -1052,6 +1095,8 @@ function FullCard({ item, period, canManage }: { item: InboxItem; period: string
         return <OfferReturnsCard f={f} {...props} />;
       case "network_risk":
         return <NetworkRiskCard f={f} {...props} />;
+      case "campaign_returns":
+        return <CampaignReturnsCard f={f} {...props} />;
       case "returners":
         return <ReturnersCard f={f} {...props} />;
     }
@@ -1184,11 +1229,24 @@ function summaryOf(f: Finding, period: string): Summary {
         affects: `${n(f.total)} orders`,
         link: { to: `/orders?${period}&disagree=1`, label: "See orders" },
       };
+    case "campaign_returns":
+      return {
+        headline: campaignHeadline(f),
+        figure: f.spendOnReturned ? figure(f.spendOnReturned) : pct(f.flagged[0]!.rate ?? 0),
+        note: f.spendOnReturned
+          ? `of ad spend went on first orders that came back${f.spendKnownFor < f.flagged.length ? ` (${n(f.spendKnownFor)} of ${n(f.flagged.length)} campaigns; the rest have no spend recorded)` : ""}`
+          : `of its new buyers' first parcels came back, against ${pct(f.flagged[0]!.restRate)}`,
+        next: "Narrow these campaigns' audience or pause them, and check which products and cities their returned orders were for.",
+        affects: `${n(f.flagged.reduce((t, c) => t + c.returned, 0))} returned first orders`,
+        link: { to: `/marketing?${period}`, label: "See campaigns" },
+      };
     case "network_risk":
       return {
         headline: networkHeadline(f),
-        figure: pct(f.rate),
-        note: `came back, against ${pct(f.restRate)} for everyone else`,
+        figure: f.cost ? figure(f.cost.total) : pct(f.rate),
+        note: f.cost
+          ? `in courier charges on ${n(f.excessReturns)} extra returns: ${pct(f.rate)} came back, against ${pct(f.restRate)}`
+          : `came back, against ${pct(f.restRate)} for everyone else`,
         next: networkNext(f),
         affects: `${n(f.openHigh)} open orders`,
         link: networkLink(f, period),
@@ -1196,8 +1254,10 @@ function summaryOf(f: Finding, period: string): Summary {
     case "returners":
       return {
         headline: returnersHeadline(f),
-        figure: pct(f.rate),
-        note: `came back, against ${pct(f.restRate)} for everyone else`,
+        figure: f.cost ? figure(f.cost.total) : pct(f.rate),
+        note: f.cost
+          ? `in courier charges on ${n(f.excessReturns)} extra returns: ${pct(f.rate)} came back, against ${pct(f.restRate)}`
+          : `came back, against ${pct(f.restRate)} for everyone else`,
         next: returnersNext(f),
         affects: `${n(f.orders)} orders from buyers who returned before`,
         link: { to: `/customers?${period}`, label: "See buyers" },
