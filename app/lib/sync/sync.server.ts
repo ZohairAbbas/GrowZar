@@ -238,10 +238,30 @@ async function writePage(options: {
   let unparseablePhones = 0;
   let maxUpdatedAt: Date | null = null;
 
-  for (const row of page.data ?? []) {
-    const externalId = extractId(row, feed);
-    const sourceUpdatedAt = extractUpdatedAt(row, feed.updatedAtField);
+  const rows = (page.data ?? []).map((row) => ({
+    row,
+    externalId: extractId(row, feed),
+    sourceUpdatedAt: extractUpdatedAt(row, feed.updatedAtField),
+  }));
 
+  // What this page's rows already are, in one query rather than one per row.
+  // Most of a page is usually unchanged (`updatedSince` overlaps, and some
+  // feeds re-send their whole set): for the largest store that was ~5,000
+  // lookups and as many updates every cycle.
+  const ids = [...new Set(rows.map((r) => r.externalId).filter((id): id is string => !!id))];
+  const known = new Map(
+    (ids.length
+      ? await prisma.rawRecord.findMany({
+          where: { storeId, app, entity: feed.entity, externalId: { in: ids } },
+          select: { id: true, externalId: true, sourceUpdatedAt: true },
+        })
+      : []
+    ).map((r) => [r.externalId, r]),
+  );
+  /** Unchanged rows, touched together after the loop. */
+  const unchanged = new Set<string>();
+
+  for (const { row, externalId, sourceUpdatedAt } of rows) {
     // A row with no canonical id or no updatedAt cannot be stored safely: it
     // could not be deduplicated, so every run would add another copy. It is
     // counted and reported rather than dropped in silence — a feed producing
@@ -255,30 +275,14 @@ async function writePage(options: {
       maxUpdatedAt = sourceUpdatedAt;
     }
 
-    const existing = await prisma.rawRecord.findUnique({
-      where: {
-        storeId_app_entity_externalId: {
-          storeId,
-          app,
-          entity: feed.entity,
-          externalId,
-        },
-      },
-      select: { id: true, sourceUpdatedAt: true, deletedAt: true },
-    });
-
+    const existing = known.get(externalId);
     if (existing && existing.sourceUpdatedAt.getTime() === sourceUpdatedAt.getTime()) {
-      await prisma.rawRecord.update({
-        where: { id: existing.id },
-        // A row the app still serves is alive, even unchanged: a purge marked
-        // everything deleted, and a re-sent row must undo that.
-        data: { lastSeenAt: new Date(), ...(existing.deletedAt ? { deletedAt: null } : {}) },
-      });
+      unchanged.add(existing.id);
       duplicates += 1;
       continue;
     }
 
-    await prisma.rawRecord.upsert({
+    const stored = await prisma.rawRecord.upsert({
       where: {
         storeId_app_entity_externalId: {
           storeId,
@@ -303,7 +307,11 @@ async function writePage(options: {
         sourceUpdatedAt,
         payload: row as Prisma.InputJsonValue,
       },
+      select: { id: true },
     });
+    // The same row again later in this page is then a duplicate, as it was
+    // when each row was looked up as it came.
+    known.set(externalId, { id: stored.id, externalId, sourceUpdatedAt });
 
     written += 1;
 
@@ -346,6 +354,17 @@ async function writePage(options: {
       if (resolved?.created) customers += 1;
       if (resolved?.phoneProblem) unparseablePhones += 1;
     }
+  }
+
+  // Every unchanged row, in one statement: it is still served, so it is seen
+  // now, and alive even if a purge had marked it deleted. Before the
+  // tombstones below, as the per-row updates were, so a row this page both
+  // re-sends and buries ends up buried.
+  if (unchanged.size) {
+    await prisma.rawRecord.updateMany({
+      where: { id: { in: [...unchanged] } },
+      data: { lastSeenAt: new Date(), deletedAt: null },
+    });
   }
 
   let tombstoned = 0;
