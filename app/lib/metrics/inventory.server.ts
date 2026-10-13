@@ -1,4 +1,6 @@
 import { prisma } from "../db.server";
+import type { ProfitTable } from "./profit-table";
+import { bucketOf, byVariant, rollup, type RollupOrder } from "./rollups";
 import {
   inventoryView,
   parseDailySales,
@@ -26,6 +28,11 @@ export async function inventorySection(
   currency: string | null,
   limit?: number,
   state: StockState | null = null,
+  /**
+   * Orders to read the stock against: the settled history (delivery rate by
+   * variant) and the period's profit by variant, when the viewer may see it.
+   */
+  orders?: { history: readonly RollupOrder[]; profit: ProfitTable | null },
 ): Promise<InventoryView> {
   const since = [period.from, shiftDay(period.today, -SELLING_DAYS)].sort()[0]!;
   // Snapshots for the period, and for the rate window (sales off an empty shelf).
@@ -61,5 +68,15 @@ export async function inventorySection(
     currency,
     limit,
     state,
+    outcomes: orders ? decidedByVariant(orders.history) : null,
+    profit: orders?.profit ? new Map(orders.profit.rows.filter((r) => r.kind === "row").map((r) => [r.key, r.profit])) : null,
   });
+}
+
+function decidedByVariant(history: readonly RollupOrder[]) {
+  const pick = (b: { deliveryRate: { delivered: number; returned: number } }) => ({ delivered: b.deliveryRate.delivered, returned: b.deliveryRate.returned });
+  return {
+    byVariant: new Map(rollup(history, byVariant).map((b) => [b.key, pick(b)])),
+    store: pick(bucketOf("store", history)),
+  };
 }

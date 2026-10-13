@@ -1,3 +1,4 @@
+import { MIN_DECIDED_TO_RATE } from "./compare";
 import { addMoney, readMoney, timesQuantity, zero, type Money } from "./money";
 
 /**
@@ -59,6 +60,11 @@ export const PO_USE_MIN = 3;
 export const PO_USE_DAYS = 90;
 /** Rows on screen; the rest is counted. */
 export const ROWS_SHOWN = 50;
+/** Days a reorder should last once it arrives; the suggested quantity covers the lead time plus these. */
+export const COVER_AFTER_ARRIVAL = 30;
+/** Share of the period's positive profit the top variants make between them. */
+export const TOP_PROFIT_SHARE = 0.8;
+
 
 /** Statuses that never put stock on the way. Everything else with units still due does. */
 const NOT_ON_THE_WAY = new Set(["draft", "cancelled", "canceled", "received", "closed"]);
@@ -179,7 +185,30 @@ export type InventoryRow = {
   /** Days in the rate window it sold on, though the day opened with no stock. */
   soldAtZeroDays: number;
   state: StockState;
+  /**
+   * Delivered ÷ (delivered + returned) for orders with this variant in the
+   * settled history: its own past MIN_DECIDED_TO_RATE decided orders, else
+   * the store's. Null without outcomes.
+   */
+  deliveryRate: number | null;
+  rateSource: "variant" | "store" | null;
+  /** Units a day the shelf loses once returned parcels are back on it: perDay × deliveryRate. */
+  netPerDay: number | null;
+  netDaysOfCover: number | null;
+  /**
+   * Units to order now so stock lasts the lead time plus COVER_AFTER_ARRIVAL
+   * days, less what is on hand and on order, at the net rate (else the
+   * placed rate). Only for a variant that is out, or runs out within its lead time.
+   */
+  reorderUnits: number | null;
+  /** Profit in the period, as Finance's product tab has it; null without one. */
+  profit: Money | null;
+  /** Among the variants that make TOP_PROFIT_SHARE of the period's positive profit. */
+  topProfit: boolean;
 };
+
+/** Delivered and returned orders, to rate one variant or the whole store. */
+export type Decided = { delivered: number; returned: number };
 
 export type InventoryView = {
   currency: string | null;
@@ -193,6 +222,11 @@ export type InventoryView = {
   /** Stock on hand at Inventorify's unit cost; variants without a cost are counted, not guessed. */
   stockValue: Money | null;
   uncosted: number;
+  /** Stock at cost of variants with no sale in 30 days or none in 90 ("slow", "not_selling"). */
+  stuck: { value: Money | null; variants: number; uncosted: number };
+  /** Whether rows carry a delivery rate, and whether they carry profit. */
+  hasOutcomes: boolean;
+  hasProfit: boolean;
   /** Rows in the picked state, or every row; then cut to the limit. */
   rows: InventoryRow[];
   hiddenRows: number;
@@ -204,7 +238,17 @@ export type InventoryView = {
   receivedOrders: number;
   /** Whether the store reorders through Inventorify (PO_USE_MIN), so "nothing on order" means nothing coming. */
   reordersInInventorify: boolean;
-  openOrders: Array<{ id: string; poNumber: string; status: string; supplierName: string | null; expected: string | null; units: number; variants: number }>;
+  openOrders: Array<{
+    id: string;
+    poNumber: string;
+    status: string;
+    supplierName: string | null;
+    expected: string | null;
+    /** Whole days past the expected date, still not received; null when not late or no date. */
+    daysLate: number | null;
+    units: number;
+    variants: number;
+  }>;
 };
 
 const STATE_ORDER: Record<StockState, number> = { out: 0, reorder: 1, on_order: 2, ok: 3, slow: 4, untracked: 5, not_selling: 6 };
@@ -222,6 +266,10 @@ export function inventoryView(input: {
   limit?: number;
   /** Only rows in this state; the counts above the table stay store-wide. */
   state?: StockState | null;
+  /** Decided orders by variant over the settled history, and the store's, for the delivery rate. */
+  outcomes?: { byVariant: ReadonlyMap<string, Decided>; store: Decided } | null;
+  /** The period's profit by variant (Finance's product tab), in the store's currency. */
+  profit?: ReadonlyMap<string, Money> | null;
 }): InventoryView {
   const limit = input.limit ?? ROWS_SHOWN;
   const { period, today, currency } = input;
@@ -272,6 +320,25 @@ export function inventoryView(input: {
 
   let stockValue: Money | null = currency ? zero(currency) : null;
   let uncosted = 0;
+  let stuckValue: Money | null = currency ? zero(currency) : null;
+  let stuckVariants = 0;
+  let stuckUncosted = 0;
+
+  const rateOf = (d: Decided | undefined) => (d && d.delivered + d.returned ? d.delivered / (d.delivered + d.returned) : null);
+  const storeRate = input.outcomes ? rateOf(input.outcomes.store) : null;
+
+  // The top variants by profit: largest first, until they make TOP_PROFIT_SHARE of all positive profit.
+  const top = new Set<string>();
+  if (input.profit) {
+    const positive = [...input.profit].map(([k, m]) => [k, Number(m.amount)] as const).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+    const total = positive.reduce((a, [, n]) => a + n, 0);
+    let sum = 0;
+    for (const [k, n] of positive) {
+      if (sum >= TOP_PROFIT_SHARE * total) break;
+      top.add(k);
+      sum += n;
+    }
+  }
   const rows: InventoryRow[] = [];
 
   for (const v of input.variants) {
@@ -300,12 +367,27 @@ export function inventoryView(input: {
             : "ok";
 
     if (v.stock > 0) {
-      if (v.unitCost && stockValue && v.unitCost.currency === stockValue.currency) {
-        stockValue = addMoney(stockValue, timesQuantity(v.unitCost, v.stock));
-      } else {
-        uncosted += 1;
+      const costed = !!(v.unitCost && stockValue && v.unitCost.currency === stockValue.currency);
+      if (costed) stockValue = addMoney(stockValue!, timesQuantity(v.unitCost!, v.stock));
+      else uncosted += 1;
+      if (state === "slow" || state === "not_selling") {
+        stuckVariants += 1;
+        if (costed && stuckValue) stuckValue = addMoney(stuckValue, timesQuantity(v.unitCost!, v.stock));
+        else stuckUncosted += 1;
       }
     }
+
+    const own = input.outcomes?.byVariant.get(v.variantId);
+    const ownRated = own !== undefined && own.delivered + own.returned >= MIN_DECIDED_TO_RATE;
+    const deliveryRate = ownRated ? rateOf(own) : storeRate;
+    const rateSource = deliveryRate === null ? null : ownRated ? "variant" : "store";
+    const netPerDay = deliveryRate === null || untracked ? null : perDay * deliveryRate;
+    const netDaysOfCover = netPerDay === null ? null : v.stock <= 0 ? 0 : netPerDay > 0 ? Math.floor(v.stock / netPerDay) : null;
+    const reorderRate = netPerDay ?? perDay;
+    const reorderUnits =
+      (state === "out" || state === "reorder" || state === "on_order") && lead !== null && reorderRate > 0
+        ? Math.max(0, Math.ceil(reorderRate * (lead + COVER_AFTER_ARRIVAL)) - Math.max(0, v.stock) - due)
+        : null;
 
     const o = out.get(v.variantId) ?? { days: 0, out: 0 };
     rows.push({
@@ -324,12 +406,20 @@ export function inventoryView(input: {
       daysSnapshotted: o.days,
       soldAtZeroDays: atZero,
       state,
+      deliveryRate: deliveryRate === null ? null : Math.round(deliveryRate * 1000) / 10,
+      rateSource,
+      netPerDay: netPerDay === null ? null : Math.round(netPerDay * 10) / 10,
+      netDaysOfCover,
+      reorderUnits,
+      profit: input.profit?.get(v.variantId) ?? null,
+      topProfit: top.has(v.variantId),
     });
   }
 
   rows.sort(
     (a, b) =>
       STATE_ORDER[a.state] - STATE_ORDER[b.state] ||
+      Number(b.topProfit) - Number(a.topProfit) ||
       (a.daysOfCover ?? Infinity) - (b.daysOfCover ?? Infinity) ||
       b.soldInPeriod - a.soldInPeriod ||
       a.title.localeCompare(b.title),
@@ -348,20 +438,29 @@ export function inventoryView(input: {
     untracked: count("untracked"),
     stockValue,
     uncosted,
+    stuck: { value: stuckValue, variants: stuckVariants, uncosted: stuckUncosted },
+    hasOutcomes: storeRate !== null,
+    hasProfit: !!input.profit,
     rows: picked.slice(0, limit),
     hiddenRows: Math.max(0, picked.length - limit),
     state: input.state ?? null,
     byState: STOCK_STATES.map((state) => ({ state, count: count(state) })).filter((s) => s.count > 0),
     receivedOrders,
     reordersInInventorify: receivedOrders >= PO_USE_MIN,
-    openOrders: open.map((po) => ({
-      id: po.id,
-      poNumber: po.poNumber,
-      status: po.status,
-      supplierName: po.supplierName,
-      expected: po.expectedDeliveryDate,
-      units: po.items.reduce((n, i) => n + i.onOrder, 0),
-      variants: po.items.length,
-    })),
+    openOrders: open
+      .map((po) => {
+        const late = po.expectedDeliveryDate && po.expectedDeliveryDate < today ? Math.round((Date.parse(today) - Date.parse(po.expectedDeliveryDate)) / 86_400_000) : null;
+        return {
+          id: po.id,
+          poNumber: po.poNumber,
+          status: po.status,
+          supplierName: po.supplierName,
+          expected: po.expectedDeliveryDate,
+          daysLate: late,
+          units: po.items.reduce((n, i) => n + i.onOrder, 0),
+          variants: po.items.length,
+        };
+      })
+      .sort((a, b) => (b.daysLate ?? -1) - (a.daysLate ?? -1)),
   };
 }

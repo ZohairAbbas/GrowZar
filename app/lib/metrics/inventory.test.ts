@@ -64,7 +64,7 @@ describe("inventoryView", () => {
     const state = Object.fromEntries(v.rows.map((r) => [r.variantId, r.state]));
     expect(state).toEqual({ a: "reorder", b: "on_order", c: "ok" });
     expect(v.reorderNow).toBe(1);
-    expect(v.openOrders).toEqual([{ id: "p", poNumber: "PO-1", status: "sent", supplierName: null, expected: null, units: 20, variants: 1 }]);
+    expect(v.openOrders).toEqual([{ id: "p", poNumber: "PO-1", status: "sent", supplierName: null, expected: null, daysLate: null, units: 20, variants: 1 }]);
   });
 
   it("filters the rows to one state before the cut, keeping the counts store-wide", () => {
@@ -77,6 +77,47 @@ describe("inventoryView", () => {
     expect(v.byState).toEqual([{ state: "reorder", count: 1 }, { state: "ok", count: 3 }]);
     expect(parseStockState(new URLSearchParams("stock=slow"))).toBe("slow");
     expect(parseStockState(new URLSearchParams("stock=junk"))).toBeNull();
+  });
+
+  it("values stock that is not selling at cost, counting variants without a cost", () => {
+    const v = view({
+      variants: [variant("slow", { stock: 4, unitCost: pkr("50.00") }), variant("dead", { stock: 2, unitCost: null }), variant("sells", { stock: 100 })],
+      sales: [{ variantId: "slow", date: shiftDay(TODAY, -60), units: 1 }, ...sales("sells", 1)],
+    });
+    expect(v.stuck).toEqual({ value: pkr("200.00"), variants: 2, uncosted: 1 });
+  });
+
+  it("marks a purchase order late once its expected day has passed, latest first", () => {
+    const po = (id: string, expectedDeliveryDate: string | null) => ({ id, poNumber: id, status: "sent", supplierName: null, expectedDeliveryDate, receivedOn: null, items: [{ variantId: "a", onOrder: 1 }] });
+    const v = view({ purchaseOrders: [po("due", TODAY), po("two", shiftDay(TODAY, -2)), po("five", shiftDay(TODAY, -5)), po("none", null)] });
+    expect(v.openOrders.map((o) => [o.id, o.daysLate])).toEqual([["five", 5], ["two", 2], ["due", null], ["none", null]]);
+  });
+
+  it("nets returns off the rate with the variant's own delivery rate, else the store's, and sizes the reorder on it", () => {
+    const v = view({
+      variants: [variant("own", { stock: 5, leadTimeDays: 10 }), variant("thin", { stock: 5, leadTimeDays: 10 })],
+      sales: [...sales("own", 2), ...sales("thin", 2)],
+      outcomes: { byVariant: new Map([["own", { delivered: 15, returned: 5 }], ["thin", { delivered: 1, returned: 1 }]]), store: { delivered: 90, returned: 10 } },
+      purchaseOrders: [{ id: "p", poNumber: "PO-1", status: "sent", supplierName: null, expectedDeliveryDate: null, receivedOn: null, items: [{ variantId: "thin", onOrder: 10 }] }],
+    });
+    const own = v.rows.find((r) => r.variantId === "own")!;
+    const thin = v.rows.find((r) => r.variantId === "thin")!;
+    // 2 a day × 75% = 1.5; (10 + 30) days × 1.5 = 60, less 5 on hand.
+    expect(own).toMatchObject({ state: "reorder", deliveryRate: 75, rateSource: "variant", netPerDay: 1.5, netDaysOfCover: 3, reorderUnits: 55 });
+    // Under 20 decided: the store's 90%; 1.8 × 40 = 72, less 5 on hand and 10 on order.
+    expect(thin).toMatchObject({ state: "on_order", deliveryRate: 90, rateSource: "store", reorderUnits: 57 });
+    expect(v.hasOutcomes).toBe(true);
+  });
+
+  it("marks the variants that make 80% of profit and lists them first in their state", () => {
+    const v = view({
+      variants: ["a", "b", "c", "d"].map((id) => variant(id, { stock: 100 })),
+      sales: ["a", "b", "c", "d"].flatMap((id) => sales(id, 1)),
+      profit: new Map([["a", pkr("100.00")], ["b", pkr("700.00")], ["c", pkr("200.00")], ["d", pkr("-50.00")]]),
+    });
+    expect(v.rows.filter((r) => r.topProfit).map((r) => r.variantId)).toEqual(["b", "c"]);
+    expect(v.rows.map((r) => r.variantId).slice(0, 2)).toEqual(["b", "c"]);
+    expect(v.rows.find((r) => r.variantId === "d")!.profit).toEqual(pkr("-50.00"));
   });
 
   it("counts an empty shelf as out only for a variant that has been selling", () => {

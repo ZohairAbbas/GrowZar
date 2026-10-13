@@ -905,6 +905,30 @@ export async function shippingDepth(storeId: string, s: StoreSummary): Promise<S
   };
 }
 
+/** The headline's ad spend and Financify's per-variant share of it, for the product tab. */
+async function productAdInput(storeId: string, s: StoreSummary) {
+  const cur = s.store.currency;
+  const ads = s.profit?.parts.adSpend != null ? parseAmount(s.profit.parts.adSpend)! : null;
+  const units = (m: Money) => (m.currency === cur ? parseAmount(m.amount)! : 0n);
+  const adData = ads !== null ? await loadAdSpend(storeId, s.period.from, s.period.to) : null;
+  return {
+    ads,
+    adByVariant: new Map([...(adData?.byVariant ?? new Map<string, Money[]>())].map(([k, list]) => [k, list.reduce((a, m) => a + units(m), 0n)])),
+    adUnattributed: (adData?.unattributed ?? []).reduce((a, m) => a + units(m), 0n),
+  };
+}
+
+/**
+ * Profit by variant for the period, every row unfolded: Finance's product tab
+ * to the cent, for the Inventory section to rank stock by. Null without a
+ * currency or profit.
+ */
+export async function productProfit(storeId: string, s: StoreSummary): Promise<ProfitTable | null> {
+  const cur = s.store.currency;
+  if (!cur || !s.profit) return null;
+  return profitTable("product", { rows: s.rows, currency: cur, ...(await productAdInput(storeId, s)), maxRows: Infinity });
+}
+
 /**
  * The four profit tables for a summary, sharing its ad spend exactly as the
  * headline subtracted it (`profit.parts.adSpend`, spend + fees, or none).
@@ -917,21 +941,18 @@ async function profitTables(
   if (!cur || !s.profit) return { profitBy: null, labels: {}, images: {} };
   const ads = s.profit.parts.adSpend !== null ? parseAmount(s.profit.parts.adSpend)! : null;
   const units = (m: Money) => (m.currency === cur ? parseAmount(m.amount)! : 0n);
-  const [adData, campaignRows, attribution, names] = await Promise.all([
-    ads !== null ? loadAdSpend(storeId, s.period.from, s.period.to) : Promise.resolve(null),
+  const [productAds, campaignRows, attribution, names] = await Promise.all([
+    productAdInput(storeId, s),
     ads !== null ? loadCampaignRows(storeId, s.period.from, s.period.to) : Promise.resolve([]),
     loadAttribution(storeId, s.rows.map((o) => o.orderId)),
     loadCampaignNames(storeId),
   ]);
-  const adByVariant = new Map([...(adData?.byVariant ?? new Map<string, Money[]>())].map(([k, list]) => [k, list.reduce((a, m) => a + units(m), 0n)]));
   const adByCampaign = new Map<string, bigint>();
   for (const r of campaignRows) adByCampaign.set(r.key, (adByCampaign.get(r.key) ?? 0n) + units(r.spend) + units(r.fees));
   const input = {
     rows: s.rows,
     currency: cur,
-    ads,
-    adByVariant,
-    adUnattributed: (adData?.unattributed ?? []).reduce((a, m) => a + units(m), 0n),
+    ...productAds,
     adByCampaign,
     campaignOf: new Map([...attribution].map(([id, a]) => [id, a.campaignKey])),
   };
