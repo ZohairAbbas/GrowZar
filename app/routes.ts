@@ -39,6 +39,8 @@ export default [
   ...prefix("stores", [
     index("routes/stores._index.tsx"),
     route(":storeId", "routes/stores.$storeId.tsx"),
+    // Home's "Next app for your store" button (G-GZR6-3).
+    route(":storeId/apps/:app/install", "routes/stores.$storeId.apps.$app.install.tsx"),
   ]),
 
   route("switch", "routes/switch.ts"),
