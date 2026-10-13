@@ -5,6 +5,7 @@ import {
   parseSupplier,
   isOnTheWay,
   parseDailySales,
+  parseStockState,
   parsePurchaseOrder,
   parseVariant,
   shiftDay,
@@ -64,6 +65,18 @@ describe("inventoryView", () => {
     expect(state).toEqual({ a: "reorder", b: "on_order", c: "ok" });
     expect(v.reorderNow).toBe(1);
     expect(v.openOrders).toEqual([{ id: "p", poNumber: "PO-1", status: "sent", supplierName: null, expected: null, units: 20, variants: 1 }]);
+  });
+
+  it("filters the rows to one state before the cut, keeping the counts store-wide", () => {
+    const variants = [variant("a", { stock: 5 }), ...Array.from({ length: 3 }, (_, i) => variant(`ok${i}`, { stock: 100 }))];
+    const all = [...sales("a", 1), ...variants.slice(1).flatMap((v) => sales(v.variantId, 1))];
+    const v = view({ variants, sales: all, limit: 2, state: "ok" });
+    expect(v.rows.map((r) => r.state)).toEqual(["ok", "ok"]);
+    expect(v.hiddenRows).toBe(1);
+    expect(v.reorderNow).toBe(1);
+    expect(v.byState).toEqual([{ state: "reorder", count: 1 }, { state: "ok", count: 3 }]);
+    expect(parseStockState(new URLSearchParams("stock=slow"))).toBe("slow");
+    expect(parseStockState(new URLSearchParams("stock=junk"))).toBeNull();
   });
 
   it("counts an empty shelf as out only for a variant that has been selling", () => {

@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { MoneyList, Stat } from "./Metrics";
 
 /**
@@ -36,6 +37,8 @@ export type InventoryPanelView = {
     state: StockState;
   }>;
   hiddenRows: number;
+  state: StockState | null;
+  byState: Array<{ state: StockState; count: number }>;
   receivedOrders: number;
   reordersInInventorify: boolean;
   openOrders: Array<{ id: string; poNumber: string; status: string; supplierName: string | null; expected: string | null; units: number; variants: number }>;
@@ -53,7 +56,7 @@ const STATE: Record<StockState, { text: string; className: string }> = {
 
 const shortDay = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
-export function InventoryPanel({ view, periodDays }: { view: InventoryPanelView; periodDays: number }) {
+export function InventoryPanel({ view, periodDays, period }: { view: InventoryPanelView; periodDays: number; period: string }) {
   if (view.variants === 0) {
     return (
       <section className="rounded-2xl bg-white p-8 text-sm text-gray-600">
@@ -96,6 +99,25 @@ export function InventoryPanel({ view, periodDays }: { view: InventoryPanelView;
           Days of cover = on hand ÷ units a day, sold {rate}. Lead time is the supplier's measured time from order to delivery once it has 3 received purchase orders, otherwise the variant's setting in Inventorify. Days out of stock count
           the days in this period that opened with an empty shelf.
         </p>
+        <nav aria-label="Filter by state" className="mt-4 flex flex-wrap gap-2 text-sm font-semibold">
+          {[{ state: null, count: view.variants }, ...view.byState].map((s) => {
+            const active = s.state === view.state;
+            return (
+              <Link
+                key={s.state ?? "all"}
+                to={`/inventory?${period}${s.state ? `&stock=${s.state}` : ""}`}
+                preventScrollReset
+                aria-current={active ? "true" : undefined}
+                className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 transition ${
+                  active ? "bg-navy text-white" : "bg-gray-50 text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                {s.state ? STATE[s.state].text : "All variants"}{" "}
+                <span className={`tabular-nums ${active ? "text-navy-muted" : "text-gray-500"}`}>{s.count.toLocaleString()}</span>
+              </Link>
+            );
+          })}
+        </nav>
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
@@ -140,8 +162,11 @@ export function InventoryPanel({ view, periodDays }: { view: InventoryPanelView;
             </tbody>
           </table>
         </div>
+        {view.state && !view.rows.length ? <p className="mt-3 text-sm text-gray-600">No variants are in this state now.</p> : null}
         {view.hiddenRows ? (
-          <p className="mt-3 text-xs text-gray-500">{view.hiddenRows.toLocaleString()} more variants with enough stock or no recent sales are not listed.</p>
+          <p className="mt-3 text-xs text-gray-500">
+            {view.hiddenRows.toLocaleString()} more {view.state ? `“${STATE[view.state].text}” variants` : "variants with enough stock or no recent sales"} are not listed.
+          </p>
         ) : null}
       </div>
 
