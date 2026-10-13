@@ -10,6 +10,7 @@ import {
   RATE_DAYS,
   SELLING_DAYS,
   type InventoryView,
+  type StockState,
 } from "./inventory";
 
 type Payload = { payload: unknown };
@@ -24,6 +25,7 @@ export async function inventorySection(
   period: { from: string; to: string; today: string },
   currency: string | null,
   limit?: number,
+  state: StockState | null = null,
 ): Promise<InventoryView> {
   const since = [period.from, shiftDay(period.today, -SELLING_DAYS)].sort()[0]!;
   // Snapshots for the period, and for the rate window (sales off an empty shelf).
@@ -58,5 +60,6 @@ export async function inventorySection(
     today: period.today,
     currency,
     limit,
+    state,
   });
 }

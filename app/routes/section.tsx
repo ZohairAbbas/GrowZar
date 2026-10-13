@@ -40,6 +40,7 @@ import {
 import { CoverageLine, DataHealth } from "~/components/metrics/Metrics";
 import { InventoryPanel } from "~/components/metrics/InventoryPanel";
 import { inventorySection } from "~/lib/metrics/inventory.server";
+import { parseStockState } from "~/lib/metrics/inventory";
 import { messagingSection } from "~/lib/metrics/messaging.server";
 import { MessagingPanel } from "~/components/metrics/MessagingPanel";
 import { checkoutsSection, formAbandonmentsSection } from "~/lib/metrics/checkouts.server";
@@ -192,7 +193,9 @@ async function buildMetrics(
   const outcome = section === "orders" ? parseOutcome(url.searchParams) : null;
   // The finding filter's own city and courier travel in the scope query.
   const filterQuery = filter ? new URLSearchParams([...new URLSearchParams(orderFilterQuery(filter))].filter(([k]) => k !== "city" && k !== "courier")).toString() : "";
-  const extra = [filterQuery, outcome ? `outcome=${outcome}` : "", confirmation ? `confirmation=${confirmation}` : ""].filter(Boolean).join("&");
+  // And a stock state picked from the Inventory chips.
+  const stock = section === "inventory" ? parseStockState(url.searchParams) : null;
+  const extra = [filterQuery, outcome ? `outcome=${outcome}` : "", confirmation ? `confirmation=${confirmation}` : "", stock ? `stock=${stock}` : ""].filter(Boolean).join("&");
   const keep = [extra, scopeQuery(scope)].filter(Boolean).join("&");
   // One line naming the gaps behind this section's numbers (D1).
   const coverage = coverageLine(await storeCoverage(summary), section);
@@ -288,7 +291,7 @@ async function buildMetrics(
       };
     }
     case "inventory":
-      return { ...base, kind: "inventory" as const, view: await inventorySection(storeId, period, summary.store.currency) };
+      return { ...base, kind: "inventory" as const, view: await inventorySection(storeId, period, summary.store.currency, undefined, stock) };
     default:
       return null;
   }
@@ -392,7 +395,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           {metrics.kind === "inbox" && !metrics.view ? (
             <section className="rounded-2xl bg-white p-8 text-sm text-gray-600">WhatKaBot is connected; its conversations arrive with the next sync.</section>
           ) : null}
-          {metrics.kind === "inventory" ? <InventoryPanel view={metrics.view} periodDays={metrics.period.days} /> : null}
+          {metrics.kind === "inventory" ? <InventoryPanel view={metrics.view} periodDays={metrics.period.days} period={metrics.period.query} /> : null}
         </div>
       ) : null}
 

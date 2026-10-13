@@ -149,6 +149,15 @@ export function shiftDay(d: string, by: number): string {
 
 export type StockState = "out" | "reorder" | "on_order" | "ok" | "slow" | "untracked" | "not_selling";
 
+/** Every state, in the order the table lists them. */
+export const STOCK_STATES: readonly StockState[] = ["out", "reorder", "on_order", "ok", "slow", "untracked", "not_selling"];
+
+/** The state picked from the table's chips (`?stock=`), or null for all. */
+export function parseStockState(params: URLSearchParams): StockState | null {
+  const asked = params.get("stock");
+  return (STOCK_STATES as readonly string[]).includes(asked ?? "") ? (asked as StockState) : null;
+}
+
 export type InventoryRow = {
   variantId: string;
   title: string;
@@ -184,8 +193,13 @@ export type InventoryView = {
   /** Stock on hand at Inventorify's unit cost; variants without a cost are counted, not guessed. */
   stockValue: Money | null;
   uncosted: number;
+  /** Rows in the picked state, or every row; then cut to the limit. */
   rows: InventoryRow[];
   hiddenRows: number;
+  /** The state the rows are filtered to, if any. */
+  state: StockState | null;
+  /** Variants in each state, for the chips; states with none are left out. */
+  byState: Array<{ state: StockState; count: number }>;
   /** Purchase orders received in the last PO_USE_DAYS. */
   receivedOrders: number;
   /** Whether the store reorders through Inventorify (PO_USE_MIN), so "nothing on order" means nothing coming. */
@@ -206,6 +220,8 @@ export function inventoryView(input: {
   currency: string | null;
   /** Rows kept; the screen shows ROWS_SHOWN, a detector wants them all. */
   limit?: number;
+  /** Only rows in this state; the counts above the table stay store-wide. */
+  state?: StockState | null;
 }): InventoryView {
   const limit = input.limit ?? ROWS_SHOWN;
   const { period, today, currency } = input;
@@ -319,18 +335,23 @@ export function inventoryView(input: {
       a.title.localeCompare(b.title),
   );
 
+  const picked = input.state ? rows.filter((r) => r.state === input.state) : rows;
+  const count = (state: StockState) => rows.filter((r) => r.state === state).length;
+
   return {
     currency,
     rateWindow: { from: rateFrom, to: rateTo },
     variants: rows.length,
     selling: rows.filter((r) => r.state !== "not_selling").length,
-    outNow: rows.filter((r) => r.state === "out").length,
-    reorderNow: rows.filter((r) => r.state === "reorder").length,
-    untracked: rows.filter((r) => r.state === "untracked").length,
+    outNow: count("out"),
+    reorderNow: count("reorder"),
+    untracked: count("untracked"),
     stockValue,
     uncosted,
-    rows: rows.slice(0, limit),
-    hiddenRows: Math.max(0, rows.length - limit),
+    rows: picked.slice(0, limit),
+    hiddenRows: Math.max(0, picked.length - limit),
+    state: input.state ?? null,
+    byState: STOCK_STATES.map((state) => ({ state, count: count(state) })).filter((s) => s.count > 0),
     receivedOrders,
     reordersInInventorify: receivedOrders >= PO_USE_MIN,
     openOrders: open.map((po) => ({
