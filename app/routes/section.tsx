@@ -52,6 +52,7 @@ import { consentSection } from "~/lib/metrics/consent.server";
 import { ConsentPanel } from "~/components/metrics/ConsentPanel";
 import { buyerHistorySection } from "~/lib/metrics/buyer-history.server";
 import { BuyerHistoryPanel } from "~/components/metrics/BuyerHistoryPanel";
+import { nextAppSection } from "~/lib/metrics/next-app.server";
 import { buyerNetworkSection, loadNetworkAnswers } from "~/lib/metrics/buyer-network.server";
 import { lineOf, type BuyerNetworkLine } from "~/lib/metrics/buyer-network";
 import { BuyerNetworkPanel } from "~/components/metrics/BuyerNetworkPanel";
@@ -216,12 +217,15 @@ async function buildMetrics(
   switch (section) {
     case "home": {
       const viewer = await inboxViewer();
+      const inbox = await inboxView(summary, period.days, viewer);
       return {
         ...base,
         kind: "home" as const,
         view: compared(homeView(summary, prev!, viewer.canSeeMoney)),
         cards: await homeCards(storeId, summary, viewer.canSeeMoney),
-        inbox: await inboxView(summary, period.days, viewer),
+        inbox,
+        // Cross-sell (G-GZR6-3): the store's own figures for the apps it lacks.
+        nextApp: await nextAppSection(summary.store, new Set(inbox.connected), viewer),
       };
     }
     case "finance":
@@ -354,7 +358,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             <DataHealth gaps={metrics.coverage.gaps} fx={metrics.view.fx} period={metrics.period.query} />
           </div>
         </header>
-        <HomePanel view={metrics.view} inbox={metrics.inbox} cards={metrics.cards} period={metrics.period} />
+        <HomePanel view={metrics.view} inbox={metrics.inbox} cards={metrics.cards} period={metrics.period} nextApp={metrics.nextApp} />
       </div>
     );
   }

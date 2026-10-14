@@ -82,6 +82,7 @@ model Store {
   insights       Insight[]
   buyerNetwork   BuyerNetwork[]
   orderNetwork   OrderNetwork[]
+  appPrompts     AppPromptEvent[]
 
   @@index([organizationId])
   @@map("stores")
@@ -1022,4 +1023,28 @@ model OrderNetwork {
 
   @@id([storeId, orderId])
   @@map("order_network")
+}
+
+/// Home's "Next app for your store" (G-GZR6-3): when a prompt for an app
+/// the store lacks was shown and clicked, so installs can be traced to it.
+/// "shown" is kept at most once per user, app and store-local day.
+model AppPromptEvent {
+  id      String   @id @default(uuid())
+  storeId String
+  /// The suite app pitched (PREVENTIFY, RETAINIFY, …).
+  app     String
+  /// shown | clicked
+  kind    String
+  userId  String?
+  /// Set only on "shown": the dedupe key.
+  day     String?
+  /// Whether it was the lead prompt or a listed one.
+  detail  Json?
+  at      DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, app, kind, userId, day])
+  @@index([storeId, app])
+  @@map("app_prompt_events")
 }

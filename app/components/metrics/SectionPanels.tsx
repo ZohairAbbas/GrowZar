@@ -1,5 +1,7 @@
 import { Link } from "react-router";
 import { ArrowRight } from "lucide-react";
+import type { AppPrompt } from "~/lib/metrics/next-app";
+import { SUITE_APPS } from "~/lib/apps/app-links";
 import { figuresText, riskLabel, type BuyerNetworkLine } from "~/lib/metrics/buyer-network";
 import type {
   CustomersView,
@@ -48,18 +50,72 @@ export function HomePanel({
   inbox,
   cards,
   period,
+  nextApp,
 }: {
   view: HomeView;
   inbox: InboxView;
   cards: { cash: FinanceDepth["cash"] | null; outcomes: ShippingDepth["outcomes"] };
   period: { from: string; to: string; query: string };
+  nextApp?: { storeId: string; prompts: AppPrompt[] } | null;
 }) {
   return (
     <section className="space-y-6">
       <AttentionList inbox={inbox} period={period.query} />
+      {nextApp ? <NextAppCard storeId={nextApp.storeId} prompts={nextApp.prompts} /> : null}
       <HomeTiles view={view} period={period.query} />
       {cards.cash ? <CashTimelineCard cash={cards.cash} period={period.query} scope="" compact /> : null}
       <OutcomesChart days={cards.outcomes} period={period.query} compact />
+    </section>
+  );
+}
+
+/**
+ * "Next app for your store" (G-GZR6-3): the store's own measured problem for
+ * each app it lacks, biggest first, with the app's App Store page. The button
+ * goes through Growzar, which records the click.
+ */
+function NextAppCard({ storeId, prompts }: { storeId: string; prompts: AppPrompt[] }) {
+  const [lead, ...rest] = prompts;
+  if (!lead) return null;
+  const href = (p: AppPrompt, isLead: boolean) => `/stores/${storeId}/apps/${p.app}/install${isLead ? "?lead=1" : ""}`;
+  const name = (p: AppPrompt) => SUITE_APPS[p.app].name;
+  return (
+    <section aria-labelledby="next-app-heading" className="space-y-3">
+      <h2 id="next-app-heading" className="font-display text-xl font-bold text-gray-900">
+        Next app for your store
+      </h2>
+      <div className="rounded-2xl bg-white p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="min-w-0 space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-wide text-mint-700">{name(lead)}</p>
+            <h3 className="font-display text-lg font-bold text-gray-900">{lead.headline}</h3>
+            <p className="max-w-prose text-sm text-gray-600">{lead.body}</p>
+          </div>
+          <a
+            href={href(lead, true)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex shrink-0 items-center gap-1.5 self-start whitespace-nowrap rounded-full bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-surface md:self-center"
+          >
+            Install {name(lead)} <ArrowRight className="h-4 w-4 text-mint" />
+          </a>
+        </div>
+        {rest.length ? (
+          <ul className="mt-4 space-y-2 border-t border-gray-100 pt-4">
+            {rest.map((p) => (
+              <li key={p.app} className="flex flex-col gap-1 text-sm sm:flex-row sm:items-baseline sm:justify-between">
+                <span className="min-w-0 text-gray-700">
+                  <span className="font-semibold text-gray-900">{name(p)}:</span> {p.headline}
+                </span>
+                <a href={href(p, false)} target="_blank" rel="noopener noreferrer" className="shrink-0 font-semibold text-accent-600 hover:underline">
+                  Install {name(p)}
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <p className="mt-4 text-xs text-gray-500">From this store's last 90 days. Amounts are what happened, not what an app would save.</p>
+      </div>
     </section>
   );
 }
