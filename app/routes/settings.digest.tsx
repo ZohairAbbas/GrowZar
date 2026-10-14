@@ -1,4 +1,5 @@
-import { Form, useNavigation, useSearchParams } from "react-router";
+import { Suspense, type ReactNode } from "react";
+import { Await, Form, useNavigation, useSearchParams } from "react-router";
 import { Mail, Send } from "lucide-react";
 
 import type { Route } from "./+types/settings.digest";
@@ -6,7 +7,7 @@ import { prisma } from "~/lib/db.server";
 import { env } from "~/lib/env.server";
 import { readFormData } from "~/lib/form.server";
 import { Forbidden, hasPermission, requireSection } from "~/lib/authorize.server";
-import { buildDigest, digestRecipients, sendTestDigest, storeCache, type Recipient } from "~/lib/digest/digest.server";
+import { buildDigest, digestRecipients, previewBuiltAt, previewStoreCache, sendTestDigest, type Recipient } from "~/lib/digest/digest.server";
 import { nextSendDay, SEND_HOUR, weekLabel } from "~/lib/digest/week";
 import { Notice } from "~/components/metrics/Metrics";
 
@@ -43,11 +44,20 @@ export async function loader({ request, url }: Route.LoaderArgs) {
   const now = new Date();
   const recipients = await digestRecipients(viewer.organizationId);
   const selected = recipients.find((r) => r.memberId === url.searchParams.get("member")) ?? recipients.find((r) => r.memberId === viewer.memberId) ?? recipients[0];
+  // Not awaited: the rest of the page renders at once and the preview streams
+  // in when its stores are built (two at a time, kept a few minutes).
   // A viewer scoped to some stores previews only those, whoever the member is.
-  const preview =
-    selected && selected.canHome && selected.stores.length
-      ? await buildDigest(selected, organization.name, now, storeCache(now), { onlyStores: viewer.scopedStoreIds })
-      : null;
+  const preview = (async () => {
+    if (!selected || !selected.canHome || !selected.stores.length) return null;
+    const d = await buildDigest(selected, organization.name, now, previewStoreCache(now), { onlyStores: viewer.scopedStoreIds, concurrency: 2 });
+    return {
+      subject: d.subject,
+      html: d.html,
+      hasContent: d.hasContent,
+      builtAt: (previewBuiltAt(d.stores.map((x) => x.storeId), selected.canSeeMoney) ?? now).toISOString(),
+      skipped: d.stores.filter((x) => x.skipped).map((x) => ({ name: x.name, why: x.skipped === "stale" ? "its apps have not synced for 48 hours" : "nothing to report" })),
+    };
+  })();
   const log = await prisma.digestSend.findMany({
     where: { organizationId: viewer.organizationId },
     orderBy: { createdAt: "desc" },
@@ -67,14 +77,7 @@ export async function loader({ request, url }: Route.LoaderArgs) {
         money: r.canSeeMoney,
         next: `${weekLabel(nextSendDay(now, r.timezone))}, ${String(SEND_HOUR).padStart(2, "0")}:00 ${r.timezone}`,
       })),
-      preview: preview
-        ? {
-            subject: preview.subject,
-            html: preview.html,
-            hasContent: preview.hasContent,
-            skipped: preview.stores.filter((s) => s.skipped).map((s) => ({ name: s.name, why: s.skipped === "stale" ? "its apps have not synced for 48 hours" : "nothing to report" })),
-          }
-        : null,
+      preview,
       log: log.map((l) => ({
         id: l.id,
         at: l.createdAt.toISOString(),
@@ -121,7 +124,9 @@ export async function action({ request }: Route.ActionArgs) {
     const me = recipients.find((r) => r.memberId === viewer.memberId);
     if (!target || !me) return { error: "That member is not in this organization." };
     if (!target.canHome || !target.stores.length) return { error: "That member gets no digest, so there is nothing to send." };
-    const sent = await sendTestDigest(viewer.organizationId, target, { userId: viewer.userId, memberId: viewer.memberId, email: me.email, scopedStoreIds: viewer.scopedStoreIds });
+    // The same builds the preview showed, so the test says what the preview said.
+    const now = new Date();
+    const sent = await sendTestDigest(viewer.organizationId, target, { userId: viewer.userId, memberId: viewer.memberId, email: me.email, scopedStoreIds: viewer.scopedStoreIds }, now, previewStoreCache(now));
     return sent.sent
       ? { ok: `Test sent to ${me.email}.` }
       : sent.reason === "empty"
@@ -138,12 +143,25 @@ const STATUS_TONE: Record<string, string> = {
   no_api_key: "bg-coral-100 text-coral-700",
 };
 
+function PreviewHeader({ email, note, children }: { email: string; note?: string; children?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h3 className="font-medium text-gray-900">Preview: {email}</h3>
+        {note ? <p className="text-sm text-gray-600">{note}</p> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export default function DigestSettings({ loaderData, actionData }: Route.ComponentProps) {
   const { optedOut, enabled, sending, canManage, admin } = loaderData;
   const navigation = useNavigation();
   const busy = navigation.state !== "idle";
   const [params, setParams] = useSearchParams();
   const button = "inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-50";
+  const selectedEmail = admin?.recipients.find((r) => r.memberId === admin.selected)?.email ?? "—";
 
   return (
     <div className="space-y-4">
@@ -248,41 +266,50 @@ export default function DigestSettings({ loaderData, actionData }: Route.Compone
           </section>
 
           <section className="space-y-3 rounded-2xl bg-white p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="font-medium text-gray-900">
-                  Preview: {admin.recipients.find((r) => r.memberId === admin.selected)?.email ?? "—"}
-                </h3>
-                <p className="text-sm text-gray-600">This week's digest for this member, built now, exactly as it would be sent.</p>
-              </div>
-              {admin.preview?.hasContent ? (
-                <Form method="post">
-                  <input type="hidden" name="member" value={admin.selected ?? ""} />
-                  <button type="submit" name="intent" value="test" disabled={busy} className={`${button} bg-navy text-white hover:bg-navy-surface`}>
-                    <Send className="h-4 w-4" /> Send a test to me
-                  </button>
-                </Form>
-              ) : null}
-            </div>
-            {admin.preview ? (
-              <>
-                <p className="text-sm text-gray-700">
-                  <span className="font-semibold">Subject:</span> {admin.preview.subject}
-                </p>
-                {admin.preview.skipped.map((s) => (
-                  <Notice key={s.name}>
-                    {s.name} is left out: {s.why}.
-                  </Notice>
-                ))}
-                {admin.preview.hasContent ? (
-                  <iframe title="Digest preview" sandbox="" srcDoc={admin.preview.html} className="h-[720px] w-full rounded-xl border border-gray-100 bg-[#f5f5f5]" />
-                ) : (
-                  <Notice>Nothing to send this member this week, so no email would go out.</Notice>
-                )}
-              </>
-            ) : (
-              <Notice>This member gets no digest: they have no Home access or no stores.</Notice>
-            )}
+            <Suspense key={admin.selected} fallback={<PreviewHeader email={selectedEmail} note="Building this week's digest for this member…" />}>
+              <Await
+                resolve={admin.preview}
+                errorElement={<><PreviewHeader email={selectedEmail} /><Notice tone="warn">The preview could not be built just now. Reload the page to try again.</Notice></>}
+              >
+                {(preview) =>
+                  preview ? (
+                    <>
+                      <PreviewHeader
+                        email={selectedEmail}
+                        note={`This week's digest for this member, exactly as it would be sent. Built ${new Date(preview.builtAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}.`}
+                      >
+                        {preview.hasContent ? (
+                          <Form method="post">
+                            <input type="hidden" name="member" value={admin.selected ?? ""} />
+                            <button type="submit" name="intent" value="test" disabled={busy} className={`${button} bg-navy text-white hover:bg-navy-surface`}>
+                              <Send className="h-4 w-4" /> Send a test to me
+                            </button>
+                          </Form>
+                        ) : null}
+                      </PreviewHeader>
+                      <p className="text-sm text-gray-700">
+                        <span className="font-semibold">Subject:</span> {preview.subject}
+                      </p>
+                      {preview.skipped.map((x) => (
+                        <Notice key={x.name}>
+                          {x.name} is left out: {x.why}.
+                        </Notice>
+                      ))}
+                      {preview.hasContent ? (
+                        <iframe title="Digest preview" sandbox="" srcDoc={preview.html} className="h-[720px] w-full rounded-xl border border-gray-100 bg-[#f5f5f5]" />
+                      ) : (
+                        <Notice>Nothing to send this member this week, so no email would go out.</Notice>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <PreviewHeader email={selectedEmail} />
+                      <Notice>This member gets no digest: they have no Home access or no stores.</Notice>
+                    </>
+                  )
+                }
+              </Await>
+            </Suspense>
           </section>
 
           <section className="rounded-2xl bg-white p-5">
