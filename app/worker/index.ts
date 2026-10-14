@@ -21,6 +21,7 @@ import { refreshFxRates } from "~/lib/metrics/fx.server";
 import { refreshAdSpend } from "~/lib/metrics/ad-spend.server";
 import { refreshProfitSettings } from "~/lib/metrics/summaries.server";
 import { refreshBuyerNetwork, refreshOrderNetwork } from "~/lib/metrics/buyer-network.server";
+import { runDueDigests } from "~/lib/digest/digest.server";
 
 /**
  * The sync worker.
@@ -301,10 +302,36 @@ const sweepTimer = setInterval(() => {
   void sweep().catch((error) => console.error("[events] sweep failed", error));
 }, SWEEP_INTERVAL_MS);
 
+/**
+ * The weekly digest (G-GZR6-5). Checked every ten minutes; each member's
+ * digest is due from Monday 09:00 in their store's timezone, and the send
+ * log stops a second one for the same week. One run at a time.
+ */
+const DIGEST_INTERVAL_MS = 10 * 60 * 1000;
+let digestRunning = false;
+
+async function digests() {
+  if (digestRunning) return;
+  digestRunning = true;
+  try {
+    const r = await runDueDigests();
+    if (r.sent || r.dryRun || r.skipped || r.failed) {
+      console.log(`[digest] sent=${r.sent} dryRun=${r.dryRun} skipped=${r.skipped} failed=${r.failed}`);
+    }
+  } finally {
+    digestRunning = false;
+  }
+}
+
+const digestTimer = setInterval(() => {
+  void digests().catch((error) => console.error("[digest] run failed", error));
+}, DIGEST_INTERVAL_MS);
+
 async function shutdown(signal: string) {
   console.log(`[sync] ${signal}: draining`);
   clearInterval(sweepTimer);
   clearInterval(reconcileTimer);
+  clearInterval(digestTimer);
   await eventsWorker.close();
   // Closing the worker lets the job in flight finish. A sync killed mid-run is
   // safe by design, but finishing the page it is on avoids re-fetching it.

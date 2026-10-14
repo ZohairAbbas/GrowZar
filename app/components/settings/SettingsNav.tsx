@@ -1,5 +1,5 @@
 import { NavLink } from "react-router";
-import { Building2, CreditCard, Gauge, Scale, Shield, User, Users } from "lucide-react";
+import { Building2, CreditCard, Gauge, Mail, Scale, Shield, User, Users } from "lucide-react";
 
 import { cn } from "~/lib/utils";
 
@@ -49,6 +49,12 @@ const navigation: NavItem[] = [
     to: "/settings/coverage",
     icon: Gauge,
     description: "What each app sends, and what is missing",
+  },
+  {
+    name: "Weekly digest",
+    to: "/settings/digest",
+    icon: Mail,
+    description: "Monday's email, preview and log",
   },
   {
     name: "Billing",

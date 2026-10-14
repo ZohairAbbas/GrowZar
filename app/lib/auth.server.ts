@@ -62,7 +62,11 @@ export const auth = betterAuth({
       // sign-up stays enabled here.
       disableSignUp: false,
       sendMagicLink: async ({ email, url }) => {
-        const result = await sendMagicLinkEmail(email, url);
+        // The email links to a confirm page, not to Better Auth's verify
+        // endpoint: the token is used up on first use, and Microsoft 365
+        // Safe Links opens every emailed link before the person does. Only
+        // the page's button verifies (app/routes/auth.magic-link.tsx).
+        const result = await sendMagicLinkEmail(email, confirmPageUrl(url));
         if (!result.sent && result.reason === "send_failed") {
           // Throwing would tell an unauthenticated caller whether the address
           // exists. Log and let the request look identical either way.
@@ -128,6 +132,12 @@ export const auth = betterAuth({
     }),
   ],
 });
+
+/** Better Auth's `/api/auth/magic-link/verify?…` → Growzar's `/auth/magic-link?…`, same query. */
+export function confirmPageUrl(verifyUrl: string): string {
+  const u = new URL(verifyUrl);
+  return `${env.BETTER_AUTH_URL.replace(/\/$/, "")}/auth/magic-link${u.search}`;
+}
 
 export type Auth = typeof auth;
 export type Session = typeof auth.$Infer.Session;

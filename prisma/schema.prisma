@@ -43,6 +43,9 @@ model Organization {
   members           Member[]
   invitations       Invitation[]
 
+  digestSettings DigestSettings?
+  digestSends    DigestSend[]
+
   @@map("organizations")
 }
 
@@ -663,7 +666,9 @@ model Member {
   /// Hand-added relation to Growzar's own scope table. The Better Auth
   /// generator only adds what is missing, so this survives regeneration —
   /// verified before it was written.
-  storeScopes MemberStoreScope[]
+  storeScopes  MemberStoreScope[]
+  /// Hand-added, like storeScopes: the weekly digest opt-out (G-GZR6-5).
+  digestOptOut DigestOptOut?
 
   @@index([organizationId])
   @@index([userId])
@@ -1047,4 +1052,64 @@ model AppPromptEvent {
   @@unique([storeId, app, kind, userId, day])
   @@index([storeId, app])
   @@map("app_prompt_events")
+}
+
+/// The weekly digest (G-GZR6-5, D-57): whether an organization sends it.
+/// Off until an owner or admin turns it on from the preview page.
+model DigestSettings {
+  organizationId  String    @id
+  enabled         Boolean   @default(false)
+  changedByUserId String?
+  changedAt       DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("digest_settings")
+}
+
+/// A member who does not want the weekly digest. No row means subscribed.
+model DigestOptOut {
+  memberId String   @id
+  /// settings | email | email_header (the mail client's one-click unsubscribe)
+  via      String
+  at       DateTime @default(now())
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("digest_opt_outs")
+}
+
+/// One digest for one member and week, or one test send: what it held and
+/// what became of it. Kept when the member leaves, as history.
+model DigestSend {
+  id             String    @id @default(uuid())
+  organizationId String
+  memberId       String
+  userId         String
+  /// The address it went to (or would have).
+  email          String
+  /// email; WhatsApp later.
+  channel        String    @default("email")
+  /// live | dry_run | test
+  mode           String
+  /// The recipient's local Monday, YYYY-MM-DD.
+  week           String
+  /// `memberId:week:mode` for live and dry runs, so each is made once a week;
+  /// unique per row for a test.
+  dedupeKey      String    @unique
+  /// sending | sent | failed | dry_run | opted_out | empty | no_api_key
+  status         String
+  attempts       Int       @default(0)
+  providerId     String?
+  error          String?
+  /// Per store: the findings and app lead as written, or why it was left out.
+  content        Json
+  createdAt      DateTime  @default(now())
+  sentAt         DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([memberId])
+  @@map("digest_sends")
 }
