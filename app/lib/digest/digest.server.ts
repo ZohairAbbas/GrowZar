@@ -172,6 +172,34 @@ export function storeCache(now: Date) {
   };
 }
 
+/**
+ * The preview page's builds, kept for a few minutes in the web process: the
+ * page reloads its data after every button press and on every "Preview"
+ * click, and rebuilding five stores each time is what made it slow. A digest
+ * is weekly, so a preview a minute or two old says the same thing; the page
+ * shows when it was built. A failed build is not kept.
+ */
+export const PREVIEW_TTL_MS = 3 * 60 * 1000;
+const previewBuilds = new Map<string, { at: number; built: Promise<BuiltStore> }>();
+
+export function previewStoreCache(now: Date) {
+  return (store: StoreRow, canSeeMoney: boolean) => {
+    const key = `${store.id}:${canSeeMoney}`;
+    const hit = previewBuilds.get(key);
+    if (hit && now.getTime() - hit.at < PREVIEW_TTL_MS) return hit.built;
+    const built = buildStore(store, canSeeMoney, now);
+    previewBuilds.set(key, { at: now.getTime(), built });
+    built.catch(() => previewBuilds.delete(key));
+    return built;
+  };
+}
+
+/** When the oldest store in a preview was built, for the page to say so. */
+export const previewBuiltAt = (storeIds: string[], canSeeMoney: boolean): Date | null => {
+  const times = storeIds.map((id) => previewBuilds.get(`${id}:${canSeeMoney}`)?.at).filter((t): t is number => t !== undefined);
+  return times.length ? new Date(Math.min(...times)) : null;
+};
+
 export type BuiltDigest = { week: string; stores: BuiltStore[]; subject: string; html: string; text: string; hasContent: boolean };
 
 /** One member's digest, rendered. `onlyStores` narrows it (the preview, for a viewer scoped to fewer stores). */
@@ -180,13 +208,22 @@ export async function buildDigest(
   organizationName: string,
   now: Date,
   store = storeCache(now),
-  options: { test?: boolean; onlyStores?: string[] | null; unsubscribeMemberId?: string } = {},
+  options: { test?: boolean; onlyStores?: string[] | null; unsubscribeMemberId?: string; concurrency?: number } = {},
 ): Promise<BuiltDigest> {
   const week = weekOf(now, r.timezone);
   const stores = options.onlyStores ? r.stores.filter((s) => options.onlyStores!.includes(s.id)) : r.stores;
-  const built: BuiltStore[] = [];
-  // One at a time: the worker's pool is two connections (app/worker/index.ts).
-  for (const s of stores) built.push(await store(s, r.canSeeMoney));
+  // One at a time by default: the worker's pool is two connections
+  // (app/worker/index.ts). The web pages ask for two at once, which keeps
+  // half the web pool free for everyone else.
+  const built: BuiltStore[] = new Array(stores.length);
+  let next = 0;
+  const lane = async () => {
+    while (next < stores.length) {
+      const i = next++;
+      built[i] = await store(stores[i]!, r.canSeeMoney);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(options.concurrency ?? 1, stores.length)) }, lane));
   const shown = built.filter((b) => b.skipped === null);
   const { subject, html, text } = renderDigest({
     recipientName: r.name,
@@ -329,9 +366,10 @@ export async function sendTestDigest(
   target: Recipient,
   viewer: { userId: string; memberId: string; email: string; scopedStoreIds: string[] | null },
   now = new Date(),
+  store = storeCache(now),
 ) {
   const organization = await prisma.organization.findUniqueOrThrow({ where: { id: organizationId }, select: { name: true } });
-  const digest = await buildDigest(target, organization.name, now, storeCache(now), { test: true, onlyStores: viewer.scopedStoreIds, unsubscribeMemberId: viewer.memberId });
+  const digest = await buildDigest(target, organization.name, now, store, { test: true, onlyStores: viewer.scopedStoreIds, unsubscribeMemberId: viewer.memberId, concurrency: 2 });
   // An email with no store in it says nothing; the preview already shows why.
   if (!digest.hasContent) return { sent: false as const, reason: "empty" as const };
   const sent = await sendEmail({ to: viewer.email, subject: digest.subject, html: digest.html, text: digest.text, headers: headersFor(viewer.memberId) });
