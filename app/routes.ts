@@ -21,7 +21,12 @@ export default [
     route("sign-up", "routes/auth.sign-up.tsx"),
     route("sign-out", "routes/auth.sign-out.ts"),
     route("check-email", "routes/auth.check-email.tsx"),
+    // A sign-in email's link: a button, so a link scanner cannot use it up.
+    route("magic-link", "routes/auth.magic-link.tsx"),
   ]),
+
+  // The weekly digest's unsubscribe link (G-GZR6-5): works signed out.
+  route("digest/unsubscribe", "routes/digest.unsubscribe.tsx"),
 
   // An invitation link lands here. It has to work for someone with no account
   // yet, so it is deliberately outside the signed-in shell.
@@ -77,6 +82,7 @@ export default [
       route("roles", "routes/settings.roles.tsx"),
       route("profit", "routes/settings.profit.tsx"),
       route("coverage", "routes/settings.coverage.tsx"),
+      route("digest", "routes/settings.digest.tsx"),
     ]),
   ]),
 

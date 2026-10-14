@@ -4,6 +4,7 @@ import type { Route } from "./+types/insights.$insightId.act";
 import { prisma } from "~/lib/db.server";
 import { requireStore } from "~/lib/authorize.server";
 import { actionHref, isScreenKey } from "~/lib/apps/app-links";
+import { clickSource } from "~/lib/insights/actions";
 
 /**
  * A card's "set it up in the app" or "install the app" button (G-GZR6-2):
@@ -26,9 +27,11 @@ export async function loader({ request, params, url }: Route.LoaderArgs) {
   const connections = await prisma.appConnection.findMany({ where: { storeId: insight.storeId, status: "CONNECTED" }, select: { app: true } });
   const connected = new Set<string>(connections.map((c) => c.app));
   const href = actionHref(screen, connected, insight.store.shopDomain);
+  // `from=digest`: the weekly email's button (G-GZR6-5).
+  const from = clickSource(url.searchParams.get("from"));
   if (!href) throw data("There is no confirmed link for that app yet.", { status: 404 });
   await prisma.insightEvent.create({
-    data: { insightId: insight.id, storeId: insight.storeId, kind: "app_link", userId: viewer.userId, detail: { screen, install: !href.includes("admin.shopify.com") } },
+    data: { insightId: insight.id, storeId: insight.storeId, kind: "app_link", userId: viewer.userId, detail: { screen, install: !href.includes("admin.shopify.com"), ...(from ? { from } : {}) } },
   });
   throw redirect(href);
 }

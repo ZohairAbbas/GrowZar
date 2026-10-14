@@ -202,17 +202,16 @@ export type InboxView = {
 
 const APP_NAMES: Record<App, string> = { COURIERIFY: "Courierify", FINANCIFY: "Financify", INVENTORIFY: "Inventorify", RETAINIFY: "Retainify", PREVENTIFY: "Preventify", WHATKABOT: "WhatKaBot" };
 
-export async function inboxView(
-  s: StoreSummary,
-  days: number,
-  viewer: { userId: string; canSeeMoney: boolean; canManage: boolean },
-  now = new Date(),
-): Promise<InboxView> {
+/**
+ * The findings a viewer would see, ranked, with nothing recorded: Home's
+ * inbox and the weekly digest (G-GZR6-5) both start here, so they agree.
+ */
+export async function visibleInsights(s: StoreSummary, canSeeMoney: boolean, now = new Date()) {
   const { input, connected } = await detectorInput(s, now);
   const outcomes = runDetectors(input, connected);
   let insights = rankInsights(foundIn(outcomes));
   // Money leaves the server only for a viewer who may see Finance.
-  if (!viewer.canSeeMoney) insights = withoutMoney(insights);
+  if (!canSeeMoney) insights = withoutMoney(insights);
 
   // A finding gets a row the first time it is shown, so it can be acted on.
   if (insights.length) {
@@ -229,7 +228,17 @@ export async function inboxView(
     r.status === "dismissed" || (r.status === "snoozed" && r.snoozedUntil !== null && r.snoozedUntil > now);
 
   const visible = insights.filter((i) => !hiddenNow(row.get(i.fingerprint)!));
-  const items = visible.slice(0, MAX_SHOWN).map((i) => ({ id: row.get(i.fingerprint)!.id, insight: i }));
+  const items: InboxItem[] = visible.slice(0, MAX_SHOWN).map((i) => ({ id: row.get(i.fingerprint)!.id, insight: i }));
+  return { outcomes, connected, insights, row, hiddenNow, visible, items };
+}
+
+export async function inboxView(
+  s: StoreSummary,
+  days: number,
+  viewer: { userId: string; canSeeMoney: boolean; canManage: boolean },
+  now = new Date(),
+): Promise<InboxView> {
+  const { outcomes, connected, insights, row, hiddenNow, visible, items } = await visibleInsights(s, viewer.canSeeMoney, now);
 
   if (items.length) {
     const day = localDayOf(now, s.store.timezone ?? "UTC");
@@ -296,6 +305,6 @@ export async function applyInsightAction(insightId: string, storeId: string, use
   ]);
 }
 
-export async function recordClick(insightId: string, storeId: string, userId: string, to: string) {
-  await prisma.insightEvent.create({ data: { insightId, storeId, kind: "clicked", userId, detail: { to } } });
+export async function recordClick(insightId: string, storeId: string, userId: string, to: string, from: string | null = null) {
+  await prisma.insightEvent.create({ data: { insightId, storeId, kind: "clicked", userId, detail: from ? { to, from } : { to } } });
 }

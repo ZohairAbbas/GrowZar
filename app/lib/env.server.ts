@@ -30,6 +30,11 @@ const schema = z.object({
     .string()
     .default("Growzar <no-reply@growzar.com>"),
 
+  // The weekly digest (G-GZR6-5) sends only when this is "on". Off, an
+  // organization that has turned the digest on gets dry runs: what would
+  // have gone out is logged in digest_sends, and nothing is emailed.
+  DIGEST_SENDING: z.enum(["on", "off"]).default("off"),
+
   ENCRYPTION_KEY: z
     .string()
     .min(32, "ENCRYPTION_KEY must be 32 bytes, base64"),

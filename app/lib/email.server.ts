@@ -3,8 +3,8 @@ import { canSendEmail, env } from "./env.server";
 /**
  * Outbound email through Resend's HTTP API.
  *
- * Deliberately a `fetch` call rather than the SDK: the only two messages
- * Growzar sends in Phase 1 are a magic link and an invitation, and a
+ * Deliberately a `fetch` call rather than the SDK: Growzar sends a magic
+ * link, an invitation and the weekly digest (G-GZR6-5), and a
  * dependency that ships its own retry policy would fight the one the connector
  * framework installs in G-GZR-4.
  *
@@ -17,6 +17,8 @@ type Message = {
   subject: string;
   html: string;
   text: string;
+  /** Extra headers, e.g. the digest's List-Unsubscribe (RFC 8058). */
+  headers?: Record<string, string>;
 };
 
 export type SendResult =
@@ -46,6 +48,7 @@ export async function sendEmail(message: Message): Promise<SendResult> {
         subject: message.subject,
         html: message.html,
         text: message.text,
+        ...(message.headers ? { headers: message.headers } : {}),
       }),
       signal: AbortSignal.timeout(10_000),
     });

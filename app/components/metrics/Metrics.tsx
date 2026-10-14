@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Form, Link } from "react-router";
 import { AlertTriangle, Info } from "lucide-react";
 
+import { formatAmount } from "~/lib/metrics/format";
 import { dayLabel, MAX_CUSTOM_DAYS, rangeLabel, withPeriod } from "~/lib/metrics/period";
 
 /**
@@ -23,13 +24,8 @@ import { dayLabel, MAX_CUSTOM_DAYS, rangeLabel, withPeriod } from "~/lib/metrics
 type Money = { amount: string; currency: string };
 type DeliveryRate = { rate: number | null; delivered: number; returned: number; stillOpen: number; partial: number };
 
-/** "1234567.5" → "1,234,567.50", without passing through a float. */
-export function formatAmount(amount: string): string {
-  const negative = amount.startsWith("-");
-  const [whole = "0", fraction = ""] = amount.replace("-", "").split(".");
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${negative ? "−" : ""}${grouped}.${fraction.padEnd(2, "0").slice(0, 2)}`;
-}
+// Kept in a plain module so the weekly digest can format money without React (G-GZR6-5).
+export { formatAmount };
 
 export function MoneyList({ values, empty = "—" }: { values: Money[]; empty?: string }) {
   if (!values.length) return <span className="text-gray-400">{empty}</span>;

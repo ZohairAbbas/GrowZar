@@ -47,3 +47,9 @@ export function safeAppPath(to: string | null): string | null {
     return null;
   }
 }
+
+/**
+ * Where a tracked click came from, when the link says (`from=digest` in the
+ * weekly email, G-GZR6-5). A short word or nothing: it is stored, not trusted.
+ */
+export const clickSource = (from: string | null): string | null => (from && /^[a-z]{1,20}$/.test(from) ? from : null);
