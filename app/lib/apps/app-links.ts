@@ -42,6 +42,13 @@ export const SCREENS = {
   courierify_confirmations: { app: "COURIERIFY", path: "/app/confirmations", open: "Open confirmations in Courierify" },
   courierify_ndr: { app: "COURIERIFY", path: "/app/ndr", open: "Open delivery problems in Courierify" },
   inventorify_reorder: { app: "INVENTORIFY", path: "/app/purchase-orders/new", open: "Create a purchase order in Inventorify" },
+  // WhatKaBot and Financify paths as each app's team gave them (2026-10-14). No
+  // screen opens a specific row or template from the URL.
+  whatkabot_cod_confirmation: { app: "WHATKABOT", path: "/app/settings-v3/customer-notifications", open: "Turn on COD confirmation in WhatKaBot" },
+  whatkabot_inbox: { app: "WHATKABOT", path: "/app/inbox-v3", open: "Reply in WhatKaBot's inbox" },
+  financify_costs: { app: "FINANCIFY", path: "/app/cost-history?tab=missing", open: "Add missing product costs in Financify" },
+  financify_profitability: { app: "FINANCIFY", path: "/app/product-profitability", open: "See product profit in Financify" },
+  financify_integrations: { app: "FINANCIFY", path: "/app/integrations", open: "Connect your ad accounts in Financify" },
 } as const satisfies Record<string, { app: LinkedApp; path: string; open: string }>;
 
 export type ScreenKey = keyof typeof SCREENS;
@@ -55,6 +62,19 @@ export function actionFor(screen: ScreenKey, connected: ReadonlySet<string>): Ap
   const app = SUITE_APPS[s.app];
   if (connected.has(s.app)) return app.adminHandle ? { screen, label: s.open, install: false } : null;
   return app.listing ? { screen, label: `Install ${app.name}`, install: true } : null;
+}
+
+/**
+ * The first screen whose app is connected, opened; else an install of the
+ * first one listed. Screens are in order of preference.
+ */
+export function firstAction(screens: readonly ScreenKey[], connected: ReadonlySet<string>): AppAction | null {
+  for (const s of screens) {
+    if (!connected.has(SCREENS[s].app)) continue;
+    const a = actionFor(s, connected);
+    if (a) return a;
+  }
+  return screens[0] ? actionFor(screens[0], connected) : null;
 }
 
 /** Where the act route redirects: the app's admin screen for this shop, or its listing. */
