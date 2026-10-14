@@ -53,8 +53,14 @@ export type BuiltStore = {
 export async function buildStore(store: StoreRow, canSeeMoney: boolean, now = new Date()): Promise<BuiltStore> {
   const name = store.displayName ?? store.shopDomain;
   const empty = { storeId: store.id, name, rows: [], app: null };
-  const synced = await prisma.appConnection.aggregate({ where: { storeId: store.id, status: "CONNECTED" }, _max: { lastSyncedAt: true } });
-  const last = synced._max.lastSyncedAt;
+  // The sync's own record of success (sync_state), for the apps still connected.
+  // Not app_connections.lastSyncedAt: nothing writes that during a sync.
+  const apps = await prisma.appConnection.findMany({ where: { storeId: store.id, status: "CONNECTED" }, select: { app: true } });
+  const synced = await prisma.syncState.aggregate({
+    where: { storeId: store.id, app: { in: apps.map((c) => c.app) } },
+    _max: { lastSuccessAt: true },
+  });
+  const last = synced._max.lastSuccessAt;
   if (!last || now.getTime() - last.getTime() > STALE_AFTER_MS) return { ...empty, skipped: "stale" };
 
   const period = periodFrom(new URL(`http://digest/?days=${DIGEST_DAYS}`), store.timezone, now);
@@ -326,6 +332,8 @@ export async function sendTestDigest(
 ) {
   const organization = await prisma.organization.findUniqueOrThrow({ where: { id: organizationId }, select: { name: true } });
   const digest = await buildDigest(target, organization.name, now, storeCache(now), { test: true, onlyStores: viewer.scopedStoreIds, unsubscribeMemberId: viewer.memberId });
+  // An email with no store in it says nothing; the preview already shows why.
+  if (!digest.hasContent) return { sent: false as const, reason: "empty" as const };
   const sent = await sendEmail({ to: viewer.email, subject: digest.subject, html: digest.html, text: digest.text, headers: headersFor(viewer.memberId) });
   await prisma.digestSend.create({
     data: {

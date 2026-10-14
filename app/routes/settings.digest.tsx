@@ -124,7 +124,9 @@ export async function action({ request }: Route.ActionArgs) {
     const sent = await sendTestDigest(viewer.organizationId, target, { userId: viewer.userId, memberId: viewer.memberId, email: me.email, scopedStoreIds: viewer.scopedStoreIds });
     return sent.sent
       ? { ok: `Test sent to ${me.email}.` }
-      : { error: sent.reason === "no_api_key" ? "Email is not set up on this server (no Resend key), so nothing was sent." : "The email service refused the test. It is in the log below." };
+      : sent.reason === "empty"
+        ? { error: "This member's digest has nothing in it this week, so no test was sent. The preview says why." }
+        : { error: sent.reason === "no_api_key" ? "Email is not set up on this server (no Resend key), so nothing was sent." : "The email service refused the test. It is in the log below." };
   }
   return { error: "Nothing to do." };
 }
@@ -253,7 +255,7 @@ export default function DigestSettings({ loaderData, actionData }: Route.Compone
                 </h3>
                 <p className="text-sm text-gray-600">This week's digest for this member, built now, exactly as it would be sent.</p>
               </div>
-              {admin.preview ? (
+              {admin.preview?.hasContent ? (
                 <Form method="post">
                   <input type="hidden" name="member" value={admin.selected ?? ""} />
                   <button type="submit" name="intent" value="test" disabled={busy} className={`${button} bg-navy text-white hover:bg-navy-surface`}>
