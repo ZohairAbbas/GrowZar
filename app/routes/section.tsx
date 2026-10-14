@@ -3,6 +3,8 @@ import { Check, Clock, Lock } from "lucide-react";
 
 import type { Route } from "./+types/section";
 import { prisma } from "~/lib/db.server";
+import { sectionPreview } from "~/lib/metrics/section-preview.server";
+import { SUITE_APPS, type LinkedApp } from "~/lib/apps/app-links";
 import { hasPermission, listVisibleStores, requireSection } from "~/lib/authorize.server";
 import { inboxView } from "~/lib/insights/inbox.server";
 import { SECTIONS, type Section } from "~/lib/permissions";
@@ -130,11 +132,22 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     }));
   }
 
+  // A locked section shows what Growzar already sees in this store's own
+  // numbers beside what connecting adds (G-GZR6-4).
+  const lockedPreview =
+    state.kind === "locked" && active
+      ? await sectionPreview(section, { id: active.id, currency: active.currency ?? null }, await hasPermission(request, viewer.organizationId, "finance", "view"))
+      : null;
+
   return {
     section,
     label: definition.label,
     blurb: definition.blurb,
     preview: definition.preview,
+    lockedPreview,
+    storeId: active?.id ?? null,
+    /** The missing apps' keys, for their Install buttons. */
+    missingApps: state.kind === "locked" ? state.missing.filter((a): a is LinkedApp => Object.hasOwn(SUITE_APPS, a)) : [],
     state: {
       kind: state.kind,
       apps:
@@ -320,7 +333,7 @@ const periodWords = (p: { days: number; custom: boolean; from: string; to: strin
   p.custom ? `from ${p.from} to ${p.to}` : `over the last ${p.days} days`;
 
 export default function SectionPage({ loaderData }: Route.ComponentProps) {
-  const { label, blurb, preview, state, section, storeCount, greeting, customerCount, metrics, storeName, filterStores } =
+  const { label, blurb, preview, state, section, storeCount, greeting, customerCount, metrics, storeName, filterStores, lockedPreview, storeId, missingApps } =
     loaderData;
 
   if (metrics?.kind === "home") {
@@ -422,8 +435,45 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             Connect {state.apps.join(" or ")} to get insights
           </h2>
           <p className="mt-1.5 text-sm text-gray-600">
-            Here is what this section would show you.
+            {lockedPreview ? `What Growzar already sees for ${storeName ?? "this store"}, and what connecting adds.` : "Here is what this section would show you."}
           </p>
+
+          {lockedPreview?.facts.length ? (
+            <dl className="mt-5 grid gap-3 sm:grid-cols-3">
+              {lockedPreview.facts.map((f) => (
+                <div key={f.label} className="min-w-0 rounded-xl bg-field p-4">
+                  <dt className="text-xs font-semibold text-gray-500">{f.label}</dt>
+                  <dd className="mt-1 font-semibold tabular-nums text-gray-900">{f.value}</dd>
+                  {f.note ? <dd className="mt-0.5 text-xs text-gray-500">{f.note}</dd> : null}
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          {lockedPreview?.rows.length ? (
+            <div className="mt-5 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
+                  <tr>
+                    <th className="py-2 pr-4">Best sellers, last {lockedPreview.days} days</th>
+                    <th className="py-2 pr-4">Selling</th>
+                    <th className="py-2">{lockedPreview.missingColumn}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {lockedPreview.rows.map((r) => (
+                    <tr key={r.name}>
+                      <td className="py-2 pr-4 font-medium text-gray-900">{r.name}</td>
+                      <td className="py-2 pr-4 tabular-nums text-gray-700">{r.known}</td>
+                      <td className="py-2 text-gray-400">
+                        <span className="inline-flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" /> needs {state.apps.join(" or ")}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          {lockedPreview ? <p className="mt-6 text-xs font-semibold uppercase tracking-wide text-gray-500">Connecting adds</p> : null}
 
           {/*
             A preview rather than an empty screen (D-43): a single-app merchant
@@ -439,8 +489,23 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             ))}
           </ul>
 
-          <p className="mt-6 text-xs text-gray-500">
-            Install {state.apps.join(" or ")} on your Shopify store, then press
+          {storeId && missingApps.length ? (
+            <div className="mt-6 flex flex-wrap gap-2">
+              {missingApps.map((app) => (
+                <a
+                  key={app}
+                  href={`/stores/${storeId}/apps/${app}/install?from=${section}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-surface"
+                >
+                  Install {SUITE_APPS[app].name}
+                </a>
+              ))}
+            </div>
+          ) : null}
+          <p className="mt-4 text-xs text-gray-500">
+            {lockedPreview ? `Figures are from the last ${lockedPreview.days} days. ` : ""}Install {state.apps.join(" or ")} on your Shopify store, then press
             “Open in Growzar” inside it. Nothing to copy or paste.
           </p>
         </section>

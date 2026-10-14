@@ -27,7 +27,7 @@ export async function loader({ request, params, url }: Route.LoaderArgs) {
       : entry.listing;
   if (!href) throw data("That app has no App Store page.", { status: 404 });
   await prisma.appPromptEvent.create({
-    data: { storeId: params.storeId, app, kind: "clicked", userId: viewer.userId, detail: { lead: url.searchParams.get("lead") === "1" } },
+    data: { storeId: params.storeId, app, kind: "clicked", userId: viewer.userId, detail: { lead: url.searchParams.get("lead") === "1", from: /^[a-z]{1,20}$/.test(url.searchParams.get("from") ?? "") ? url.searchParams.get("from") : "home" } },
   });
   throw redirect(href);
 }
