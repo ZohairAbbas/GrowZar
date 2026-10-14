@@ -29,7 +29,7 @@ import type { CampaignReturnsFinding } from "~/lib/metrics/campaign-acquisition"
 import { MIN_DECIDED as MIN_CONTACT_DECIDED } from "~/lib/metrics/buyer-contact";
 import type { InboxItem, InboxView } from "~/lib/insights/inbox.server";
 import { DISMISS_REASONS } from "~/lib/insights/actions";
-import { actionFor, type ScreenKey } from "~/lib/apps/app-links";
+import { firstAction, type ScreenKey } from "~/lib/apps/app-links";
 import { formatAmount, MoneyList, outcomeLabel } from "./Metrics";
 
 /**
@@ -41,24 +41,44 @@ const Area = createContext<Finding["kind"] | null>(null);
 const Connected = createContext<ReadonlySet<string>>(new Set());
 
 /**
- * The app screen that acts on each finding. Kinds not listed have no app fix
- * to offer yet (form abandonments wait for WhatKaBot's confirmed admin links).
+ * The app screens that act on a finding, in order of preference: the first
+ * whose app is connected is opened, else the first is offered to install.
+ * Not here: COD-form abandonments (no suite app can remind on them) and
+ * WhatKaBot for abandoned checkouts (its access to them is unconfirmed).
  */
-const ACTION_SCREEN: Partial<Record<Finding["kind"], ScreenKey>> = {
-  unfollowed_checkouts: "retainify_flows",
-  unconfirmed_returns: "courierify_confirmations",
-  stuck_parcels: "courierify_ndr",
-  returners: "preventify_verification",
-  network_risk: "preventify_verification",
-  offer_returns: "preventify_offers",
-  stockout: "inventorify_reorder",
-};
+function screensFor(f: Finding): ScreenKey[] {
+  switch (f.kind) {
+    case "unfollowed_checkouts":
+      // Retainify reminds on Shopify checkouts only; nothing reminds on COD forms.
+      return f.source === "shopify_checkout" ? ["retainify_flows"] : [];
+    case "unconfirmed_returns":
+      return ["whatkabot_cod_confirmation", "courierify_confirmations"];
+    case "stuck_parcels":
+      // Buyers already asking: answer them first.
+      return f.wroteIn?.orders ? ["whatkabot_inbox", "courierify_ndr"] : ["courierify_ndr"];
+    case "returners":
+    case "network_risk":
+      return ["preventify_verification"];
+    case "offer_returns":
+      return ["preventify_offers"];
+    case "stockout":
+      return ["inventorify_reorder"];
+    case "margin":
+      return f.cogsIncompleteOrders ? ["financify_costs"] : [];
+    case "product_loss":
+      return ["financify_profitability"];
+    case "campaign_returns":
+      // A flagged campaign with no spend recorded: its ad account isn't connected.
+      return f.flagged.some((c) => !c.spend) ? ["financify_integrations"] : [];
+    default:
+      return [];
+  }
+}
 
 /** "Set up … in <app>" when the app is connected, "Install <app>" when it isn't; through the act route, which records it. */
-function AppActionLink({ id, kind, variant }: { id: string; kind: Finding["kind"]; variant: "button" | "text" }) {
+function AppActionLink({ id, finding, variant }: { id: string; finding: Finding; variant: "button" | "text" }) {
   const connected = useContext(Connected);
-  const screen = ACTION_SCREEN[kind];
-  const action = screen ? actionFor(screen, connected) : null;
+  const action = firstAction(screensFor(finding), connected);
   if (!action) return null;
   const href = `/insights/${id}/act?screen=${action.screen}`;
   const cls =
@@ -967,7 +987,7 @@ function AttentionListInner({ inbox, period }: { inbox: InboxView; period: strin
                     {s.headline}
                   </button>
                   <p className="line-clamp-2 text-sm text-gray-500">{s.next ?? s.why ?? s.note}</p>
-                  <AppActionLink id={item.id} kind={item.insight.finding.kind} variant="text" />
+                  <AppActionLink id={item.id} finding={item.insight.finding} variant="text" />
                 </div>
                 <p className="col-start-2 font-display text-xl font-bold tabular-nums text-gray-900 md:col-start-auto md:text-right">
                   {s.figure}
@@ -1157,7 +1177,7 @@ function FullCard({ item, period, canManage }: { item: InboxItem; period: string
     <Area.Provider value={f.kind}>
       {card}
       <div className="mt-3 flex justify-end">
-        <AppActionLink id={id} kind={f.kind} variant="button" />
+        <AppActionLink id={id} finding={f} variant="button" />
       </div>
     </Area.Provider>
   );
@@ -1459,7 +1479,7 @@ function CompactCard({ item, period, onDetails }: { item: InboxItem; period: str
         </button>
       </div>
       <div className="pt-3">
-        <AppActionLink id={id} kind={f.kind} variant="text" />
+        <AppActionLink id={id} finding={f} variant="text" />
       </div>
     </article>
   );
