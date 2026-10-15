@@ -76,6 +76,8 @@ export type CoverageInput = {
    * store money now, so their settlements matter whatever the period.
    */
   owingCouriers?: readonly string[];
+  /** Settlements that count shipments but list none of the store's parcels, per payer: left out as not this store's. */
+  notAttributable?: ReadonlyArray<{ payer: string; statements: number; shipments: number }>;
   adSpend: { daysFetched: number; daysInPeriod: number } | null;
   /** Of the period's distinct buyers, how many have a name on record. */
   buyers: { total: number; named: number };
@@ -132,7 +134,12 @@ function counted(
   return { ...base, have, of, status: s, gap: s === "complete" ? null : gap(of - have) };
 }
 
-function settlementItem(rows: readonly RollupOrder[], payouts: readonly Payout[], alsoOwing: readonly string[] = []): CoverageItem | null {
+function settlementItem(
+  rows: readonly RollupOrder[],
+  payouts: readonly Payout[],
+  alsoOwing: readonly string[] = [],
+  notAttributable: NonNullable<CoverageInput["notAttributable"]> = [],
+): CoverageItem | null {
   // The couriers that owe this store cash: those that delivered a Courierify
   // parcel in the period, and any still holding unpaid COD from before.
   const owing = [
@@ -153,6 +160,10 @@ function settlementItem(rows: readonly RollupOrder[], payouts: readonly Payout[]
       const p = latest.get(c)!;
       return `${c} last settled ${shortDay(p.day)}${p.status !== "received" ? ` (${p.status})` : ""}`;
     }),
+    ...notAttributable.map(
+      (x) =>
+        `${x.statements} ${x.payer} statement${x.statements === 1 ? "" : "s"} for ${x.shipments.toLocaleString("en")} shipments list${x.statements === 1 ? "s" : ""} none of this store's parcels (likely a courier account shared with other businesses), so ${x.statements === 1 ? "it is" : "they are"} left out of payouts and deductions`,
+    ),
   ];
   return {
     key: "settlements",
@@ -163,7 +174,7 @@ function settlementItem(rows: readonly RollupOrder[], payouts: readonly Payout[]
     of: owing.length,
     unit: "couriers owed money",
     status: s,
-    gap: s === "complete" && settled.every((c) => latest.get(c)!.status === "received") ? null : parts.join("; "),
+    gap: s === "complete" && settled.every((c) => latest.get(c)!.status === "received") && !notAttributable.length ? null : parts.join("; "),
     effect: "COD not yet paid counts only couriers whose payouts Courierify records; an untracked courier's COD is listed apart, neither owed nor paid",
     sections: ["home", "finance"],
   };
@@ -314,7 +325,7 @@ export function coverageReport(input: CoverageInput): CoverageReport {
         shipped.length,
         (n) => `no courier fee on ${plural(n, "shipped order")}`,
       ),
-      settlementItem(rows, input.payouts, input.owingCouriers),
+      settlementItem(rows, input.payouts, input.owingCouriers, input.notAttributable),
       counted(
         {
           key: "cities",

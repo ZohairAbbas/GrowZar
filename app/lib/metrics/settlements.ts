@@ -29,8 +29,29 @@ export const MIN_PAYOUTS_FOR_CYCLE = 3;
 
 const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
 
-/** One settlement row from Courierify's feed, or null if it is not a payout we can date. */
+/**
+ * Whether a settlement is this store's money: one that counts shipments but
+ * lists none of the store's parcels is not (Courierify, 2026-10-15). A
+ * courier account shared with businesses outside Courierify sends the whole
+ * account's batches, e.g. 15 TCS batches of 21-2,545 consignments on
+ * 0dscam-qn with none of its parcels. Such a row is left out everywhere and
+ * only counted on the coverage page.
+ */
+export function attributable(payload: Record<string, unknown>): boolean {
+  const count = typeof payload.shipmentsCount === "number" ? payload.shipmentsCount : 0;
+  return !(count > 0 && Array.isArray(payload.shipmentIds) && payload.shipmentIds.length === 0);
+}
+
+/**
+ * Payers whose statements reach Courierify only when someone at the store
+ * uploads them: Orio has no API (Courierify, 2026-10-15). Their "last payout"
+ * is the last statement uploaded, not the last time they paid.
+ */
+export const UPLOAD_ONLY_PAYERS: ReadonlySet<string> = new Set(["orio"]);
+
+/** One settlement row from Courierify's feed, or null if it is not a payout we can date, or not this store's. */
 export function readPayout(payload: Record<string, unknown>): Payout | null {
+  if (!attributable(payload)) return null;
   const payer = text(payload.courier)?.toLowerCase();
   const date = text(payload.settlementDate);
   const status = text(payload.status) ?? "unknown";

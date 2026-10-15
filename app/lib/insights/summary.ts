@@ -132,6 +132,17 @@ export function summaryOf(f: Finding, period: string): Summary {
   switch (f.kind) {
     case "cash_held": {
       const who = payerName(f.payer);
+      // Orio's statements are uploaded by hand: no statement is not the same as no payment.
+      if (f.byUpload) {
+        return {
+          headline: `No ${who} statement in Courierify for ${n(f.orders)} delivered order${f.orders === 1 ? "" : "s"}`,
+          figure: first(f.cod),
+          note: `Last ${who} statement uploaded ${f.lastPaidDay}`,
+          next: `Upload ${who}'s latest statements in Courierify, then chase what is still unpaid.`,
+          affects: `${n(f.orders)} delivered orders`,
+          link: { to: `/orders?${period}&awaitingPayout=${f.payer}`, label: "See orders" },
+        };
+      }
       return {
         headline: `${who} hasn't paid for ${n(f.orders)} delivered order${f.orders === 1 ? "" : "s"}`,
         figure: first(f.cod),
