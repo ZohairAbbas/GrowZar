@@ -35,6 +35,10 @@ const schema = z.object({
   // have gone out is logged in digest_sends, and nothing is emailed.
   DIGEST_SENDING: z.enum(["on", "off"]).default("off"),
 
+  // Our own accounts, comma-separated (Phase 9, pack §10.1): what they act on
+  // is watched and measured, but kept out of results totals and the replay.
+  INTERNAL_EMAILS: z.string().optional(),
+
   ENCRYPTION_KEY: z
     .string()
     .min(32, "ENCRYPTION_KEY must be 32 bytes, base64"),

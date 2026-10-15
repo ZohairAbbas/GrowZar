@@ -83,6 +83,7 @@ model Store {
   adSpend        AdSpend[]
   profitSettings StoreProfitSettings?
   insights       Insight[]
+  insightOutcomes InsightOutcome[]
   buyerNetwork   BuyerNetwork[]
   orderNetwork   OrderNetwork[]
   appPrompts     AppPromptEvent[]
@@ -926,9 +927,14 @@ model Insight {
   resolvedAt   DateTime?
   /// The few numbers the last evaluation saw (`evidenceOf`).
   lastEvidence Json      @default("{}")
+  /// The whole finding the last 90-day evaluation saw, money included, and
+  /// for state-based detectors the orders it was about (G-GZR9-1): what a
+  /// click copies into its watch. Server-only, never sent to a browser.
+  lastFinding  Json?
 
-  store  Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  events InsightEvent[]
+  store    Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  events   InsightEvent[]
+  outcomes InsightOutcome[]
 
   @@unique([storeId, fingerprint])
   @@index([storeId, status])
@@ -956,6 +962,54 @@ model InsightEvent {
   @@unique([insightId, kind, userId, day])
   @@index([storeId, at])
   @@map("insight_events")
+}
+
+/// A watch on what happened after someone acted on an insight (Phase 9,
+/// G-GZR9-1): opened by the first click or app link, with the finding as it
+/// stood (the baseline). The measurement engine fills checkpoints, verdict,
+/// effect and money later. A finding that resolves with no watch is
+/// "resolved on its own", never a result.
+model InsightOutcome {
+  id             String    @id @default(uuid())
+  insightId      String
+  storeId        String
+  detector       String
+  subject        String
+  /// clicked | app_link (later: action, Phase 8). An observed change never opens a watch.
+  trigger        String
+  actedAt        DateTime
+  actedByUserId  String?
+  /// Opened by an internal account: measured, but kept out of totals and the replay statistics.
+  internal       Boolean   @default(false)
+  /// The finding at actedAt: `{ finding, items?, evidence, evaluatedAt, note? }`.
+  baseline       Json
+  /// snapshot | reconstructed | unavailable
+  baselineSource String
+  /// The "did it" signal, once seen (G-GZR9-4): upgrades the claim, never the trigger.
+  observed       Json?
+  checkpoints    Json      @default("[]")
+  /// too_early | improved | no_change | worse | not_enough_data | closed
+  verdict        String    @default("too_early")
+  effect         Json?
+  /// Computed and stored; shown only for approved detectors (D-38).
+  money          Json?
+  formulaVersion Int?
+  judgedAt       DateTime?
+  closedAt       DateTime?
+  /// dismissed_wrong | store_disconnected
+  closedReason   String?
+  /// "This wasn't us": recorded, kept out of totals.
+  hiddenAt       DateTime?
+  hiddenByUserId String?
+  hiddenNote     String?
+  createdAt      DateTime  @default(now())
+
+  insight Insight @relation(fields: [insightId], references: [id], onDelete: Cascade)
+  store   Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([insightId, actedAt])
+  @@index([storeId, actedAt])
+  @@map("insight_outcomes")
 }
 
 /// Daily exchange rates from Financify (G-FIN2-1, `GET /api/v1/fx`):
