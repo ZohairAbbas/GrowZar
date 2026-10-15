@@ -1,6 +1,20 @@
 import { prisma } from "../db.server";
 import { coverageReport, type CoverageReport } from "./coverage";
-import { readPayout, type Payout } from "./settlements";
+import { attributable, readPayout, type Payout } from "./settlements";
+
+/** Settlements that are not this store's money (settlements.ts `attributable`), per payer. */
+function notAttributableBy(payloads: ReadonlyArray<Record<string, unknown>>) {
+  const by = new Map<string, { payer: string; statements: number; shipments: number }>();
+  for (const p of payloads) {
+    if (attributable(p)) continue;
+    const payer = typeof p.courier === "string" ? p.courier.toLowerCase() : "unknown";
+    const x = by.get(payer) ?? { payer, statements: 0, shipments: 0 };
+    x.statements += 1;
+    x.shipments += typeof p.shipmentsCount === "number" ? p.shipmentsCount : 0;
+    by.set(payer, x);
+  }
+  return [...by.values()].sort((a, b) => a.payer.localeCompare(b.payer));
+}
 import type { StoreSummary } from "./summaries.server";
 import { loadAttribution } from "./campaigns.server";
 import { feedsFor } from "../sync/entities";
@@ -44,6 +58,7 @@ export async function storeCoverage(s: StoreSummary): Promise<CoverageReport> {
       .map((r) => readPayout((r.payload ?? {}) as Record<string, unknown>))
       .filter((p): p is Payout => p !== null),
     owingCouriers: owing.map((o) => o.courier!),
+    notAttributable: notAttributableBy(settlementRows.map((r) => (r.payload ?? {}) as Record<string, unknown>)),
     adSpend: s.adSpend ? { daysFetched: s.adSpend.daysFetched, daysInPeriod: s.adSpend.daysInPeriod } : null,
     buyers: { total: buyerIds.length, named },
     unconvertedOrders: s.fx?.unconverted.reduce((n, u) => n + u.orders, 0) ?? 0,

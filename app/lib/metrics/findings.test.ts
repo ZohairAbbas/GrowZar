@@ -278,6 +278,13 @@ describe("I4: COD a courier or 3PL has not paid, against its own rhythm", () => 
     expect(f).toMatchObject({ payer: "orio", orders: 4, cod: [pkr("20000.00")], lastPaidDay: "2026-08-25", medianGapDays: 1, daysLate: 37 });
   });
 
+  it("marks Orio as known only by uploaded statements, and no other payer", () => {
+    const [f] = cashHeldFindings(cashInput(times(4, () => delivered(30)))) as Exclude<ReturnType<typeof cashHeldFindings>, { kind: "skip" }>;
+    expect(f!.byUpload).toBe(true);
+    const [t] = cashHeldFindings(cashInput(times(11, () => delivered(15, { courier: "tcs", fulfilledVia: null })))) as Exclude<ReturnType<typeof cashHeldFindings>, { kind: "skip" }>;
+    expect(t!.byUpload).toBe(false);
+  });
+
   it("does not count an order still inside the payer's usual gap plus grace", () => {
     // TCS pays weekly and paid 3 days ago; deliveries 5 days ago are not due.
     const fresh = times(20, () => delivered(5, { courier: "tcs", fulfilledVia: null }));

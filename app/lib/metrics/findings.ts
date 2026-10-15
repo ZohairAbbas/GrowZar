@@ -21,7 +21,7 @@ import type { Statement } from "./settlements";
 import { formatAmount, isPositive, parseAmount, sumByCurrency, type Money } from "./money";
 import type { Outcome } from "./order-grain";
 import { productLines, type Bucket, type Profit, type RollupOrder } from "./rollups";
-import type { PayerHistory } from "./settlements";
+import { UPLOAD_ONLY_PAYERS, type PayerHistory } from "./settlements";
 import { times, type ReturnCost } from "./return-cost";
 import type { InventoryView } from "./inventory";
 import type { StockoutFinding } from "./stockout";
@@ -222,6 +222,12 @@ export type CashHeldFinding = {
   daysLate: number;
   disputed: number;
   asOf: string;
+  /**
+   * The payer's statements reach Courierify only by upload (Orio): its
+   * "last payout" is the last statement someone uploaded, not the last
+   * time it paid, so the card says so and asks for the upload first.
+   */
+  byUpload: boolean;
   /** Payers with delivered, unpaid orders but too few payouts to judge. */
   notJudged: Array<{ payer: string; orders: number }>;
   filter: OrderFilter;
@@ -973,6 +979,7 @@ export function cashHeldFindings(input: FindingsInput): CashHeldFinding[] | Skip
       daysLate,
       disputed: h.disputed,
       asOf,
+      byUpload: UPLOAD_ONLY_PAYERS.has(payer),
       notJudged,
       filter: { kind: "awaiting_payout", payer },
     });

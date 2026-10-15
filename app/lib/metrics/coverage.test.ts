@@ -133,6 +133,14 @@ describe("settlements over time", () => {
     const r = coverageReport(input([order()], { owingCouriers: ["smartlane"] }));
     expect(r.items.find((i) => i.key === "settlements")).toMatchObject({ have: 1, of: 2, status: "partial" });
   });
+  it("says which statements were left out as not this store's", () => {
+    const r = coverageReport(
+      input([order()], { payouts: [{ payer: "leopards", day: "2026-09-28", status: "received" }], notAttributable: [{ payer: "tcs", statements: 15, shipments: 15417 }] }),
+    );
+    const item = r.items.find((i) => i.key === "settlements")!;
+    expect(item.status).toBe("complete");
+    expect(item.gap).toContain("15 tcs statements for 15,417 shipments list none of this store's parcels");
+  });
 });
 
 describe("freshness", () => {

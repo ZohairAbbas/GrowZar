@@ -4,6 +4,7 @@ import { prisma } from "../db.server";
 import { checkoutsSection, formAbandonmentsSection } from "../metrics/checkouts.server";
 import { localDayOf } from "../metrics/order-grain";
 import { loadAdSpend } from "../metrics/rollups.server";
+import { attributable } from "../metrics/settlements";
 import type { RollupOrder } from "../metrics/rollups";
 import { addDays, type Windows } from "./groups";
 import { observe, SIGNALLED, type FormOrderFact, type Observed, type SignalInput } from "./signals";
@@ -128,7 +129,7 @@ export async function observeWatch(
       c.settlements ??= (await payloads(env.storeId, "COURIERIFY", "SETTLEMENT")).flatMap((p) => {
         const at = when(p.settlementDate);
         // A payout, as settlements.ts reads them (no direction means a payout).
-        return at && (p.direction === undefined || p.direction === "payout") ? [{ payer: String(p.courier ?? "").toLowerCase(), day: String(p.settlementDate).slice(0, 10), at }] : [];
+        return at && (p.direction === undefined || p.direction === "payout") && attributable(p) ? [{ payer: String(p.courier ?? "").toLowerCase(), day: String(p.settlementDate).slice(0, 10), at }] : [];
       });
       input.settlements = c.settlements;
       break;

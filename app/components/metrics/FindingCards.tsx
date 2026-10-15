@@ -698,18 +698,30 @@ function CashHeldCard({ f, period, id, canManage }: { f: CashHeldFinding } & Car
     <Card
       id={id}
       canManage={canManage}
-      title={`No payout recorded from ${who} for ${n(f.orders)} delivered order${f.orders === 1 ? "" : "s"}`}
+      title={
+        f.byUpload
+          ? `No ${who} statement in Courierify for ${n(f.orders)} delivered order${f.orders === 1 ? "" : "s"}`
+          : `No payout recorded from ${who} for ${n(f.orders)} delivered order${f.orders === 1 ? "" : "s"}`
+      }
       link={{ to: `/orders?${period}&awaitingPayout=${f.payer}`, label: `See the ${n(f.orders)} orders` }}
     >
       <p>
         COD of <MoneyList values={f.cod} />, delivered
-        {f.oldestDay ? ` from ${f.oldestDay}` : ""}, with no {who} payout recorded in Courierify.
+        {f.oldestDay ? ` from ${f.oldestDay}` : ""}, with no {who} {f.byUpload ? "statement" : "payout"} recorded in Courierify.
       </p>
-      <p>
-        {who} usually paid this store every {f.medianGapDays} day{f.medianGapDays === 1 ? "" : "s"}. Its last payout in
-        Courierify was on {f.lastPaidDay}
-        {f.daysLate > 0 ? `, ${n(f.daysLate)} days later than that rhythm would have it.` : "."}
-      </p>
+      {f.byUpload ? (
+        <p>
+          {who} statements reach Courierify only when someone uploads them: {who} has no connection that sends them. The
+          last one uploaded was dated {f.lastPaidDay}. If {who} has paid since, upload its statements in Courierify and
+          this card will update; whatever is still unpaid after that is worth chasing.
+        </p>
+      ) : (
+        <p>
+          {who} usually paid this store every {f.medianGapDays} day{f.medianGapDays === 1 ? "" : "s"}. Its last payout in
+          Courierify was on {f.lastPaidDay}
+          {f.daysLate > 0 ? `, ${n(f.daysLate)} days later than that rhythm would have it.` : "."}
+        </p>
+      )}
       <p className="text-xs text-gray-600">
         This is what Courierify has recorded. A payout made outside it, straight to your bank or on {who}'s own
         statement, would not show here: check that statement before chasing.

@@ -77,7 +77,9 @@ export function MoneyBreakdown({ lines, period, scope }: { lines: FinanceDepth["
  */
 const COMPACT_GROUPS: Array<{ label: string; keys: string[]; tone: string }> = [
   { label: "Paid by courier", keys: ["paid"], tone: "bg-mint-600" },
-  { label: "Delivered, not yet paid", keys: ["awaiting", "untracked"], tone: "bg-mint" },
+  { label: "Delivered, awaiting payout", keys: ["awaiting"], tone: "bg-mint" },
+  // Couriers whose payouts Courierify does not record: neither owed nor paid, as Finance lists them.
+  { label: "Delivered, payout not tracked", keys: ["untracked"], tone: "bg-mint-200" },
   { label: "Not yet delivered", keys: ["not_dispatched", "booked", "with_courier"], tone: "bg-data-700/40" },
   { label: "Returned", keys: ["returned"], tone: "bg-coral" },
   { label: "Outcome not known", keys: ["unknown"], tone: "bg-data-700/40" },
