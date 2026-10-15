@@ -32,6 +32,8 @@ import {
 } from "./measure";
 import { STATE_BASED, type StateVerdict } from "./state";
 import { measureStateWatch, type StateEnv } from "./state.server";
+import { claimLevel, type Observed } from "./signals";
+import { observeWatch, type SignalEnv } from "./signals.server";
 
 /**
  * The measurement engine for order-based detectors (G-GZR9-2): the worker
@@ -41,10 +43,10 @@ import { measureStateWatch, type StateEnv } from "./state.server";
  */
 
 const DAY_MS = 86_400_000;
-export type Watch = { id: string; detector: string; subject: string; actedAt: Date; baseline: Prisma.JsonValue; checkpoints: Prisma.JsonValue };
+export type Watch = { id: string; detector: string; subject: string; actedAt: Date; baseline: Prisma.JsonValue; checkpoints: Prisma.JsonValue; observed?: Prisma.JsonValue };
 type Checkpoint = { day: number; at?: string; decided?: number; orders?: number };
 
-export type Measured = { watches: number; judged: number; ms: number; results: Array<{ id: string; detector: string; verdict: StateVerdict; effect: Record<string, unknown> }> };
+export type Measured = { watches: number; judged: number; ms: number; results: Array<{ id: string; detector: string; verdict: StateVerdict; effect: Record<string, unknown>; observed: Observed | null }> };
 
 /**
  * `extra`: watches to measure that are not stored (the replay, G-GZR9-6);
@@ -55,7 +57,7 @@ export async function measureStore(storeId: string, now = new Date(), opts: { wr
   const write = opts.write ?? true;
   const stored: Watch[] = await prisma.insightOutcome.findMany({
     where: { storeId, closedAt: null, judgedAt: null, detector: { in: [...ORDER_BASED, ...STATE_BASED] } },
-    select: { id: true, detector: true, subject: true, actedAt: true, baseline: true, checkpoints: true },
+    select: { id: true, detector: true, subject: true, actedAt: true, baseline: true, checkpoints: true, observed: true },
   });
   const watches = [...stored, ...(opts.extra ?? [])];
   const results: Measured["results"] = [];
@@ -71,6 +73,7 @@ export async function measureStore(storeId: string, now = new Date(), opts: { wr
   const ctx: GroupContext | null = currency ? { currency, ...(await sideData(storeId, kinds, orders)) } : null;
   const returnCost = await loadReturnCost(storeId, currency);
   const today = localDayOf(now, tz);
+  const signalEnv: SignalEnv = { storeId, currency, timezone: tz, orders, today, now, cache: {} };
   const stateEnv: StateEnv = { storeId, currency, orders, ordersById: new Map(orders.map((o) => [o.orderId, o])), today, now, cache: {} };
 
   let judged = 0;
@@ -119,9 +122,12 @@ export async function measureStore(storeId: string, now = new Date(), opts: { wr
     for (const day of followed ? [] : [EARLY_DAYS, AFTER_DAYS, CUTOFF_DAYS]) {
       if (daysSince >= day && !checkpoints.some((c) => c.day === day)) checkpoints.push({ day, at: now.toISOString(), ...progress });
     }
+    // The "did it" signal (G-GZR9-4): looked for until seen, then kept; it sets the claim level.
+    const observed = w.observed ?? (await observeWatch(signalEnv, { ...w, finding }, win));
+    effect = { ...effect, claim: claimLevel(observed) };
     const final = verdict !== "too_early";
     if (final) judged += 1;
-    results.push({ id: w.id, detector: w.detector, verdict, effect });
+    results.push({ id: w.id, detector: w.detector, verdict, effect, observed: (observed as Observed | null) ?? null });
     if (!write || !stored.includes(w)) continue;
     await prisma.insightOutcome.update({
       where: { id: w.id },
@@ -132,6 +138,7 @@ export async function measureStore(storeId: string, now = new Date(), opts: { wr
         money: money ? (money as Prisma.InputJsonValue) : undefined,
         formulaVersion: money ? FORMULA_VERSION : undefined,
         judgedAt: final ? now : undefined,
+        observed: !w.observed && observed ? (observed as Prisma.InputJsonValue) : undefined,
       },
     });
   }
