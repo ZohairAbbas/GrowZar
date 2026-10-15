@@ -5,6 +5,7 @@ import { prisma } from "~/lib/db.server";
 import { requireStore } from "~/lib/authorize.server";
 import { actionHref, isScreenKey } from "~/lib/apps/app-links";
 import { clickSource } from "~/lib/insights/actions";
+import { recordAct } from "~/lib/insights/inbox.server";
 
 /**
  * A card's "set it up in the app" or "install the app" button (G-GZR6-2):
@@ -30,9 +31,8 @@ export async function loader({ request, params, url }: Route.LoaderArgs) {
   // `from=digest`: the weekly email's button (G-GZR6-5).
   const from = clickSource(url.searchParams.get("from"));
   if (!href) throw data("There is no confirmed link for that app yet.", { status: 404 });
-  await prisma.insightEvent.create({
-    data: { insightId: insight.id, storeId: insight.storeId, kind: "app_link", userId: viewer.userId, detail: { screen, install: !href.includes("admin.shopify.com"), ...(from ? { from } : {}) } },
-  });
+  // The first click or app link opens the insight's watch (G-GZR9-1).
+  await recordAct(insight.id, insight.storeId, viewer.userId, "app_link", { screen, install: !href.includes("admin.shopify.com"), ...(from ? { from } : {}) });
   throw redirect(href);
 }
 

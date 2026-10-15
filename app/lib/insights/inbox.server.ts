@@ -29,6 +29,9 @@ import {
   type Insight,
 } from "./detectors";
 import type { InsightAction } from "./actions";
+import { itemsOf } from "../outcomes/items";
+import { closesWatch, type FindingSnapshot, type Trigger } from "../outcomes/watch";
+import { closeWatches, openWatch } from "../outcomes/watch.server";
 
 /**
  * The insight inbox (G-GZR3-3): evaluation in the worker, and Home's view.
@@ -142,7 +145,7 @@ export async function evaluateStore(storeId: string, now = new Date()): Promise<
   const conclusive = new Set(outcomes.filter((o) => o.status === "found" || o.status === "nothing_found").map((o) => o.detector));
 
   return prisma.$transaction(async (tx) => {
-    const existing = await tx.insight.findMany({ where: { storeId } });
+    const existing = await tx.insight.findMany({ where: { storeId }, omit: { lastFinding: true } });
     const byFingerprint = new Map(existing.map((r) => [r.fingerprint, r]));
     let created = 0;
     let resolved = 0;
@@ -150,11 +153,16 @@ export async function evaluateStore(storeId: string, now = new Date()): Promise<
 
     for (const i of found) {
       const evidence = evidenceOf(i) as Prisma.InputJsonValue;
+      // What a click copies into its watch (G-GZR9-1): the whole finding, and
+      // for state-based detectors the orders it is about.
+      const items = itemsOf(i, input);
+      const lastFinding = { insight: i, ...(items ? { items } : {}) } satisfies FindingSnapshot as unknown as Prisma.InputJsonValue;
       const before = byFingerprint.get(i.fingerprint);
       const row = await tx.insight.upsert({
         where: { storeId_fingerprint: { storeId, fingerprint: i.fingerprint } },
-        create: { storeId, fingerprint: i.fingerprint, detector: i.detector, subject: i.subject, lastSeenAt: now, lastEvidence: evidence },
-        update: { lastSeenAt: now, lastEvidence: evidence, resolvedAt: null },
+        create: { storeId, fingerprint: i.fingerprint, detector: i.detector, subject: i.subject, lastSeenAt: now, lastEvidence: evidence, lastFinding },
+        update: { lastSeenAt: now, lastEvidence: evidence, lastFinding, resolvedAt: null },
+        select: { id: true },
       });
       if (!before) created += 1;
       else if (before.resolvedAt) {
@@ -222,6 +230,7 @@ export async function visibleInsights(s: StoreSummary, canSeeMoney: boolean, now
   }
   const rows = await prisma.insight.findMany({
     where: { storeId: s.store.id, fingerprint: { in: insights.map((i) => i.fingerprint) } },
+    omit: { lastFinding: true },
   });
   const row = new Map(rows.map((r) => [r.fingerprint, r]));
   const hiddenNow = (r: (typeof rows)[number]) =>
@@ -290,9 +299,9 @@ export async function applyInsightAction(insightId: string, storeId: string, use
       : action.intent === "snooze"
         ? { ...base, status: "snoozed", snoozedUntil: new Date(now.getTime() + action.days * 86_400_000), dismissedReason: null, dismissedNote: null }
         : { ...base, status: "open", snoozedUntil: null, dismissedReason: null, dismissedNote: null };
-  await prisma.$transaction([
-    prisma.insight.update({ where: { id: insightId }, data }),
-    prisma.insightEvent.create({
+  await prisma.$transaction(async (tx) => {
+    await tx.insight.update({ where: { id: insightId }, data, select: { id: true } });
+    await tx.insightEvent.create({
       data: {
         insightId,
         storeId,
@@ -301,10 +310,30 @@ export async function applyInsightAction(insightId: string, storeId: string, use
         detail: action as unknown as Prisma.InputJsonValue,
         at: now,
       },
-    }),
-  ]);
+    });
+    // "It's wrong" ends the watch with no result; nothing else does (G-GZR9-1).
+    if (closesWatch(action)) await closeWatches(tx, insightId, now, "dismissed_wrong");
+  });
+}
+
+/**
+ * A tracked click (`clicked`, the card's link) or app link (`app_link`, its
+ * app button): the event, and the watch the first one opens (G-GZR9-1).
+ */
+export async function recordAct(
+  insightId: string,
+  storeId: string,
+  userId: string,
+  kind: Extract<Trigger, "clicked" | "app_link">,
+  detail: Prisma.InputJsonValue,
+  now = new Date(),
+) {
+  await prisma.$transaction(async (tx) => {
+    await tx.insightEvent.create({ data: { insightId, storeId, kind, userId, detail, at: now } });
+    await openWatch(tx, { insightId, userId, trigger: kind, at: now });
+  });
 }
 
 export async function recordClick(insightId: string, storeId: string, userId: string, to: string, from: string | null = null) {
-  await prisma.insightEvent.create({ data: { insightId, storeId, kind: "clicked", userId, detail: from ? { to, from } : { to } } });
+  await recordAct(insightId, storeId, userId, "clicked", from ? { to, from } : { to });
 }
