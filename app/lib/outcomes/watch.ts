@@ -25,6 +25,25 @@ export type Verdict = (typeof VERDICTS)[number];
 
 export type BaselineSource = "snapshot" | "reconstructed" | "unavailable";
 
+/**
+ * A placebo watch (pack §10.2, approved 2026-10-15): a finding that started
+ * firing, measured from then as if acted on, while nobody clicks it. What
+ * placebos come out "improved" on is the improvement nobody caused, the
+ * baseline a real claim must beat. Never shown, never counted in results;
+ * a click closes it ("clicked") and opens the real watch.
+ */
+export const PLACEBO = "placebo";
+
+/**
+ * Whether an evaluation that found an insight opens a placebo for it: when
+ * its episode starts (new, or back after resolving), or when it has neither
+ * a placebo nor a real watch yet (a finding already firing).
+ */
+export function opensPlacebo(detector: string, episodeStarts: boolean, has: { placebo: boolean; real: boolean }): boolean {
+  if (!watches(detector)) return false;
+  return episodeStarts || (!has.placebo && !has.real);
+}
+
 /** Informational or data-health findings: nothing to measure afterwards (pack §5). */
 export const NO_OUTCOME: ReadonlySet<DetectorId> = new Set<DetectorId>(["margin_ceiling", "outcome_disagreement"]);
 

@@ -30,8 +30,8 @@ import {
 } from "./detectors";
 import type { InsightAction } from "./actions";
 import { itemsOf } from "../outcomes/items";
-import { closesWatch, type FindingSnapshot, type Trigger } from "../outcomes/watch";
-import { closeWatches, openWatch } from "../outcomes/watch.server";
+import { closesWatch, opensPlacebo, PLACEBO, type FindingSnapshot, type Trigger } from "../outcomes/watch";
+import { closeWatches, openPlacebo, openWatch } from "../outcomes/watch.server";
 
 /**
  * The insight inbox (G-GZR3-3): evaluation in the worker, and Home's view.
@@ -146,6 +146,12 @@ export async function evaluateStore(storeId: string, now = new Date()): Promise<
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.insight.findMany({ where: { storeId }, omit: { lastFinding: true } });
+    // Which insights already have a placebo or a real watch (G-GZR9 placebos).
+    const outcomes = await tx.insightOutcome.findMany({ where: { storeId }, select: { insightId: true, trigger: true } });
+    const has = (id: string) => ({
+      placebo: outcomes.some((o) => o.insightId === id && o.trigger === PLACEBO),
+      real: outcomes.some((o) => o.insightId === id && o.trigger !== PLACEBO),
+    });
     const byFingerprint = new Map(existing.map((r) => [r.fingerprint, r]));
     let created = 0;
     let resolved = 0;
@@ -156,7 +162,8 @@ export async function evaluateStore(storeId: string, now = new Date()): Promise<
       // What a click copies into its watch (G-GZR9-1): the whole finding, and
       // for state-based detectors the orders it is about.
       const items = itemsOf(i, input);
-      const lastFinding = { insight: i, ...(items ? { items } : {}) } satisfies FindingSnapshot as unknown as Prisma.InputJsonValue;
+      const snapshot: FindingSnapshot = { insight: i, ...(items ? { items } : {}) };
+      const lastFinding = snapshot as unknown as Prisma.InputJsonValue;
       const before = byFingerprint.get(i.fingerprint);
       const row = await tx.insight.upsert({
         where: { storeId_fingerprint: { storeId, fingerprint: i.fingerprint } },
@@ -164,6 +171,10 @@ export async function evaluateStore(storeId: string, now = new Date()): Promise<
         update: { lastSeenAt: now, lastEvidence: evidence, lastFinding, resolvedAt: null },
         select: { id: true },
       });
+      // A finding nobody has clicked is measured too, as a placebo (pack §10.2).
+      if (opensPlacebo(i.detector, !before || !!before.resolvedAt, has(row.id))) {
+        await openPlacebo(tx, { insightId: row.id, storeId, detector: i.detector, subject: i.subject, at: now, snapshot, evidence });
+      }
       if (!before) created += 1;
       else if (before.resolvedAt) {
         reappeared += 1;
