@@ -17,6 +17,7 @@ import { describeSweep, sweepStrandedEvents } from "~/lib/events/sweep.server";
 import { rebuildOrderGrain, updateOrderGrain } from "~/lib/metrics/order-grain.server";
 import type { CityAlias } from "~/lib/metrics/city-aliases";
 import { evaluateStore } from "~/lib/insights/inbox.server";
+import { measureStore } from "~/lib/outcomes/engine.server";
 import { refreshFxRates } from "~/lib/metrics/fx.server";
 import { refreshAdSpend } from "~/lib/metrics/ad-spend.server";
 import { refreshProfitSettings } from "~/lib/metrics/summaries.server";
@@ -56,6 +57,9 @@ const grainState = new Map<string, { cityAliases: Map<string, CityAlias>; fullAt
 const evaluatedAt = new Map<string, number>();
 const FULL_REBUILD_EVERY_MS = 60 * 60 * 1000;
 const EVALUATE_EVERY_MS = 15 * 60 * 1000;
+/** When each store's watches were last measured by this process (G-GZR9-2): at most daily. */
+const measuredAt = new Map<string, number>();
+const MEASURE_EVERY_MS = 24 * 60 * 60 * 1000;
 /** Above this many touched orders or parcels, a full rebuild is the cheaper path. */
 const MAX_INCREMENTAL = 500;
 
@@ -166,6 +170,19 @@ export const syncWorker = new Worker<SyncJob>(
         );
       } catch (error) {
         console.error(`[insights] store=${storeId} evaluation FAILED:`, error instanceof Error ? error.message : error);
+      }
+    }
+
+    // Outcomes of acted-on insights (G-GZR9-2): what changed since, from
+    // the order grain, at most daily per store. Its own try, like the
+    // steps above.
+    if (now - (measuredAt.get(storeId) ?? 0) >= MEASURE_EVERY_MS) {
+      try {
+        const m = await measureStore(storeId);
+        measuredAt.set(storeId, now);
+        if (m.watches) console.log(`[outcomes] store=${storeId} watches=${m.watches} judged=${m.judged} ms=${m.ms}`);
+      } catch (error) {
+        console.error(`[outcomes] store=${storeId} measurement FAILED:`, error instanceof Error ? error.message : error);
       }
     }
 
