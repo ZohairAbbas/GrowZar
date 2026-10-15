@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { env } from "../env.server";
-import { baselineFrom, internalEmails, isInternal, opensWatch, type Trigger } from "./watch";
+import { baselineFrom, internalEmails, isInternal, opensWatch, PLACEBO, type FindingSnapshot, type Trigger } from "./watch";
 
 /**
  * Opening and closing watches (G-GZR9-1), inside the transaction that records
@@ -26,7 +26,7 @@ export async function openWatch(
     select: { storeId: true, detector: true, subject: true, lastFinding: true, lastEvidence: true, lastSeenAt: true },
   });
   const [latest, reappeared] = await Promise.all([
-    tx.insightOutcome.findFirst({ where: { insightId: w.insightId }, orderBy: { actedAt: "desc" }, select: { actedAt: true, closedAt: true } }),
+    tx.insightOutcome.findFirst({ where: { insightId: w.insightId, trigger: { not: PLACEBO } }, orderBy: { actedAt: "desc" }, select: { actedAt: true, closedAt: true } }),
     tx.insightEvent.findFirst({ where: { insightId: w.insightId, kind: "reappeared" }, orderBy: { at: "desc" }, select: { at: true } }),
   ]);
   if (!opensWatch(insight.detector, latest, reappeared?.at ?? null)) return null;
@@ -48,13 +48,38 @@ export async function openWatch(
     },
     select: { id: true },
   });
+  // Clicked: no longer a finding nobody acted on, so its placebo leaves the calibration.
+  await tx.insightOutcome.updateMany({
+    where: { insightId: w.insightId, trigger: PLACEBO, closedAt: null },
+    data: { closedAt: w.at, closedReason: "clicked", verdict: "closed" },
+  });
   return row.id;
+}
+
+/** Open a placebo watch for a finding the evaluation just saw, with the snapshot it is keeping. */
+export async function openPlacebo(
+  tx: Prisma.TransactionClient,
+  p: { insightId: string; storeId: string; detector: string; subject: string; at: Date; snapshot: FindingSnapshot; evidence: Prisma.InputJsonValue },
+) {
+  await tx.insightOutcome.create({
+    data: {
+      insightId: p.insightId,
+      storeId: p.storeId,
+      detector: p.detector,
+      subject: p.subject,
+      trigger: PLACEBO,
+      actedAt: p.at,
+      baseline: { finding: p.snapshot.insight, ...(p.snapshot.items ? { items: p.snapshot.items } : {}), evidence: p.evidence, evaluatedAt: p.at.toISOString() } as unknown as Prisma.InputJsonValue,
+      baselineSource: "snapshot",
+    },
+  });
 }
 
 /** Close the insight's open watches with no result (dismissed as wrong, pack §4). */
 export async function closeWatches(tx: Prisma.TransactionClient, insightId: string, at: Date, reason: "dismissed_wrong" | "store_disconnected") {
   await tx.insightOutcome.updateMany({
-    where: { insightId, closedAt: null },
+    // A placebo keeps running: "wrong" is a judgement on the card, not an action.
+    where: { insightId, closedAt: null, trigger: { not: PLACEBO } },
     data: { closedAt: at, closedReason: reason, verdict: "closed" },
   });
 }

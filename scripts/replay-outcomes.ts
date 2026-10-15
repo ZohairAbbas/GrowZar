@@ -216,7 +216,27 @@ for (const d of ["product_loss", "cash_held"]) {
   say();
 }
 
-say(`## 4. Approve or reject`);
+// Live placebo watches: findings the worker saw firing that nobody clicked (approved 2026-10-15).
+const live = await prisma.insightOutcome.findMany({ where: { trigger: "placebo" }, select: { detector: true, verdict: true, closedReason: true, observed: true } });
+say(`## 4. Live placebo watches`);
+say();
+if (!live.length) say(`None yet.`);
+else {
+  say(`Findings the worker saw start firing (or already firing on the first evaluation after placebos were switched on) that nobody has clicked, measured by the same engine. A click closes a placebo as "clicked" and drops it from these counts. This is the sample the replay cannot reach; the same pass rule applies to judged ones.`);
+  say();
+  say(`| Detector | Open or judged | Still running | improved | partly | no_change | worse | not_enough_data | Closed by a click | False "improved" of judged |`);
+  say(`|---|---|---|---|---|---|---|---|---|---|`);
+  for (const d of [...new Set(live.map((l) => l.detector))].sort()) {
+    const rs = live.filter((l) => l.detector === d);
+    const clean = rs.filter((l) => l.closedReason !== "clicked");
+    const c = (v: string) => clean.filter((l) => l.verdict === v).length;
+    const judged = clean.filter((l) => !["too_early", "closed"].includes(l.verdict)).length;
+    say(`| \`${d}\` | ${clean.length} | ${c("too_early")} | ${c("improved") || ""} | ${c("partly") || ""} | ${c("no_change") || ""} | ${c("worse") || ""} | ${c("not_enough_data") || ""} | ${rs.length - clean.length || ""} | ${pct(c("improved"), judged)} |`);
+  }
+}
+say();
+
+say(`## 5. Approve or reject`);
 say();
 say(`| Detector | Replay | Recommendation |`);
 say(`|---|---|---|`);

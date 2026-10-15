@@ -5,7 +5,7 @@ import { notReceivedFinding, stuckFinding, type FindingsInput } from "../metrics
 import type { ParcelFacts } from "../metrics/returns";
 import type { Insight } from "../insights/detectors";
 import { itemsOf } from "./items";
-import { baselineFrom, closesWatch, internalEmails, isInternal, opensWatch } from "./watch";
+import { baselineFrom, closesWatch, internalEmails, isInternal, opensPlacebo, opensWatch } from "./watch";
 
 // Made-up numbers throughout; nothing here comes from a real store.
 const pkr = (amount: string) => ({ amount, currency: "PKR" });
@@ -110,5 +110,20 @@ describe("items a state-based finding is about", () => {
   });
   it("has nothing to list for detectors measured from order history", () => {
     expect(itemsOf(asInsight({ kind: "courier_for_city" }), input([]))).toBeNull();
+  });
+});
+
+describe("placebo watches", () => {
+  const none = { placebo: false, real: false };
+  it("open when a finding starts firing, or is firing with no watch of either kind", () => {
+    expect(opensPlacebo("courier_for_city", true, { placebo: true, real: true })).toBe(true);
+    expect(opensPlacebo("courier_for_city", false, none)).toBe(true);
+  });
+  it("not while an episode already has one, or after a click", () => {
+    expect(opensPlacebo("courier_for_city", false, { placebo: true, real: false })).toBe(false);
+    expect(opensPlacebo("courier_for_city", false, { placebo: false, real: true })).toBe(false);
+  });
+  it("never for informational findings", () => {
+    expect(opensPlacebo("margin_ceiling", true, none)).toBe(false);
   });
 });
