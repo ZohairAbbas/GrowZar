@@ -75,7 +75,8 @@ function scenario(sb: Rate, sa: Rate, rb: Rate | null, ra: Rate | null): Scenari
 export type Verdict = "too_early" | "improved" | "no_change" | "worse" | "not_enough_data";
 
 export type RateEffect = {
-  metric: "return_rate";
+  /** What the bad side counts: returns, missing fees, orders outside Courierify, checkouts not followed up. */
+  metric: string;
   /** Percent, one decimal, decided orders only: what the card line shows. */
   before: { subject: number | null; rest: number | null };
   after: { subject: number | null; rest: number | null };
@@ -98,14 +99,14 @@ const pct1 = (r: Rate) => (r.decided ? Math.round((1000 * r.returned) / r.decide
 const pts = (x: number) => Math.round(x * 1000) / 10;
 
 /** The numbers, whether or not it is time to judge. */
-export function rateEffect(before: WindowTally, after: WindowTally): RateEffect {
+export function rateEffect(before: WindowTally, after: WindowTally, metric = "return_rate"): RateEffect {
   const cmp = !!(before.rest && after.rest);
   // Against the claim of fewer returns: the subject's after-orders return, its before-orders deliver; the comparison the other way.
   const pess = scenario(asDelivered(before.subject), asReturned(after.subject), cmp ? asReturned(before.rest!) : null, cmp ? asDelivered(after.rest!) : null);
   const opt = scenario(asReturned(before.subject), asDelivered(after.subject), cmp ? asDelivered(before.rest!) : null, cmp ? asReturned(after.rest!) : null);
   const mid = scenario(central(before.subject), central(after.subject), cmp ? central(before.rest!) : null, cmp ? central(after.rest!) : null);
   return {
-    metric: "return_rate",
+    metric,
     before: { subject: pct1(central(before.subject)), rest: before.rest ? pct1(central(before.rest)) : null },
     after: { subject: pct1(central(after.subject)), rest: after.rest ? pct1(central(after.rest)) : null },
     tallies: { before, after },

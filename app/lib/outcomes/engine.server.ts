@@ -30,6 +30,8 @@ import {
   verdictOf,
   type Verdict,
 } from "./measure";
+import { STATE_BASED, type StateVerdict } from "./state";
+import { measureStateWatch, type StateEnv } from "./state.server";
 
 /**
  * The measurement engine for order-based detectors (G-GZR9-2): the worker
@@ -40,9 +42,9 @@ import {
 
 const DAY_MS = 86_400_000;
 export type Watch = { id: string; detector: string; subject: string; actedAt: Date; baseline: Prisma.JsonValue; checkpoints: Prisma.JsonValue };
-type Checkpoint = { day: number; at: string; decided: number; orders: number };
+type Checkpoint = { day: number; at?: string; decided?: number; orders?: number };
 
-export type Measured = { watches: number; judged: number; ms: number; results: Array<{ id: string; detector: string; verdict: Verdict; effect: Record<string, unknown> }> };
+export type Measured = { watches: number; judged: number; ms: number; results: Array<{ id: string; detector: string; verdict: StateVerdict; effect: Record<string, unknown> }> };
 
 /**
  * `extra`: watches to measure that are not stored (the replay, G-GZR9-6);
@@ -52,7 +54,7 @@ export async function measureStore(storeId: string, now = new Date(), opts: { wr
   const started = Date.now();
   const write = opts.write ?? true;
   const stored: Watch[] = await prisma.insightOutcome.findMany({
-    where: { storeId, closedAt: null, judgedAt: null, detector: { in: [...ORDER_BASED] } },
+    where: { storeId, closedAt: null, judgedAt: null, detector: { in: [...ORDER_BASED, ...STATE_BASED] } },
     select: { id: true, detector: true, subject: true, actedAt: true, baseline: true, checkpoints: true },
   });
   const watches = [...stored, ...(opts.extra ?? [])];
@@ -69,6 +71,7 @@ export async function measureStore(storeId: string, now = new Date(), opts: { wr
   const ctx: GroupContext | null = currency ? { currency, ...(await sideData(storeId, kinds, orders)) } : null;
   const returnCost = await loadReturnCost(storeId, currency);
   const today = localDayOf(now, tz);
+  const stateEnv: StateEnv = { storeId, currency, orders, ordersById: new Map(orders.map((o) => [o.orderId, o])), today, now, cache: {} };
 
   let judged = 0;
   for (const w of watches) {
@@ -76,14 +79,22 @@ export async function measureStore(storeId: string, now = new Date(), opts: { wr
     if (today <= actedDay) continue;
     const win = windowsOf(actedDay, historyFrom);
     const finding = findingOf(w.baseline);
-    const checkpoints = (Array.isArray(w.checkpoints) ? w.checkpoints : []) as Checkpoint[];
+    let checkpoints = (Array.isArray(w.checkpoints) ? w.checkpoints : []) as Checkpoint[];
     let effect: Record<string, unknown>;
-    let verdict: Verdict;
+    let verdict: StateVerdict;
     let money: Record<string, unknown> | null = null;
     let progress = { decided: 0, orders: 0 };
     const daysSince = (now.getTime() - w.actedAt.getTime()) / DAY_MS;
 
-    if (!ctx) {
+    let followed = false;
+    if (STATE_BASED.has(w.detector)) {
+      const r = await measureStateWatch(stateEnv, w, win);
+      ({ effect, verdict, money, progress } = r);
+      if (r.checkpoints) {
+        checkpoints = r.checkpoints as Checkpoint[];
+        followed = true;
+      }
+    } else if (!ctx) {
       effect = { reason: "the store's currency has not been reported" };
       verdict = daysSince >= CUTOFF_DAYS ? "not_enough_data" : "too_early";
     } else if (w.detector === "product_loss") {
@@ -105,7 +116,7 @@ export async function measureStore(storeId: string, now = new Date(), opts: { wr
       }
     }
 
-    for (const day of [EARLY_DAYS, AFTER_DAYS, CUTOFF_DAYS]) {
+    for (const day of followed ? [] : [EARLY_DAYS, AFTER_DAYS, CUTOFF_DAYS]) {
       if (daysSince >= day && !checkpoints.some((c) => c.day === day)) checkpoints.push({ day, at: now.toISOString(), ...progress });
     }
     const final = verdict !== "too_early";
