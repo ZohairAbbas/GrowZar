@@ -124,7 +124,11 @@ export default function Ask({ loaderData }: Route.ComponentProps) {
     setConversationId(conversation?.id ?? null);
   }, [conversation?.id]);
   useEffect(() => () => inflight.current?.abort(), []);
-  useEffect(() => end.current?.scrollIntoView({ behavior: "smooth", block: "end" }), [turns.length]);
+  // Braces, not an expression: in Chrome 154 scrollIntoView returns a Promise, and an effect's
+  // return value is its cleanup, which React then calls ("y is not a function", 2026-10-19).
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [turns.length]);
 
   async function ask(question: string) {
     const text = question.trim();
