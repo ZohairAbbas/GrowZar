@@ -6,7 +6,9 @@ import {
   ScrollRestoration,
   isRouteErrorResponse,
 } from "react-router";
+import { useEffect } from "react";
 import type { Route } from "./+types/root";
+import { reportClientError } from "~/lib/client-error";
 import "./styles/globals.css";
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -33,6 +35,9 @@ export default function App() {
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   const routeError = isRouteErrorResponse(error) ? error : null;
+  useEffect(() => {
+    if (!routeError) reportClientError(error);
+  }, [error, routeError]);
 
   // A 403 is a normal outcome here, not a crash: it is what a direct URL to
   // another store's data returns for a member scoped away from it (G-GZR-2).
