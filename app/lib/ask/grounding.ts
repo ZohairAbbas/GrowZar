@@ -15,7 +15,8 @@ import type { ToolResult } from "./types";
  *  - k / thousand / lakh / million / crore / billion, at the precision shown
  *    ("PKR 1.7 million" for 1,710,860.20);
  *  - Eastern Arabic and Persian digits (Urdu script).
- * Dates are checked by their parts, and "table N" citations are not figures.
+ * Dates are checked by their parts; "table N" citations and the preset
+ * periods ("the last 30 days") are not figures.
  * A bare whole number up to 10 with no % or decimals is let through: answers
  * count things ("3 products", "two of the 5 couriers"), and such counts are
  * shown in the table beside them.
@@ -49,6 +50,8 @@ export function asciiDigits(s: string): string {
 }
 
 const DATE = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
+/** The screens' preset periods, as a sentence names them ("the last 30 days", "pichle 7 din"): a period, not a figure. */
+const PRESET_PERIOD = /\b(?:last|past|previous|recent|pichle|pichhle|pichlay|pichhlay|guzishta)\s+(?:7|30|60|90)\s*(?:days?|din|dinon)\b/gi;
 const CITATION = /\(?\btables?\s+\d+(?:\s*(?:,|and|aur|&|-|–)\s*\d+)*\)?/gi;
 const NUMBER = /(?<![\w#.])([-−]?)(\d{1,3}(?:,\d{2,3})+|\d+)(?:\.(\d+))?(?:\s?(k|thousand|hazaa?r|lakhs?|lac|mn|million|crores?|cr|bn|billion|arab)\b)?(\s?%)?(?:\s?([a-z]+))?/gi;
 /** "Rs.5,000", "PKR5000": a currency written against its amount is split off, so the amount is read. */
@@ -69,7 +72,7 @@ export type Found = {
 
 /** The numbers a text states, with how precisely it states them. */
 export function numbersIn(raw: string): Found[] {
-  const text = asciiDigits(raw).replace(CITATION, " ").replace(CURRENCY_AGAINST, "$1 ").replace(DATE, (_m, y, mo, d) => ` ${y} ${mo} ${d} `);
+  const text = asciiDigits(raw).replace(CITATION, " ").replace(PRESET_PERIOD, " ").replace(CURRENCY_AGAINST, "$1 ").replace(DATE, (_m, y, mo, d) => ` ${y} ${mo} ${d} `);
   const out: Found[] = [];
   for (const m of text.matchAll(NUMBER)) {
     const [, sign, int, frac, scaleWord, pct, after] = m;

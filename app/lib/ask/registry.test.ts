@@ -361,6 +361,12 @@ describe("empty and thin data", () => {
     expect(r.status).toBe("invalid");
   });
 
+  it("refuses to compare a period with itself or an overlapping one", async () => {
+    const r = await run("compare_periods", { store: "s1", metrics: ["orders"], by: "none", period: { days: 30, from: null, to: null }, against: { days: 30, from: null, to: null }, filters: null, order: null, limit: null });
+    expect(r.status).toBe("invalid");
+    expect(r.title).toMatch(/must end before this one starts/);
+  });
+
   it("withdraws a comparison against days before the store's history", async () => {
     const r = await run("compare_periods", { store: "s1", metrics: ["orders"], by: "none", period: null, against: { days: null, from: "2026-07-01", to: "2026-07-30" }, filters: null, order: null, limit: null });
     expect(r.status).toBe("not_enough_data");

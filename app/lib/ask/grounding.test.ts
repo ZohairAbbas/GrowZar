@@ -73,6 +73,13 @@ describe("ground", () => {
     expect(ground("Variant 45678 sold well.", sources).grounded).toBe(false);
   });
 
+  it("reads a preset period as a period, but not a percentage of the same number", () => {
+    expect(ground("I can't show that for the last 30 days, or pichle 90 din.", []).grounded).toBe(true);
+    expect(ground("Returns rose 30%.", []).grounded).toBe(false);
+    // Only a period named as one ("last", "pichle"): "pays every 30 days" is a figure.
+    expect(ground("Leopards pays every 30 days.", []).grounded).toBe(false);
+  });
+
   it("lets small counts through but not small percentages", () => {
     expect(ground("Two of the 4 products lost money.", SOURCES).grounded).toBe(true);
     expect(ground("Returns rose 4%.", SOURCES).grounded).toBe(false);
