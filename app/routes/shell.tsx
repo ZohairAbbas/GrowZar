@@ -1,5 +1,5 @@
-import { Fragment } from "react";
-import { Form, Link, NavLink, Outlet, useLocation } from "react-router";
+import { Fragment, useEffect } from "react";
+import { Form, Link, NavLink, Outlet, isRouteErrorResponse, useLocation, useRouteError } from "react-router";
 import {
   BarChart3,
   Boxes,
@@ -22,6 +22,7 @@ import {
 
 import type { Route } from "./+types/shell";
 import { auth } from "~/lib/auth.server";
+import { reportClientError } from "~/lib/client-error";
 import { readStoreCookie } from "~/lib/store-cookie.server";
 import { prisma } from "~/lib/db.server";
 import { askEnabled } from "~/lib/ask/loop.server";
@@ -357,6 +358,11 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
 }
 
 export function ErrorBoundary() {
+  const error = useRouteError();
+  // A crash in the browser is sent to the server log; a loader's is logged there already.
+  useEffect(() => {
+    if (!isRouteErrorResponse(error)) reportClientError(error);
+  }, [error]);
   return (
     <main className="mx-auto max-w-lg px-6 py-24">
       <h1 className="font-display text-3xl font-bold tracking-tight">Something went wrong</h1>
