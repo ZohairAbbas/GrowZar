@@ -69,7 +69,8 @@ export async function action({ request }: Route.ActionArgs) {
     },
   });
   return new Response(stream, {
-    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" },
+    // no-transform: server.js's compression would otherwise hold the stream back until it fills a gzip block.
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no" },
   });
 }
 
