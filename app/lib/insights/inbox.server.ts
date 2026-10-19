@@ -32,6 +32,8 @@ import type { InsightAction } from "./actions";
 import { itemsOf } from "../outcomes/items";
 import { closesWatch, opensPlacebo, PLACEBO, type FindingSnapshot, type Trigger } from "../outcomes/watch";
 import { closeWatches, openPlacebo, openWatch } from "../outcomes/watch.server";
+import type { OutcomeLine } from "../outcomes/line";
+import { latestLineByInsight } from "../outcomes/results.server";
 
 /**
  * The insight inbox (G-GZR3-3): evaluation in the worker, and Home's view.
@@ -217,6 +219,8 @@ export type InboxView = {
   canManage: boolean;
   /** The store's connected apps, so a card can offer the app screen that fixes it, or the install (G-GZR6-2). */
   connected: string[];
+  /** What happened since someone acted on a shown finding, by insight id (G-GZR9-5). */
+  outcomes: Record<string, OutcomeLine>;
 };
 
 const APP_NAMES: Record<App, string> = { COURIERIFY: "Courierify", FINANCIFY: "Financify", INVENTORIFY: "Inventorify", RETAINIFY: "Retainify", PREVENTIFY: "Preventify", WHATKABOT: "WhatKaBot" };
@@ -297,6 +301,7 @@ export async function inboxView(
     ),
     canManage: viewer.canManage,
     connected: [...connected],
+    outcomes: await latestLineByInsight(s.store.id, items.map((i) => i.id), viewer),
   };
 }
 

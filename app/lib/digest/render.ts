@@ -19,7 +19,10 @@ export type DigestRow = {
 
 export type DigestAppLead = { appName: string; headline: string; body: string; link: DigestLink };
 
-export type DigestStoreBlock = { name: string; rows: DigestRow[]; app: DigestAppLead | null };
+/** One outcome measured this week (G-GZR9-5): the same sentence as the card and Results. */
+export type DigestResult = { text: string; link: DigestLink };
+
+export type DigestStoreBlock = { name: string; rows: DigestRow[]; app: DigestAppLead | null; results?: DigestResult[] };
 
 export type DigestEmail = {
   recipientName: string | null;
@@ -75,6 +78,14 @@ function appHtml(a: DigestAppLead): string {
           </td></tr>`;
 }
 
+function resultHtml(r: DigestResult): string {
+  return `
+          <tr><td style="padding:12px 0;border-top:1px solid #f1f5f9;">
+            <p style="margin:0;font-size:14px;color:#374151;line-height:1.5;">${esc(r.text)}</p>
+            <p style="margin:8px 0 0;">${textLink(r.link)}</p>
+          </td></tr>`;
+}
+
 function storeHtml(s: DigestStoreBlock, multi: boolean): string {
   return `
       <tr><td style="padding:24px 32px 8px;">
@@ -82,6 +93,7 @@ function storeHtml(s: DigestStoreBlock, multi: boolean): string {
           ${multi ? `<tr><td style="padding:0 0 4px;font-size:13px;font-weight:700;color:#6b7280;">${esc(s.name)}</td></tr>` : ""}
           ${s.rows.length ? `<tr><td style="padding:0 0 4px;font-size:18px;font-weight:700;color:#111827;">Needs your attention</td></tr>${s.rows.map(rowHtml).join("")}` : ""}
           ${s.app ? `<tr><td style="height:${s.rows.length ? 16 : 0}px;"></td></tr>${appHtml(s.app)}` : ""}
+          ${s.results?.length ? `<tr><td style="padding:20px 0 4px;font-size:18px;font-weight:700;color:#111827;">Measured this week</td></tr>${s.results.map(resultHtml).join("")}` : ""}
         </table>
       </td></tr>`;
 }
@@ -129,6 +141,10 @@ export function renderDigest(d: DigestEmail): { subject: string; html: string; t
       }
     }
     if (s.app) lines.push(`Next app for your store: ${s.app.appName}`, s.app.headline, s.app.body, `${s.app.link.label}: ${s.app.link.href}`, "");
+    if (s.results?.length) {
+      lines.push("Measured this week", "");
+      for (const r of s.results) lines.push(`* ${r.text}`, `  ${r.link.label}: ${r.link.href}`, "");
+    }
   }
   lines.push(
     `Open Growzar: ${d.homeUrl}`,

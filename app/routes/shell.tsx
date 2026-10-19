@@ -16,6 +16,7 @@ import {
   Users,
   Wallet,
   Lightbulb,
+  Activity,
 } from "lucide-react";
 
 import type { Route } from "./+types/shell";
@@ -270,6 +271,21 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
                   >
                     <Lightbulb className="h-[18px] w-[18px] flex-shrink-0 group-[.active]:text-mint" />
                     <span className="flex-1 truncate">Insights</span>
+                  </NavLink>
+                ) : null}
+                {/* What happened after findings were acted on (G-GZR9-5), also under Home. */}
+                {item.section === "home" ? (
+                  <NavLink
+                    to="/results"
+                    className={({ isActive }) =>
+                      cn(
+                        "group flex items-center gap-3 rounded-full px-3.5 py-2.5 text-sm transition",
+                        isActive ? "active bg-navy font-semibold text-white" : "font-medium text-gray-700 hover:bg-field",
+                      )
+                    }
+                  >
+                    <Activity className="h-[18px] w-[18px] flex-shrink-0 group-[.active]:text-mint" />
+                    <span className="flex-1 truncate">Results</span>
                   </NavLink>
                 ) : null}
                 </Fragment>

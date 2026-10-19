@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useFetcher } from "react-router";
-import { ExternalLink, ArrowRight, Database, Lightbulb, Mail, Package, Target, Truck, Undo2, Wallet, X } from "lucide-react";
+import { Activity, ExternalLink, ArrowRight, Database, Lightbulb, Mail, Package, Target, Truck, Undo2, Wallet, X } from "lucide-react";
 
 import type {
   CashHeldFinding,
@@ -28,6 +28,7 @@ import type { NetworkRiskFinding, ReturnersFinding } from "~/lib/metrics/buyer-h
 import type { CampaignReturnsFinding } from "~/lib/metrics/campaign-acquisition";
 import { MIN_DECIDED as MIN_CONTACT_DECIDED } from "~/lib/metrics/buyer-contact";
 import type { InboxItem, InboxView } from "~/lib/insights/inbox.server";
+import type { OutcomeLine } from "~/lib/outcomes/line";
 import { DISMISS_REASONS } from "~/lib/insights/actions";
 import { firstAction } from "~/lib/apps/app-links";
 import { MoneyList, outcomeLabel } from "./Metrics";
@@ -59,6 +60,29 @@ import {
 const Area = createContext<Finding["kind"] | null>(null);
 /** The store's connected apps, for the button into the app that fixes a card (G-GZR6-2). */
 const Connected = createContext<ReadonlySet<string>>(new Set());
+/** What happened since someone acted on each shown finding (G-GZR9-5), by insight id. */
+const Outcomes = createContext<Record<string, OutcomeLine>>({});
+
+/**
+ * One outcome line under a finding (pack §13): the numbers and what the
+ * store changed, never a verdict; links to the insight's history.
+ */
+export function OutcomeNote({ line, compact = false }: { line: OutcomeLine | undefined; compact?: boolean }) {
+  if (!line || line.status === "hidden") return null;
+  return (
+    <div className={`flex items-start gap-2 rounded-xl bg-field ${compact ? "mt-2 p-2.5 text-xs" : "mt-3 p-3 text-sm"} text-gray-700`}>
+      <Activity className={`${compact ? "h-3.5 w-3.5" : "h-4 w-4"} mt-0.5 flex-shrink-0 text-accent-600`} aria-hidden="true" />
+      <p className={compact ? "line-clamp-3" : undefined}>
+        {line.internal ? <span className="mr-1 rounded bg-gray-200 px-1.5 py-0.5 text-[11px] font-bold text-gray-600">Internal</span> : null}
+        {line.text}
+        {line.money ? <span className="font-semibold text-gray-900"> · {line.money}</span> : null}{" "}
+        <Link to={`/insights/${line.insightId}`} className="whitespace-nowrap font-semibold text-accent-600 hover:underline">
+          History →
+        </Link>
+      </p>
+    </div>
+  );
+}
 
 
 /** "Set up … in <app>" when the app is connected, "Install <app>" when it isn't; through the act route, which records it. */
@@ -898,7 +922,9 @@ export const parseInsightsTab = (v: string | null): InsightsTab =>
 export function AttentionList(props: { inbox: InboxView; period: string }) {
   return (
     <Connected.Provider value={new Set(props.inbox.connected)}>
-      <AttentionListInner {...props} />
+      <Outcomes.Provider value={props.inbox.outcomes ?? {}}>
+        <AttentionListInner {...props} />
+      </Outcomes.Provider>
     </Connected.Provider>
   );
 }
@@ -908,6 +934,7 @@ function AttentionListInner({ inbox, period }: { inbox: InboxView; period: strin
   const shown = action.slice(0, ATTENTION_ROWS);
   const total = inbox.items.length + inbox.overflow;
   const details = useDetails(inbox.items, period, inbox.canManage);
+  const outcomes = useContext(Outcomes);
   return (
     <section aria-labelledby="attention-heading" className="space-y-3">
       <div className="flex items-baseline justify-between gap-3">
@@ -941,6 +968,7 @@ function AttentionListInner({ inbox, period }: { inbox: InboxView; period: strin
                   </button>
                   <p className="line-clamp-2 text-sm text-gray-500">{s.next ?? s.why ?? s.note}</p>
                   <AppActionLink id={item.id} finding={item.insight.finding} variant="text" />
+                  <OutcomeNote line={outcomes[item.id]} compact />
                 </div>
                 <p className="col-start-2 font-display text-xl font-bold tabular-nums text-gray-900 md:col-start-auto md:text-right">
                   {s.figure}
@@ -985,7 +1013,9 @@ function AttentionListInner({ inbox, period }: { inbox: InboxView; period: strin
 export function InsightsBoard(props: { inbox: InboxView; period: string; tab: InsightsTab }) {
   return (
     <Connected.Provider value={new Set(props.inbox.connected)}>
-      <InsightsBoardInner {...props} />
+      <Outcomes.Provider value={props.inbox.outcomes ?? {}}>
+        <InsightsBoardInner {...props} />
+      </Outcomes.Provider>
     </Connected.Provider>
   );
 }
@@ -1082,6 +1112,7 @@ function InsightsBoardInner({ inbox, period, tab }: { inbox: InboxView; period: 
 /** The full card for a finding: everything it measured and left out. Shown in Details. */
 function FullCard({ item, period, canManage }: { item: InboxItem; period: string; canManage: boolean }) {
   const { id, insight } = item;
+  const outcome = useContext(Outcomes)[id];
   const props = { id, period, canManage };
   const f = insight.finding;
   const card = (() => {
@@ -1129,6 +1160,7 @@ function FullCard({ item, period, canManage }: { item: InboxItem; period: string
   return (
     <Area.Provider value={f.kind}>
       {card}
+      <OutcomeNote line={outcome} />
       <div className="mt-3 flex justify-end">
         <AppActionLink id={id} finding={f} variant="button" />
       </div>
@@ -1149,6 +1181,7 @@ function CompactCard({ item, period, onDetails }: { item: InboxItem; period: str
   const s = summaryOf(f, period);
   const area = AREAS[f.kind];
   const urgency = URGENCY[insight.rank.group];
+  const outcome = useContext(Outcomes)[id];
   return (
     <article className="flex h-full flex-col rounded-2xl bg-white p-5">
       <div className="flex items-center justify-between gap-2">
@@ -1172,6 +1205,7 @@ function CompactCard({ item, period, onDetails }: { item: InboxItem; period: str
       <p className="mt-3 flex items-center gap-1.5 text-sm text-gray-600">
         <Target className="h-4 w-4 text-gray-400" /> Affects {s.affects}
       </p>
+      <OutcomeNote line={outcome} compact />
       <div className="mt-auto flex items-center gap-2 pt-4">
         {s.link ? (
           <Link

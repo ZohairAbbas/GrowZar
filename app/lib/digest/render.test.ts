@@ -65,3 +65,18 @@ describe("digestSubject", () => {
     expect(digestSubject({ stores: [{ ...email.stores[0]!, rows: [] }] })).toBe("Your week at Test Store");
   });
 });
+
+describe("outcomes measured this week (G-GZR9-5)", () => {
+  const result = { text: "Since you looked at this on 20 Oct, Lahore's return rate went from 39.2% to 21%, across 152 orders.", link: { href: "https://app.example/insights/i1?from=digest", label: "History" } };
+  it("adds a section with each sentence and its history link, escaped, in HTML and text", () => {
+    const d = renderDigest({ ...email, stores: [{ name: "Store <b>", rows: [], app: null, results: [{ ...result, text: `${result.text} <script>` }] }] });
+    expect(d.html).toContain("Measured this week");
+    expect(d.html).toContain("across 152 orders. &lt;script&gt;");
+    expect(d.html).not.toContain("<script>");
+    expect(d.text).toContain("Measured this week");
+    expect(d.text).toContain("History: https://app.example/insights/i1?from=digest");
+  });
+  it("leaves the section out when nothing was measured", () => {
+    expect(renderDigest({ ...email, stores: [{ name: "S", rows: [], app: null, results: [] }] }).html).not.toContain("Measured this week");
+  });
+});

@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { ArrowRight } from "lucide-react";
+import { Activity, ArrowRight } from "lucide-react";
 import type { AppPrompt } from "~/lib/metrics/next-app";
 import { SUITE_APPS } from "~/lib/apps/app-links";
 import { figuresText, riskLabel, type BuyerNetworkLine } from "~/lib/metrics/buyer-network";
@@ -51,21 +51,41 @@ export function HomePanel({
   cards,
   period,
   nextApp,
+  results,
 }: {
   view: HomeView;
   inbox: InboxView;
   cards: { cash: FinanceDepth["cash"] | null; outcomes: ShippingDepth["outcomes"] };
   period: { from: string; to: string; query: string };
   nextApp?: { storeId: string; prompts: AppPrompt[] } | null;
+  results?: { watched: number; measured: number; watching: number; changed: number } | null;
 }) {
   return (
     <section className="space-y-6">
       <AttentionList inbox={inbox} period={period.query} />
+      {results?.measured ? <ResultsRow results={results} /> : null}
       {nextApp ? <NextAppCard storeId={nextApp.storeId} prompts={nextApp.prompts} /> : null}
       <HomeTiles view={view} period={period.query} />
       {cards.cash ? <CashTimelineCard cash={cards.cash} period={period.query} scope="" compact /> : null}
       <OutcomesChart days={cards.outcomes} period={period.query} compact />
     </section>
+  );
+}
+
+/** Home's one Results row (G-GZR9-5), once anything acted on has been measured. */
+function ResultsRow({ results }: { results: { watched: number; measured: number; watching: number; changed: number } }) {
+  const k = (x: number) => x.toLocaleString("en-GB");
+  return (
+    <Link to="/results" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white px-5 py-4 hover:bg-field">
+      <span className="flex items-center gap-2 font-semibold text-gray-900">
+        <Activity className="h-[18px] w-[18px] text-accent-600" aria-hidden="true" /> Results
+      </span>
+      <span className="text-sm text-gray-600">
+        {k(results.measured)} measured · {k(results.watching)} still measuring
+        {results.changed ? ` · ${k(results.changed)} with a change seen` : ""}
+      </span>
+      <span className="text-sm font-semibold text-accent-600">See results →</span>
+    </Link>
   );
 }
 

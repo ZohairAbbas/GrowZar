@@ -50,8 +50,7 @@ export default [
 
   route("switch", "routes/switch.ts"),
 
-  // The insight inbox's actions and click-through (G-GZR3-3).
-  route("insights/:insightId", "routes/insights.$insightId.tsx"),
+  // The insight inbox's click-through (G-GZR3-3).
   route("insights/:insightId/open", "routes/insights.$insightId.open.tsx"),
   // A card's button into the app that fixes it, or its App Store page (G-GZR6-2).
   route("insights/:insightId/act", "routes/insights.$insightId.act.tsx"),
@@ -71,6 +70,10 @@ export default [
     route("compare", "routes/compare.tsx"),
     // Every finding, in tabs; Home shows only what needs action.
     route("insights", "routes/insights._index.tsx"),
+    // One insight's history, and its actions: dismiss, snooze, reopen, "this wasn't us" (G-GZR3-3, G-GZR9-5).
+    route("insights/:insightId", "routes/insights.$insightId.tsx"),
+    // What happened after findings were acted on, per store and organization (G-GZR9-5).
+    route("results", "routes/results.tsx"),
   ]),
 
   layout("routes/settings.tsx", [
