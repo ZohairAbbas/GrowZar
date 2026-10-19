@@ -72,14 +72,16 @@ export function OutcomeNote({ line, compact = false }: { line: OutcomeLine | und
   return (
     <div className={`flex items-start gap-2 rounded-xl bg-field ${compact ? "mt-2 p-2.5 text-xs" : "mt-3 p-3 text-sm"} text-gray-700`}>
       <Activity className={`${compact ? "h-3.5 w-3.5" : "h-4 w-4"} mt-0.5 flex-shrink-0 text-accent-600`} aria-hidden="true" />
-      <p className={compact ? "line-clamp-3" : undefined}>
-        {line.internal ? <span className="mr-1 rounded bg-gray-200 px-1.5 py-0.5 text-[11px] font-bold text-gray-600">Internal</span> : null}
-        {line.text}
-        {line.money ? <span className="font-semibold text-gray-900"> · {line.money}</span> : null}{" "}
+      <div className="min-w-0">
+        <p className={compact ? "line-clamp-3" : undefined}>
+          {line.internal ? <span className="mr-1 rounded bg-gray-200 px-1.5 py-0.5 text-[11px] font-bold text-gray-600">Internal</span> : null}
+          {line.text}
+          {line.money ? <span className="font-semibold text-gray-900"> · {line.money}</span> : null}
+        </p>
         <Link to={`/insights/${line.insightId}`} className="whitespace-nowrap font-semibold text-accent-600 hover:underline">
           History →
         </Link>
-      </p>
+      </div>
     </div>
   );
 }

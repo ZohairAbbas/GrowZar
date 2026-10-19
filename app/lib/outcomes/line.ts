@@ -145,7 +145,7 @@ export function outcomeLine(w: WatchRow, opts: { timezone: string; canSeeMoney: 
     // What the store changed shows as soon as it is seen, before any numbers are final.
     const seen = signal ? ` · seen since: ${signal}` : "";
     if (typeof e.reason === "string" && !e.progress && !e.items) {
-      return { ...base, status: "watching", text: `Opened ${since}. It can't be measured: ${e.reason}.` };
+      return { ...base, status: "watching", text: `Opened ${since}. It can't be measured: ${e.reason}.${signal ? ` Seen since: ${signal}.` : ""}` };
     }
     if (followed && typeof e.items === "number") {
       return { ...base, status: "watching", text: `Watching since ${since} · ${n(e.resolvedNow ?? 0)} of ${n(e.items)} ${followed.items} ${followed.done} so far${seen}` };

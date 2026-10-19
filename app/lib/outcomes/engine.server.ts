@@ -209,7 +209,9 @@ async function measureProduct(
   const a: ProfitWindow | null = afterAds === null ? null : productProfit(orders, variantId, currency, win.after, AFTER_DAYS, afterAds, now);
   const progress = a ? { decided: a.decided, orders: a.orders } : { decided: 0, orders: 0 };
   const tm = timing(actedAt, win.after.to, today, now, progress);
-  const effect = { metric: "profit_per_30_days", currency, before: b, after: a, windows: win, calibrated: false, ...(!b || !a ? { reason: "ad spend per product is not fetched for every day of both windows" } : {}) };
+  // Days after acting can't all be fetched before they happen: only a closed window can lack them.
+  const missing = !b || (tm.afterClosed && !a);
+  const effect = { metric: "profit_per_30_days", currency, before: b, after: a, windows: win, calibrated: false, ...(missing ? { reason: "ad spend per product is not fetched for every day of both windows" } : {}) };
   if (!tm.judge) return { effect, verdict: "too_early", money: null, progress };
   // A product that stopped selling has nothing to settle: its after window is judged as it stands.
   const v = b && a ? productVerdict(b, a) : null;
