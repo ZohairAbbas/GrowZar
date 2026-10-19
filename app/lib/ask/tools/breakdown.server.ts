@@ -47,6 +47,7 @@ export const breakdownSchema = z
     filters: filtersArg,
     variant: z.string().nullable().describe("Only orders containing this variant id (from a previous result's key). Counts and rates only."),
     order: z.enum(["top", "bottom"]).nullable().describe("top: highest first (default); bottom: lowest first. Time dimensions are always in date order."),
+    only: z.enum(["negative", "positive"]).nullable().describe('Keep only rows whose first metric is below zero ("which products lost money") or above it. Null for all rows.'),
     limit: limitArg,
   })
   .strict();
@@ -215,6 +216,7 @@ export async function runBreakdown(args: Args, ctx: AskContext): Promise<ToolRes
     currency,
     labels,
     sort: time ? "time" : (args.order ?? "top"),
+    only: args.only,
     limit: Math.min(args.limit ?? (time ? 50 : 10), 50),
   });
 

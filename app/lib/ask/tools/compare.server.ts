@@ -144,6 +144,6 @@ export const comparePeriods: AskTool<typeof compareSchema> = {
   description:
     "Compare a period with an earlier one (default: the equal-length period just before) for any metric, in total or by a dimension, e.g. 'delivery rate this month vs last month' or 'which city's returns rose most'. Returns this period, the earlier period and the change.",
   schema: compareSchema,
-  sections: (args) => breakdown.sections({ ...args, variant: null }),
+  sections: (args) => breakdown.sections({ ...args, variant: null, only: null }),
   run: runCompare,
 };

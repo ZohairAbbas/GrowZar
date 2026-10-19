@@ -36,6 +36,8 @@ export default [
 
   // The event relay's front door (contract §7).
   route("api/v1/events", "routes/api.v1.events.ts"),
+  // "Talk to your data" (Phase 10): a question in, a stream of events out.
+  route("api/ask", "routes/api.ask.ts"),
 
   // "Open in Growzar" lands here with a signed claim token (contract §10).
   route("claim", "routes/claim.tsx"),

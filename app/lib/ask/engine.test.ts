@@ -136,3 +136,14 @@ describe("breakdownTable", () => {
     expect(t.rows[0]!.label).toBe("Leopards");
   });
 });
+
+describe("only negative or positive rows", () => {
+  it("keeps the rows below zero and says how many of all", () => {
+    const rows = [...month(), ...times(3, () => order({ city: "Multan", cityRaw: "Multan", outcome: "returned", delivered: null }))];
+    const s = slice(rows);
+    const table = profitTable("city", { rows, currency: "PKR", ads: 50_000_000_000n, maxRows: Infinity });
+    const t = breakdownTable({ groups: rawGroups({ ...s, profitBy: { product: table, city: table, courier: table, campaign: table } }, "city"), dimension: "city", metrics: ["profit"], currency: "PKR", labels: {}, sort: "bottom", limit: 10, only: "negative" });
+    expect(t.rows.every((r) => (r.profit as number) < 0)).toBe(true);
+    expect(t.notes[0]).toMatch(new RegExp(`^${t.total} of 3 rows have a negative profit`));
+  });
+});

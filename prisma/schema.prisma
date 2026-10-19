@@ -46,6 +46,10 @@ model Organization {
   digestSettings DigestSettings?
   digestSends    DigestSend[]
 
+  askSettings      AskSettings?
+  askConversations AskConversation[]
+  askUsage         AskUsageMonthly[]
+
   @@map("organizations")
 }
 
@@ -1166,4 +1170,89 @@ model DigestSend {
   @@index([organizationId, createdAt])
   @@index([memberId])
   @@map("digest_sends")
+}
+
+/// "Talk to your data" (Phase 10): whether an organization has it, and what
+/// it may spend a month. Off until an owner or admin turns it on (G-GZR10-6).
+model AskSettings {
+  organizationId   String    @id
+  enabled          Boolean   @default(false)
+  /// US dollars in millionths: 5000000 is $5 (B5, 2026-10-19).
+  monthlyCapMicros BigInt    @default(5000000)
+  changedByUserId  String?
+  changedAt        DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("ask_settings")
+}
+
+/// One thread of questions by one member.
+model AskConversation {
+  id             String   @id @default(uuid())
+  organizationId String
+  userId         String
+  /// The stores the member could see when it started.
+  storeIds       String[]
+  startedAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  messages     AskMessage[]
+
+  @@index([organizationId, userId, startedAt])
+  @@map("ask_conversations")
+}
+
+/// A question or an answer. Text and tool results are cleared after the
+/// retention period (B6, 90 days); usage, outcome and feedback stay.
+model AskMessage {
+  id              String    @id @default(uuid())
+  conversationId  String
+  /// user | assistant
+  role            String
+  text            String?
+  /// The tool calls and their (guarded, aggregate-only) results, in order.
+  toolCalls       Json?
+  /// The tools whose results the answer was drawn from.
+  toolResultRefs  String[]
+  model           String?
+  /// answered | refused | limit | disabled | timeout | error (assistant only)
+  status          String?
+  inputTokens     Int       @default(0)
+  cachedTokens    Int       @default(0)
+  outputTokens    Int       @default(0)
+  reasoningTokens Int       @default(0)
+  /// US dollars in millionths.
+  costMicros      BigInt    @default(0)
+  latencyMs       Int?
+  /// Every number in the text matched a tool result (G-GZR10-4); null until checked.
+  grounded        Boolean?
+  /// up | down
+  feedback        String?
+  feedbackNote    String?
+  redactedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  conversation AskConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([createdAt])
+  @@map("ask_messages")
+}
+
+/// What an organization's questions cost each month (UTC), for the cap.
+model AskUsageMonthly {
+  organizationId String
+  /// YYYY-MM, UTC.
+  month          String
+  questions      Int    @default(0)
+  inputTokens    BigInt @default(0)
+  cachedTokens   BigInt @default(0)
+  outputTokens   BigInt @default(0)
+  costMicros     BigInt @default(0)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, month])
+  @@map("ask_usage_monthly")
 }
