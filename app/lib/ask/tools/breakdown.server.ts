@@ -268,6 +268,9 @@ export const breakdown: AskTool<typeof breakdownSchema> = {
     // Buyers are the Customers section's; campaigns and channels Marketing's.
     if (args.metrics.includes("buyers") || args.by === "buyer_type") s.push("customers");
     if (args.by === "campaign" || args.by === "channel") s.push("marketing");
+    // A view by city or courier is the Shipping section's; by product, the Orders section's (its lines and variant filter).
+    if (args.by === "city" || args.by === "courier" || args.filters?.city || args.filters?.courier) s.push("shipping");
+    if (args.by === "product" || args.by === "variant" || args.variant) s.push("orders");
     return s;
   },
   run: runBreakdown,

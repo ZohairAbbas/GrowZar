@@ -301,6 +301,16 @@ describe("permissions", () => {
     expect(r.status).toBe("forbidden");
   });
 
+  it("asks for the section a breakdown's view belongs to", async () => {
+    const homeOnly = ctx({ sections: ["home"] });
+    const byCity = await run("breakdown", { store: "s1", metrics: ["orders"], by: "city", period: null, filters: null, variant: null, order: null, limit: null }, homeOnly);
+    expect(byCity.title).toMatch(/Shipping/);
+    const byProduct = await run("breakdown", { store: "s1", metrics: ["orders"], by: "product", period: null, filters: null, variant: null, order: null, limit: null }, homeOnly);
+    expect(byProduct.title).toMatch(/Orders/);
+    const total = await run("breakdown", { store: "s1", metrics: ["orders"], by: "none", period: null, filters: null, variant: null, order: null, limit: null }, homeOnly);
+    expect(total.status).toBe("ok");
+  });
+
   it("refuses a section the role lacks (staff: no Customers)", async () => {
     const r = await run("customers", { store: "s1", view: "repeat", period: null }, ctx({ sections: ["home", "orders", "shipping"] }));
     expect(r.status).toBe("forbidden");
