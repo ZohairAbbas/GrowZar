@@ -13,7 +13,8 @@ import { periodFrom } from "../metrics/screens.server";
 import { storeSummary } from "../metrics/summaries.server";
 import { loadStoreFacts } from "../metrics/next-app.server";
 import { nextAppPrompts, type PromptApp } from "../metrics/next-app";
-import { renderDigest, type DigestAppLead, type DigestRow } from "./render";
+import { renderDigest, type DigestAppLead, type DigestResult, type DigestRow } from "./render";
+import { outcomeLinesOf } from "../outcomes/results.server";
 import { unsubscribeUrl } from "./unsubscribe.server";
 import { isSendTime, weekLabel, weekOf } from "./week";
 
@@ -47,12 +48,14 @@ export type BuiltStore = {
   skipped: "stale" | "nothing" | null;
   rows: Array<{ insightId: string; fingerprint: string; detector: string; row: DigestRow }>;
   app: { app: PromptApp; lead: DigestAppLead } | null;
+  /** Outcomes measured in the last 7 days (G-GZR9-5), counted ones only. */
+  results: DigestResult[];
 };
 
 /** One store's part, for one level of money access. Records nothing. */
 export async function buildStore(store: StoreRow, canSeeMoney: boolean, now = new Date()): Promise<BuiltStore> {
   const name = store.displayName ?? store.shopDomain;
-  const empty = { storeId: store.id, name, rows: [], app: null };
+  const empty = { storeId: store.id, name, rows: [], app: null, results: [] };
   // The sync's own record of success (sync_state), for the apps still connected.
   // Not app_connections.lastSyncedAt: nothing writes that during a sync.
   const apps = await prisma.appConnection.findMany({ where: { storeId: store.id, status: "CONNECTED" }, select: { app: true } });
@@ -102,7 +105,18 @@ export async function buildStore(store: StoreRow, canSeeMoney: boolean, now = ne
       }
     : null;
 
-  return { storeId: store.id, name, skipped: rows.length || app ? null : "nothing", rows, app };
+  // What was measured this week (G-GZR9-5): never an internal account's watch,
+  // a placebo or a hidden one; money only as the page shows it (D-57).
+  const measured = await outcomeLinesOf([store.id], { userId: "", canSeeMoney, internal: false }, { judgedSince: new Date(now.getTime() - 7 * 86_400_000) });
+  const results: DigestResult[] = measured
+    .filter((l) => l.status === "measured")
+    .slice(0, ATTENTION_ROWS)
+    .map((l) => ({
+      text: l.money ? `${l.text} (${l.money})` : l.text,
+      link: { href: `${base()}/insights/${l.insightId}?from=digest`, label: "History" },
+    }));
+
+  return { storeId: store.id, name, skipped: rows.length || app || results.length ? null : "nothing", rows, app, results };
 }
 
 // ── Recipients ───────────────────────────────────────────────────────────────
@@ -229,7 +243,7 @@ export async function buildDigest(
     recipientName: r.name,
     organizationName,
     weekLabel: weekLabel(week),
-    stores: shown.map((b) => ({ name: b.name, rows: b.rows.map((x) => x.row), app: b.app?.lead ?? null })),
+    stores: shown.map((b) => ({ name: b.name, rows: b.rows.map((x) => x.row), app: b.app?.lead ?? null, results: b.results })),
     homeUrl: `${base()}/home`,
     settingsUrl: `${base()}/settings/digest`,
     // A test goes to the viewer, so its link must unsubscribe the viewer, not the member previewed.
@@ -248,6 +262,7 @@ const contentOf = (d: BuiltDigest | null): Prisma.InputJsonValue =>
         skipped: s.skipped,
         items: s.rows.map((x) => ({ insightId: x.insightId, fingerprint: x.fingerprint, detector: x.detector, headline: x.row.headline, figure: x.row.figure })),
         app: s.app ? { app: s.app.app, headline: s.app.lead.headline } : null,
+        results: s.results.map((r) => r.text),
       }))
     : [];
 

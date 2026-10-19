@@ -7,6 +7,8 @@ import { sectionPreview } from "~/lib/metrics/section-preview.server";
 import { SUITE_APPS, type LinkedApp } from "~/lib/apps/app-links";
 import { hasPermission, listVisibleStores, requireSection } from "~/lib/authorize.server";
 import { inboxView } from "~/lib/insights/inbox.server";
+import { resultCounts } from "~/lib/outcomes/line";
+import { outcomeLinesOf } from "~/lib/outcomes/results.server";
 import { SECTIONS, type Section } from "~/lib/permissions";
 import {
   APP_LABELS,
@@ -239,6 +241,8 @@ async function buildMetrics(
         inbox,
         // Cross-sell (G-GZR6-3): the store's own figures for the apps it lacks.
         nextApp: await nextAppSection(summary.store, new Set(inbox.connected), viewer),
+        // One Results row once anything is measured (G-GZR9-5).
+        results: resultCounts(await outcomeLinesOf([storeId], viewer)),
       };
     }
     case "finance":
@@ -371,7 +375,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             <DataHealth gaps={metrics.coverage.gaps} fx={metrics.view.fx} period={metrics.period.query} />
           </div>
         </header>
-        <HomePanel view={metrics.view} inbox={metrics.inbox} cards={metrics.cards} period={metrics.period} nextApp={metrics.nextApp} />
+        <HomePanel view={metrics.view} inbox={metrics.inbox} cards={metrics.cards} period={metrics.period} nextApp={metrics.nextApp} results={metrics.results} />
       </div>
     );
   }
