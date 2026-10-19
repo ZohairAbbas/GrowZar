@@ -101,60 +101,28 @@ async function reserve(organizationId: string, month: string, cap: bigint): Prom
   return rows.length > 0 && RESERVE_MICROS <= cap;
 }
 
-type Recorded = { name: string; args: unknown; table: number; result: ToolResult };
+export type Recorded = { name: string; args: unknown; table: number; result: ToolResult };
 
-export async function ask(opts: {
+/**
+ * The answer itself, with nothing stored and no gate: the model and the
+ * tools in turns, then the number check. `ask` wraps it with the gates and
+ * the record; the eval (scripts/ask-eval.ts) calls it directly.
+ */
+export async function answer(opts: {
   ctx: AskContext;
   question: string;
-  conversationId: string | null;
+  history: ReadonlyArray<{ role: "user" | "assistant"; text: string }>;
   activeStoreId: string | null;
   onEvent: (e: AskEvent) => void;
-  /** Scripts only (the eval): ask without the organization's switch being on, and past the hourly limit. The kill switch and the cap still apply. */
-  ignoreOrgSwitch?: boolean;
   signal?: AbortSignal;
-}): Promise<{ status: AskStatus; text: string; messageId: string | null }> {
-  const { ctx, onEvent } = opts;
-  const started = Date.now();
-  const question = opts.question.trim().slice(0, 2_000);
-  const finish = (status: AskStatus, text: string, messageId: string | null, usage = NO_USAGE, cost = 0) => {
-    onEvent({ type: "done", messageId, status, text, grounded: null, usage, costMicros: cost, latencyMs: Date.now() - started });
-    return { status, text, messageId };
-  };
-
-  const blocked = await gate(ctx.organizationId, ctx.userId, ctx.now, { ignoreOrgSwitch: opts.ignoreOrgSwitch, ignoreRateLimit: opts.ignoreOrgSwitch });
-  if (blocked) return finish(blocked, MESSAGES[blocked], null);
-  const { model, effort } = askModel();
-  // The conversation: the member's own, in this organization, or a new one.
-  const existing = opts.conversationId
-    ? await prisma.askConversation.findFirst({ where: { id: opts.conversationId, organizationId: ctx.organizationId, userId: ctx.userId } })
-    : null;
-  const conversation =
-    existing ?? (await prisma.askConversation.create({ data: { organizationId: ctx.organizationId, userId: ctx.userId, storeIds: ctx.stores.map((s) => s.id) } }));
-  onEvent({ type: "start", conversationId: conversation.id });
-  const history = existing
-    ? (
-        await prisma.askMessage.findMany({
-          where: { conversationId: conversation.id, text: { not: null }, OR: [{ role: "user" }, { status: "answered" }] },
-          orderBy: { createdAt: "desc" },
-          take: HISTORY_MESSAGES,
-          select: { role: true, text: true },
-        })
-      ).reverse()
-    : [];
-  await prisma.askMessage.create({ data: { conversationId: conversation.id, role: "user", text: question } });
-  // Counted again with this question in: a burst sent at once is each other's count.
-  if (!opts.ignoreOrgSwitch) {
-    const lastHour = await prisma.askMessage.count({
-      where: { role: "user", createdAt: { gte: new Date(ctx.now.getTime() - 3_600_000) }, conversation: { organizationId: ctx.organizationId, userId: ctx.userId } },
-    });
-    if (lastHour > RATE_LIMIT_PER_HOUR) return finish("rate_limited", MESSAGES.rate_limited, null);
-  }
-  const cap = (await prisma.askSettings.findUnique({ where: { organizationId: ctx.organizationId }, select: { monthlyCapMicros: true } }))?.monthlyCapMicros ?? 5_000_000n;
-  if (!(await reserve(ctx.organizationId, monthOf(ctx.now), cap))) return finish("limit", MESSAGES.limit, null);
-
+  /** The eval compares models; otherwise ASK_MODEL. */
+  model?: { model: string; effort: ReturnType<typeof askModel>["effort"] };
+}): Promise<{ status: AskStatus; text: string; usage: Usage; recorded: Recorded[]; grounding: Grounding | null; model: string }> {
+  const { ctx, onEvent, question } = opts;
+  const { model, effort } = opts.model ?? askModel();
   const tz = ctx.stores.find((s) => s.id === opts.activeStoreId)?.timezone ?? ctx.stores[0]?.timezone ?? "UTC";
   const input: Item[] = [
-    ...history.map((m) => (m.role === "user" ? userItem(m.text!) : assistantItem(m.text!))),
+    ...opts.history.map((m) => (m.role === "user" ? userItem(m.text) : assistantItem(m.text))),
     userItem(userTurn(ctx, question, opts.activeStoreId, localDayOf(ctx.now, tz))),
   ];
   const tools = toolSpecs();
@@ -240,13 +208,70 @@ export async function ask(opts: {
   let grounding: Grounding | null = null;
   if (status === "answered") {
     grounding = ground(text, sourceNumbers(recorded.map((r) => r.result), [question, localDayOf(ctx.now, tz)]));
-    if (!grounding.grounded) {
-      text = grounding.text;
-      console.warn(`[ask] ungrounded answer in conversation ${conversation.id}: ${grounding.unmatched.join(", ")}`);
-    }
-  } else if (status === "refused") {
-    console.warn(`[ask] refused in conversation ${conversation.id}`);
+    if (!grounding.grounded) text = grounding.text;
   }
+
+  return { status, text, usage, recorded, grounding, model };
+}
+
+export async function ask(opts: {
+  ctx: AskContext;
+  question: string;
+  conversationId: string | null;
+  activeStoreId: string | null;
+  onEvent: (e: AskEvent) => void;
+  /** Scripts only: ask without the organization's switch being on, and past the hourly limit. The kill switch and the cap still apply. (The eval calls `answer` instead.) */
+  ignoreOrgSwitch?: boolean;
+  signal?: AbortSignal;
+}): Promise<{ status: AskStatus; text: string; messageId: string | null }> {
+  const { ctx, onEvent } = opts;
+  const started = Date.now();
+  const question = opts.question.trim().slice(0, 2_000);
+  const finish = (status: AskStatus, text: string, messageId: string | null, usage = NO_USAGE, cost = 0) => {
+    onEvent({ type: "done", messageId, status, text, grounded: null, usage, costMicros: cost, latencyMs: Date.now() - started });
+    return { status, text, messageId };
+  };
+
+  const blocked = await gate(ctx.organizationId, ctx.userId, ctx.now, { ignoreOrgSwitch: opts.ignoreOrgSwitch, ignoreRateLimit: opts.ignoreOrgSwitch });
+  if (blocked) return finish(blocked, MESSAGES[blocked], null);
+  // The conversation: the member's own, in this organization, or a new one.
+  const existing = opts.conversationId
+    ? await prisma.askConversation.findFirst({ where: { id: opts.conversationId, organizationId: ctx.organizationId, userId: ctx.userId } })
+    : null;
+  const conversation =
+    existing ?? (await prisma.askConversation.create({ data: { organizationId: ctx.organizationId, userId: ctx.userId, storeIds: ctx.stores.map((s) => s.id) } }));
+  onEvent({ type: "start", conversationId: conversation.id });
+  const history = existing
+    ? (
+        await prisma.askMessage.findMany({
+          where: { conversationId: conversation.id, text: { not: null }, OR: [{ role: "user" }, { status: "answered" }] },
+          orderBy: { createdAt: "desc" },
+          take: HISTORY_MESSAGES,
+          select: { role: true, text: true },
+        })
+      ).reverse()
+    : [];
+  await prisma.askMessage.create({ data: { conversationId: conversation.id, role: "user", text: question } });
+  // Counted again with this question in: a burst sent at once is each other's count.
+  if (!opts.ignoreOrgSwitch) {
+    const lastHour = await prisma.askMessage.count({
+      where: { role: "user", createdAt: { gte: new Date(ctx.now.getTime() - 3_600_000) }, conversation: { organizationId: ctx.organizationId, userId: ctx.userId } },
+    });
+    if (lastHour > RATE_LIMIT_PER_HOUR) return finish("rate_limited", MESSAGES.rate_limited, null);
+  }
+  const cap = (await prisma.askSettings.findUnique({ where: { organizationId: ctx.organizationId }, select: { monthlyCapMicros: true } }))?.monthlyCapMicros ?? 5_000_000n;
+  if (!(await reserve(ctx.organizationId, monthOf(ctx.now), cap))) return finish("limit", MESSAGES.limit, null);
+
+  const { status, text, usage, recorded, grounding, model } = await answer({
+    ctx,
+    question,
+    history: history.map((m) => ({ role: m.role as "user" | "assistant", text: m.text! })),
+    activeStoreId: opts.activeStoreId,
+    onEvent,
+    signal: opts.signal,
+  });
+  if (grounding && !grounding.grounded) console.warn(`[ask] ungrounded answer in conversation ${conversation.id}: ${grounding.unmatched.join(", ")}`);
+  if (status === "refused") console.warn(`[ask] refused in conversation ${conversation.id}`);
 
   const cost = costMicros(model, usage);
   const latencyMs = Date.now() - started;
