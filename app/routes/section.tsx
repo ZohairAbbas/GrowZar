@@ -15,7 +15,7 @@ import {
   SECTION_DEFINITIONS,
   sectionState,
 } from "~/lib/sections";
-import { readStoreCookie } from "~/lib/store-cookie.server";
+import { readStoreCookie, rememberLinkedStore } from "~/lib/store-cookie.server";
 import { loadSettledHistory, storeSummary } from "~/lib/metrics/summaries.server";
 import {
   PERIODS,
@@ -101,6 +101,8 @@ export async function loader({ request, url }: Route.LoaderArgs) {
   const viewer = await requireSection(request, section, "view");
 
   const stores = await listVisibleStores(viewer);
+  const linked = rememberLinkedStore(url, stores);
+  if (linked) throw linked;
   const remembered = readStoreCookie(request);
   const active = stores.find((s) => s.id === remembered) ?? stores[0] ?? null;
 

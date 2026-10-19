@@ -932,10 +932,13 @@ export async function productProfit(storeId: string, s: StoreSummary): Promise<P
 /**
  * The four profit tables for a summary, sharing its ad spend exactly as the
  * headline subtracted it (`profit.parts.adSpend`, spend + fees, or none).
+ * Finance folds each tab to its first rows; "talk to your data" asks for
+ * every row (`maxRows: Infinity`).
  */
-async function profitTables(
+export async function profitTables(
   storeId: string,
   s: StoreSummary,
+  maxRows?: number,
 ): Promise<Pick<FinanceDepth, "profitBy" | "labels" | "images">> {
   const cur = s.store.currency;
   if (!cur || !s.profit) return { profitBy: null, labels: {}, images: {} };
@@ -955,6 +958,7 @@ async function profitTables(
     ...productAds,
     adByCampaign,
     campaignOf: new Map([...attribution].map(([id, a]) => [id, a.campaignKey])),
+    maxRows,
   };
   const profitBy = Object.fromEntries(
     (["product", "city", "courier", "campaign"] as const).map((d) => [d, profitTable(d, input)]),

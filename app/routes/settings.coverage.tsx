@@ -3,7 +3,7 @@ import { CheckCircle2, CircleDashed, CircleSlash } from "lucide-react";
 import type { Route } from "./+types/settings.coverage";
 import { prisma } from "~/lib/db.server";
 import { listVisibleStores, requireSection } from "~/lib/authorize.server";
-import { readStoreCookie } from "~/lib/store-cookie.server";
+import { readStoreCookie, rememberLinkedStore } from "~/lib/store-cookie.server";
 import { storeSummary } from "~/lib/metrics/summaries.server";
 import { storeCoverage } from "~/lib/metrics/coverage.server";
 import { PERIODS, periodFrom } from "~/lib/metrics/screens.server";
@@ -24,6 +24,8 @@ export function meta() {
 export async function loader({ request, url }: Route.LoaderArgs) {
   const viewer = await requireSection(request, "home", "view");
   const stores = await listVisibleStores(viewer);
+  const linked = rememberLinkedStore(url, stores);
+  if (linked) throw linked;
   const remembered = readStoreCookie(request);
   const active = stores.find((s) => s.id === remembered) ?? stores[0] ?? null;
   if (!active) return { store: null, period: null, periods: PERIODS, report: null };
