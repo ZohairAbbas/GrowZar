@@ -9,6 +9,7 @@ import { readStoreCookie } from "~/lib/store-cookie.server";
 import { detectorLabel } from "~/lib/insights/detectors";
 import { askEnabled, type AskEvent } from "~/lib/ask/loop.server";
 import type { ToolResult } from "~/lib/ask/types";
+import { guard } from "~/lib/ask/guard";
 import { AnswerTables, AnswerText, Feedback } from "~/components/ask/Answer";
 
 export function meta() {
@@ -23,13 +24,15 @@ export function meta() {
  */
 export async function loader({ request, url }: Route.LoaderArgs) {
   const viewer = await requireSection(request, "home", "view");
-  const [settings, canManage, stores] = await Promise.all([
+  const [settings, canManage, canSeeMoney, stores] = await Promise.all([
     prisma.askSettings.findUnique({ where: { organizationId: viewer.organizationId } }),
     hasPermission(request, viewer.organizationId, "settings", "manage"),
+    hasPermission(request, viewer.organizationId, "finance", "view"),
     listVisibleStores(viewer),
   ]);
   const on = askEnabled() && Boolean(settings?.enabled);
   const remembered = readStoreCookie(request);
+  const visible = new Set(stores.map((s) => s.id));
   const active = stores.find((s) => s.id === remembered) ?? stores[0] ?? null;
   if (!on) return { on, canManage, storeId: null, storeName: null, conversations: [], conversation: null, suggestions: [], q: null };
 
@@ -80,7 +83,10 @@ export async function loader({ request, url }: Route.LoaderArgs) {
             text: m.text,
             status: m.status,
             feedback: (m.feedback as "up" | "down" | null) ?? null,
-            tables: ((m.toolCalls as unknown as Array<{ table: number; result: ToolResult }> | null) ?? []).map((r) => ({ table: r.table, result: r.result })),
+            // Shown as the viewer may see them now: a role that has lost Finance, or a store, sees neither in old answers.
+            tables: ((m.toolCalls as unknown as Array<{ table: number; result: ToolResult }> | null) ?? [])
+              .filter((r) => r.result.meta.stores.every((s) => visible.has(s.id)))
+              .map((r) => ({ table: r.table, result: guard(r.result, canSeeMoney) })),
           })),
         }
       : null,
@@ -107,11 +113,16 @@ export default function Ask({ loaderData }: Route.ComponentProps) {
   const [busy, setBusy] = useState(false);
   const asked = useRef(false);
   const end = useRef<HTMLDivElement>(null);
+  // The answer streaming now; dropped when another conversation opens, so its text can't land there.
+  const inflight = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    inflight.current?.abort();
+    setBusy(false);
     setTurns(conversation?.messages ?? []);
     setConversationId(conversation?.id ?? null);
   }, [conversation?.id]);
+  useEffect(() => () => inflight.current?.abort(), []);
   useEffect(() => end.current?.scrollIntoView({ behavior: "smooth", block: "end" }), [turns.length]);
 
   async function ask(question: string) {
@@ -120,9 +131,13 @@ export default function Ask({ loaderData }: Route.ComponentProps) {
     setBusy(true);
     setDraft("");
     setTurns((t) => [...t, { id: null, role: "user", text, status: null, feedback: null, tables: [] }, { id: null, role: "assistant", text: "", status: null, feedback: null, tables: [], pending: true }]);
-    const update = (f: (a: Turn) => Turn) => setTurns((t) => [...t.slice(0, -1), f(t.at(-1)!)]);
+    const controller = new AbortController();
+    inflight.current = controller;
+    const update = (f: (a: Turn) => Turn) => {
+      if (!controller.signal.aborted) setTurns((t) => [...t.slice(0, -1), f(t.at(-1)!)]);
+    };
     try {
-      const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: text, conversationId, storeId }) });
+      const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: text, conversationId, storeId }), signal: controller.signal });
       if (!res.ok || !res.body) {
         const err = (await res.json().catch(() => null)) as { error?: string } | null;
         update((a) => ({ ...a, text: err?.error ?? "Something went wrong. Try again in a moment.", status: "error", pending: false }));
@@ -143,7 +158,7 @@ export default function Ask({ loaderData }: Route.ComponentProps) {
           const e = JSON.parse(line) as AskEvent;
           if (e.type === "start") {
             setConversationId(e.conversationId);
-            window.history.replaceState(null, "", `/ask?c=${e.conversationId}`);
+            window.history.replaceState(window.history.state, "", `/ask?c=${e.conversationId}`);
           } else if (e.type === "text") {
             // A later model call's text replaces an earlier one's.
             const fresh = e.round !== round;
@@ -160,16 +175,22 @@ export default function Ask({ loaderData }: Route.ComponentProps) {
     } catch {
       update((a) => ({ ...a, text: "The connection dropped. Try again.", status: "error", pending: false }));
     } finally {
-      setBusy(false);
+      if (inflight.current === controller) {
+        inflight.current = null;
+        setBusy(false);
+      }
     }
   }
 
-  // A question from Home's box asks itself once.
+  // A question from Home's box asks itself once; one from a link elsewhere only fills the box,
+  // so another site can't make a member ask (and spend the organization's budget).
   useEffect(() => {
     if (q && on && !asked.current) {
       asked.current = true;
-      window.history.replaceState(null, "", "/ask");
-      void ask(q);
+      window.history.replaceState(window.history.state, "", "/ask");
+      const fromGrowzar = document.referrer !== "" && new URL(document.referrer).origin === window.location.origin;
+      if (fromGrowzar) void ask(q);
+      else setDraft(q);
     }
   }, [q, on]);
 

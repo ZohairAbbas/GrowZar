@@ -239,7 +239,8 @@ export function Feedback({ messageId, initial }: { messageId: string; initial: "
   const [sent, setSent] = useState(false);
   const send = async (feedback: "up" | "down", withNote?: string) => {
     setGiven(feedback);
-    await fetch("/api/ask/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messageId, feedback, note: withNote ?? null }) });
+    // A thumb alone leaves an earlier note as it was.
+    await fetch("/api/ask/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messageId, feedback, ...(withNote !== undefined ? { note: withNote } : {}) }) });
     if (withNote !== undefined) setSent(true);
   };
   return (
