@@ -9,18 +9,21 @@ export const SEND_HOUR = 9;
 
 const WEEKDAYS: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
 
+/** One formatter per timezone (see localDayOf: each costs native memory). */
+const partFormats = new Map<string, Intl.DateTimeFormat>();
+const partFormat = (timezone: string) => {
+  let f = partFormats.get(timezone);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-GB", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short", hour: "2-digit", hourCycle: "h23" });
+    partFormats.set(timezone, f);
+  }
+  return f;
+};
+
 /** The local date (YYYY-MM-DD), ISO weekday and hour at `at` in `timezone`. */
 export function localParts(at: Date, timezone: string): { date: string; weekday: number; hour: number } {
   const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-GB", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      weekday: "short",
-      hour: "2-digit",
-      hourCycle: "h23",
-    })
+    partFormat(timezone)
       .formatToParts(at)
       .map((p) => [p.type, p.value]),
   );
