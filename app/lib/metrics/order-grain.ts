@@ -164,15 +164,23 @@ export type OrderGrain = {
 const ref = (row: SourceRow, field?: string) =>
   `${row.app.toLowerCase()}/${row.entity.toLowerCase()}/${row.externalId}@${row.sourceUpdatedAt.toISOString()}${field ? `#${field}` : ""}`;
 
+/**
+ * One formatter per timezone. Building an Intl.DateTimeFormat costs about
+ * 27 KB of native (ICU) memory that only goes back when the GC gets to it;
+ * built per call, the worker's 19,127 offer events took +521 MB and 1.9 s
+ * against +13 MB and 68 ms cached (2026-10-19).
+ */
+const dayFormats = new Map<string, Intl.DateTimeFormat>();
+
 /** The store's local calendar day for an instant (rule #5). */
 export function localDayOf(at: Date, timezone: string): string {
-  // en-CA formats as YYYY-MM-DD.
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(at);
+  let f = dayFormats.get(timezone);
+  if (!f) {
+    // en-CA formats as YYYY-MM-DD.
+    f = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" });
+    dayFormats.set(timezone, f);
+  }
+  return f.format(at);
 }
 
 function date(value: unknown): Date | null {
