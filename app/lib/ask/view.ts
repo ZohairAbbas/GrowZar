@@ -27,10 +27,12 @@ export function cellText(c: Column, v: Cell | undefined): string {
   }
 }
 
-/** Columns worth showing: an id column ("key", "courier_key") stays out of sight when a label is there. */
+const isId = (c: Column) => c.key === "key" || c.key.endsWith("_key");
+
+/** Columns worth showing: an id column ("key", "courier_key") stays out of sight when another text column names the row. */
 export function shownColumns(r: ToolResult): Column[] {
-  const hasLabel = r.columns.some((c) => c.key === "label");
-  return r.columns.filter((c) => !(hasLabel && (c.key === "key" || c.key.endsWith("_key"))));
+  const named = r.columns.some((c) => c.kind === "text" && !isId(c));
+  return r.columns.filter((c) => !(named && isId(c)));
 }
 
 export type ChartSpec = { label: Column; value: Column; points: Array<{ label: string; value: number | null }>; time: boolean };
@@ -44,8 +46,11 @@ const TIME = /by (day|week|month)$/i;
  */
 export function chartOf(r: ToolResult): ChartSpec | null {
   if (r.status !== "ok" || r.rows.length < 2 || r.rows.length > 31) return null;
-  const label = r.columns.find((c) => c.key === "label" || c.key === "city" || c.key === "stage" || c.key === "month");
-  const value = r.columns.find((c) => c !== label && ["count", "money", "percent", "number", "points"].includes(c.kind) && r.rows.some((x) => typeof x[c.key] === "number"));
+  // The text column that tells the rows apart (couriers in one city, not the city repeated).
+  const label = r.columns.find((c) => c.kind === "text" && !isId(c) && new Set(r.rows.map((x) => x[c.key])).size > 1);
+  const figures = r.columns.filter((c) => c !== label && ["count", "money", "percent", "number", "points"].includes(c.kind) && r.rows.some((x) => typeof x[c.key] === "number"));
+  // A city–courier table is about the rate; anything else charts its first figure.
+  const value = (r.tool === "city_courier" ? figures.find((c) => c.key === "delivery_rate") : undefined) ?? figures[0];
   if (!label || !value) return null;
   const points = r.rows.map((x) => ({ label: String(x[label.key] ?? ""), value: typeof x[value.key] === "number" ? (x[value.key] as number) : null }));
   if (points.filter((p) => p.value !== null).length < 2) return null;

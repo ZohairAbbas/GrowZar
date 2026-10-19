@@ -98,7 +98,7 @@ export function BarChart({ spec }: { spec: ChartSpec }) {
   return (
     <figure className="space-y-1">
       <div className="h-5 text-xs text-gray-600" aria-live="polite">
-        {shown ? `${shown.label}: ${v(shown.value)}` : `${spec.points[0]!.label} to ${spec.points.at(-1)!.label}`}
+        {shown ? `${shown.label}: ${v(shown.value)}` : `${spec.value.label}, ${spec.points[0]!.label.split(" to ")[0]} to ${spec.points.at(-1)!.label.split(" to ").at(-1)}. Hover a bar for its value.`}
       </div>
       <svg viewBox={`0 0 100 ${h}`} preserveAspectRatio="none" className="h-32 w-full" role="img" aria-label={`${spec.value.label} by ${spec.label.label.toLowerCase()}`} onMouseLeave={() => setHover(null)}>
         <line x1="0" x2="100" y1={zero} y2={zero} className="stroke-gray-200" strokeWidth="1" vectorEffect="non-scaling-stroke" />

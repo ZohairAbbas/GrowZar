@@ -46,6 +46,26 @@ describe("tables and charts", () => {
     expect(chartOf(r({ ...cities, title: "Orders by week" }))!.time).toBe(true);
   });
 
+  it("charts couriers in one city by delivery rate, and hides the courier key", () => {
+    const r2 = r({
+      tool: "city_courier",
+      columns: [
+        { key: "city", label: "City", kind: "text" },
+        { key: "courier", label: "Courier", kind: "text" },
+        { key: "courier_key", label: "Courier key", kind: "text" },
+        { key: "orders", label: "Orders", kind: "count" },
+        { key: "delivery_rate", label: "Delivery rate", kind: "percent" },
+      ],
+      rows: [
+        { city: "Lahore", courier: "Leopards", courier_key: "leopards", orders: 81, delivery_rate: 93.2 },
+        { city: "Lahore", courier: "TCS", courier_key: "tcs", orders: 40, delivery_rate: 84.8 },
+      ],
+    });
+    const c = chartOf(r2)!;
+    expect([c.label.key, c.value.key]).toEqual(["courier", "delivery_rate"]);
+    expect(shownColumns(r2).map((x) => x.key)).toEqual(["city", "courier", "orders", "delivery_rate"]);
+  });
+
   it("draws no chart for one row or a refusal, and no card for the store list", () => {
     expect(chartOf(r({ ...cities, rows: cities.rows.slice(0, 1) }))).toBeNull();
     expect(chartOf(r({ ...cities, status: "forbidden" }))).toBeNull();
