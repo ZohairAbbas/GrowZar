@@ -3,6 +3,7 @@ import { Check, Clock, Lock } from "lucide-react";
 
 import type { Route } from "./+types/section";
 import { prisma } from "~/lib/db.server";
+import { askEnabled } from "~/lib/ask/loop.server";
 import { sectionPreview } from "~/lib/metrics/section-preview.server";
 import { SUITE_APPS, type LinkedApp } from "~/lib/apps/app-links";
 import { hasPermission, listVisibleStores, requireSection } from "~/lib/authorize.server";
@@ -143,7 +144,11 @@ export async function loader({ request, url }: Route.LoaderArgs) {
       ? await sectionPreview(section, { id: active.id, currency: active.currency ?? null }, await hasPermission(request, viewer.organizationId, "finance", "view"))
       : null;
 
+  // Home's Ask box, where Ask is on for the server and the organization (G-GZR10-3).
+  const ask = section === "home" && askEnabled() && Boolean((await prisma.askSettings.findUnique({ where: { organizationId: viewer.organizationId }, select: { enabled: true } }))?.enabled);
+
   return {
+    ask,
     section,
     label: definition.label,
     blurb: definition.blurb,
@@ -377,7 +382,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             <DataHealth gaps={metrics.coverage.gaps} fx={metrics.view.fx} period={metrics.period.query} />
           </div>
         </header>
-        <HomePanel view={metrics.view} inbox={metrics.inbox} cards={metrics.cards} period={metrics.period} nextApp={metrics.nextApp} results={metrics.results} />
+        <HomePanel view={metrics.view} inbox={metrics.inbox} cards={metrics.cards} period={metrics.period} nextApp={metrics.nextApp} results={metrics.results} ask={loaderData.ask} />
       </div>
     );
   }
