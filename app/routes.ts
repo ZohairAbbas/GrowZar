@@ -91,6 +91,7 @@ export default [
       route("profit", "routes/settings.profit.tsx"),
       route("coverage", "routes/settings.coverage.tsx"),
       route("digest", "routes/settings.digest.tsx"),
+      route("ask", "routes/settings.ask.tsx"),
     ]),
   ]),
 

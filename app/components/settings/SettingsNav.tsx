@@ -1,5 +1,5 @@
 import { NavLink } from "react-router";
-import { Building2, CreditCard, Gauge, Mail, Scale, Shield, User, Users } from "lucide-react";
+import { Building2, CreditCard, Gauge, Mail, MessageCircleQuestionMark, Scale, Shield, User, Users } from "lucide-react";
 
 import { cn } from "~/lib/utils";
 
@@ -55,6 +55,12 @@ const navigation: NavItem[] = [
     to: "/settings/digest",
     icon: Mail,
     description: "Monday's email, preview and log",
+  },
+  {
+    name: "Ask",
+    to: "/settings/ask",
+    icon: MessageCircleQuestionMark,
+    description: "Questions about your data: switch, usage, privacy",
   },
   {
     name: "Billing",
