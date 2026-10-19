@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db.server";
 import { localDayOf } from "../metrics/order-grain";
 import { addUsage, askModel, assistantItem, costMicros, LlmError, NO_USAGE, runTurn, toolOutputItem, userItem, type Item, type Usage } from "./llm.server";
+import { ground, sourceNumbers, StreamCheck, type Grounding } from "./grounding";
 import { INSTRUCTIONS, userTurn } from "./prompt";
 import { runTool, toolSpecs } from "./registry.server";
 import type { AskContext, ToolResult } from "./types";
@@ -27,22 +28,30 @@ export const TIMEOUT_MS = 60_000;
 /** Earlier turns of the conversation sent with a question (text only; tools are called again). */
 export const HISTORY_MESSAGES = 8;
 
-export type AskStatus = "answered" | "refused" | "limit" | "disabled" | "timeout" | "cancelled" | "error";
+export type AskStatus = "answered" | "refused" | "limit" | "rate_limited" | "disabled" | "timeout" | "cancelled" | "error";
 
 export type AskEvent =
   | { type: "start"; conversationId: string }
-  /** Text of model call `round`; a later round's text replaces an earlier one's. */
+  /**
+   * Text of model call `round`, as it is written; a later round's text
+   * replaces an earlier one's. `done.text` is the answer as checked, and
+   * replaces whatever streamed (a sentence with an unmatched number is gone).
+   */
   | { type: "text"; round: number; delta: string }
   | { type: "tool"; table: number; name: string; args: unknown; result: ToolResult }
-  | { type: "done"; messageId: string | null; status: AskStatus; text: string; usage: Usage; costMicros: number; latencyMs: number };
+  | { type: "done"; messageId: string | null; status: AskStatus; text: string; grounded: boolean | null; usage: Usage; costMicros: number; latencyMs: number };
 
 /** "on", "true" or "1" turns the feature on; anything else, including absent, is off. */
 export const askEnabled = () => ["on", "true", "1"].includes((process.env.ASK_ENABLED ?? "").trim().toLowerCase());
 
 export const monthOf = (d: Date) => d.toISOString().slice(0, 7);
 
+/** Questions one person may ask in an hour, across their conversations (G-GZR10-4, agreed 2026-10-19). */
+export const RATE_LIMIT_PER_HOUR = 30;
+
 const MESSAGES: Record<Exclude<AskStatus, "answered">, string> = {
   disabled: "Asking about your data isn't turned on for this organization.",
+  rate_limited: `That's a lot of questions in an hour. Try again in a little while (the limit is ${RATE_LIMIT_PER_HOUR} an hour per person).`,
   limit: "Your organization has reached this month's limit for questions. It resets on the 1st; an owner can see the usage in Settings → Ask.",
   refused: "I can't help with that one. Ask about your orders, deliveries, couriers, cash, stock, customers or marketing.",
   cancelled: "The question was stopped before it was answered.",
@@ -51,15 +60,24 @@ const MESSAGES: Record<Exclude<AskStatus, "answered">, string> = {
 };
 
 /** Why a question can't be asked now, or null when it can. */
-export async function gate(organizationId: string, now: Date, opts: { ignoreOrgSwitch?: boolean } = {}): Promise<"disabled" | "limit" | null> {
+export async function gate(
+  organizationId: string,
+  userId: string,
+  now: Date,
+  opts: { ignoreOrgSwitch?: boolean; ignoreRateLimit?: boolean } = {},
+): Promise<"disabled" | "limit" | "rate_limited" | null> {
   if (!askEnabled()) return "disabled";
-  const [settings, usage] = await Promise.all([
+  const [settings, usage, lastHour] = await Promise.all([
     prisma.askSettings.findUnique({ where: { organizationId } }),
     prisma.askUsageMonthly.findUnique({ where: { organizationId_month: { organizationId, month: monthOf(now) } } }),
+    opts.ignoreRateLimit
+      ? 0
+      : prisma.askMessage.count({ where: { role: "user", createdAt: { gte: new Date(now.getTime() - 3_600_000) }, conversation: { organizationId, userId } } }),
   ]);
   if (!opts.ignoreOrgSwitch && !settings?.enabled) return "disabled";
   const cap = settings?.monthlyCapMicros ?? 5_000_000n;
   if ((usage?.costMicros ?? 0n) >= cap) return "limit";
+  if (lastHour >= RATE_LIMIT_PER_HOUR) return "rate_limited";
   return null;
 }
 
@@ -91,7 +109,7 @@ export async function ask(opts: {
   conversationId: string | null;
   activeStoreId: string | null;
   onEvent: (e: AskEvent) => void;
-  /** Scripts only (the eval): ask without the organization's switch being on. The kill switch and the cap still apply. */
+  /** Scripts only (the eval): ask without the organization's switch being on, and past the hourly limit. The kill switch and the cap still apply. */
   ignoreOrgSwitch?: boolean;
   signal?: AbortSignal;
 }): Promise<{ status: AskStatus; text: string; messageId: string | null }> {
@@ -99,16 +117,13 @@ export async function ask(opts: {
   const started = Date.now();
   const question = opts.question.trim().slice(0, 2_000);
   const finish = (status: AskStatus, text: string, messageId: string | null, usage = NO_USAGE, cost = 0) => {
-    onEvent({ type: "done", messageId, status, text, usage, costMicros: cost, latencyMs: Date.now() - started });
+    onEvent({ type: "done", messageId, status, text, grounded: null, usage, costMicros: cost, latencyMs: Date.now() - started });
     return { status, text, messageId };
   };
 
-  const blocked = await gate(ctx.organizationId, ctx.now, { ignoreOrgSwitch: opts.ignoreOrgSwitch });
+  const blocked = await gate(ctx.organizationId, ctx.userId, ctx.now, { ignoreOrgSwitch: opts.ignoreOrgSwitch, ignoreRateLimit: opts.ignoreOrgSwitch });
   if (blocked) return finish(blocked, MESSAGES[blocked], null);
   const { model, effort } = askModel();
-  const cap = (await prisma.askSettings.findUnique({ where: { organizationId: ctx.organizationId }, select: { monthlyCapMicros: true } }))?.monthlyCapMicros ?? 5_000_000n;
-  if (!(await reserve(ctx.organizationId, monthOf(ctx.now), cap))) return finish("limit", MESSAGES.limit, null);
-
   // The conversation: the member's own, in this organization, or a new one.
   const existing = opts.conversationId
     ? await prisma.askConversation.findFirst({ where: { id: opts.conversationId, organizationId: ctx.organizationId, userId: ctx.userId } })
@@ -127,6 +142,15 @@ export async function ask(opts: {
       ).reverse()
     : [];
   await prisma.askMessage.create({ data: { conversationId: conversation.id, role: "user", text: question } });
+  // Counted again with this question in: a burst sent at once is each other's count.
+  if (!opts.ignoreOrgSwitch) {
+    const lastHour = await prisma.askMessage.count({
+      where: { role: "user", createdAt: { gte: new Date(ctx.now.getTime() - 3_600_000) }, conversation: { organizationId: ctx.organizationId, userId: ctx.userId } },
+    });
+    if (lastHour > RATE_LIMIT_PER_HOUR) return finish("rate_limited", MESSAGES.rate_limited, null);
+  }
+  const cap = (await prisma.askSettings.findUnique({ where: { organizationId: ctx.organizationId }, select: { monthlyCapMicros: true } }))?.monthlyCapMicros ?? 5_000_000n;
+  if (!(await reserve(ctx.organizationId, monthOf(ctx.now), cap))) return finish("limit", MESSAGES.limit, null);
 
   const tz = ctx.stores.find((s) => s.id === opts.activeStoreId)?.timezone ?? ctx.stores[0]?.timezone ?? "UTC";
   const input: Item[] = [
@@ -145,8 +169,12 @@ export async function ask(opts: {
   let text = "";
   let status: AskStatus = "answered";
   const recorded: Recorded[] = [];
+  // `calculate` reads the answer's earlier tables from here.
+  ctx.tables = [];
   try {
     for (let round = 1; round <= MAX_ROUNDS; round++) {
+      // Only checked sentences reach the screen, against what the tools have returned so far.
+      const check = new StreamCheck(() => sourceNumbers(recorded.map((r) => r.result), [question, localDayOf(ctx.now, tz)]));
       const turn = await runTurn({
         model,
         effort,
@@ -156,8 +184,13 @@ export async function ask(opts: {
         allowTools: round < MAX_ROUNDS,
         safetyId,
         signal,
-        onText: (delta) => onEvent({ type: "text", round, delta }),
+        onText: (delta) => {
+          const ok = check.push(delta);
+          if (ok) onEvent({ type: "text", round, delta: ok });
+        },
       });
+      const rest = check.flush();
+      if (rest) onEvent({ type: "text", round, delta: rest });
       usage = addUsage(usage, turn.usage);
       input.push(...turn.items);
       text = turn.text;
@@ -184,6 +217,7 @@ export async function ask(opts: {
         }
         const table = recorded.length + 1;
         recorded.push({ name: call.name, args, table, result });
+        ctx.tables.push(result);
         onEvent({ type: "tool", table, name: call.name, args, result });
         input.push(toolOutputItem(call.callId, JSON.stringify({ table, ...result })));
       }
@@ -202,6 +236,18 @@ export async function ask(opts: {
     clearTimeout(timer);
   }
 
+  // Every number in the answer must be one a tool returned (or the question or context gave).
+  let grounding: Grounding | null = null;
+  if (status === "answered") {
+    grounding = ground(text, sourceNumbers(recorded.map((r) => r.result), [question, localDayOf(ctx.now, tz)]));
+    if (!grounding.grounded) {
+      text = grounding.text;
+      console.warn(`[ask] ungrounded answer in conversation ${conversation.id}: ${grounding.unmatched.join(", ")}`);
+    }
+  } else if (status === "refused") {
+    console.warn(`[ask] refused in conversation ${conversation.id}`);
+  }
+
   const cost = costMicros(model, usage);
   const latencyMs = Date.now() - started;
   const message = await prisma.askMessage.create({
@@ -213,6 +259,8 @@ export async function ask(opts: {
       model,
       toolCalls: recorded as unknown as Prisma.InputJsonValue,
       toolResultRefs: [...new Set(recorded.map((r) => r.name))],
+      grounded: grounding ? grounding.grounded : null,
+      checks: grounding && !grounding.grounded ? { unmatched: grounding.unmatched, dropped: grounding.dropped } : undefined,
       inputTokens: usage.inputTokens,
       cachedTokens: usage.cachedTokens,
       outputTokens: usage.outputTokens,
@@ -234,7 +282,7 @@ export async function ask(opts: {
       costMicros: { increment: spent - RESERVE_MICROS },
     },
   });
-  onEvent({ type: "done", messageId: message.id, status, text, usage, costMicros: cost, latencyMs });
+  onEvent({ type: "done", messageId: message.id, status, text, grounded: grounding?.grounded ?? null, usage, costMicros: cost, latencyMs });
   return { status, text, messageId: message.id };
 }
 

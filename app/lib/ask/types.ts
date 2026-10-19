@@ -30,6 +30,8 @@ export type AskContext = {
   now: Date;
   /** Per-request memo, so several tool calls in one answer load a store's orders once. */
   memo: Map<string, Promise<unknown>>;
+  /** This answer's tool results so far, as the model numbers them (table 1 first), for `calculate`. */
+  tables?: ToolResult[];
 };
 
 /** A cell: a figure, a label, or nothing ("not enough data" says why in `meta`). */

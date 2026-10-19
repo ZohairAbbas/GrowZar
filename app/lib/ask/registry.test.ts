@@ -180,7 +180,9 @@ const STORES = [
 function ctx(o: { finance?: boolean; sections?: Section[]; stores?: typeof STORES } = {}): AskContext {
   const allowed = new Set<Section>(o.sections ?? ["home", "orders", "shipping", "finance", "customers", "inventory", "marketing", "inbox", "settings"]);
   if (o.finance === false) allowed.delete("finance");
-  return { organizationId: "org", userId: "u", baseCurrency: "PKR", stores: o.stores ?? STORES, can: (s) => allowed.has(s), now: new Date("2026-10-19T12:00:00Z"), memo: new Map() };
+  // An earlier table of the answer, for calculate.
+  const tables: ToolResult[] = [{ tool: "summary", status: "ok", title: "t", columns: [{ key: "label", label: "Store", kind: "text" }, { key: "orders", label: "Orders", kind: "count" }], rows: [{ label: "Lahore Lawn", orders: 68 }, { label: "Dubai Abayas", orders: 68 }], meta: { stores: [], rules: [], gaps: [], notes: [] }, link: null }];
+  return { organizationId: "org", userId: "u", baseCurrency: "PKR", stores: o.stores ?? STORES, can: (s) => allowed.has(s), now: new Date("2026-10-19T12:00:00Z"), memo: new Map(), tables };
 }
 
 const run = (name: string, args: Record<string, unknown>, c = ctx()) => runTool(name, args, c);
@@ -212,6 +214,7 @@ const CALLS: Array<[string, Record<string, unknown>]> = [
   ["marketing", { store: "s1", view: "offers", period: null, limit: null }],
   ["insights", { store: "s1", insight: null, period: null }],
   ["coverage", { store: "s1", period: null, gaps_only: null }],
+  ["calculate", { op: "share", values: [{ table: 1, row: "Lahore Lawn", column: "orders" }, { table: 1, row: "Dubai Abayas", column: "orders" }] }],
 ];
 
 /** Every key and string anywhere in a result. */
@@ -273,7 +276,8 @@ describe("every tool", () => {
   });
 
   it("states the rules, and links every answer to a screen", () => {
-    for (const { name, result } of results.filter((r) => r.result.status === "ok")) {
+    // calculate rests on earlier tables, whose links stand for it.
+    for (const { name, result } of results.filter((r) => r.result.status === "ok" && r.name !== "calculate")) {
       expect(result.link, name).not.toBeNull();
       expect(result.meta.stores.length, name).toBeGreaterThan(0);
     }

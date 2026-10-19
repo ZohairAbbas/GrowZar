@@ -41,6 +41,8 @@ vi.mock("../db.server", () => ({
       },
     },
     askMessage: {
+      count: async ({ where }: { where: { createdAt: { gte: Date }; conversation: { userId: string } } }) =>
+        db.messages.filter((m) => m.role === "user" && (m.createdAt as Date) >= where.createdAt.gte && db.conversations.some((c) => c.id === m.conversationId && c.userId === where.conversation.userId)).length,
       findMany: async ({ where }: { where: { conversationId: string } }) => db.messages.filter((m) => m.conversationId === where.conversationId && m.text !== null).reverse(),
       create: async ({ data }: { data: Row }) => {
         const m = { id: `msg${++ids}`, createdAt: new Date(), ...data };
@@ -121,7 +123,7 @@ afterEach(() => {
 describe("gates", () => {
   it("is off without ASK_ENABLED, whatever the organization says", async () => {
     delete process.env.ASK_ENABLED;
-    expect(await gate("org", new Date())).toBe("disabled");
+    expect(await gate("org", "u1", new Date())).toBe("disabled");
     const r = await run();
     expect(r.status).toBe("disabled");
     expect(seen).toEqual([]);
@@ -130,8 +132,8 @@ describe("gates", () => {
 
   it("is off until the organization turns it on, unless a script asks past the switch", async () => {
     db.settings.delete("org");
-    expect(await gate("org", new Date())).toBe("disabled");
-    expect(await gate("org", new Date(), { ignoreOrgSwitch: true })).toBeNull();
+    expect(await gate("org", "u1", new Date())).toBe("disabled");
+    expect(await gate("org", "u1", new Date(), { ignoreOrgSwitch: true })).toBeNull();
   });
 
   it("stops at the month's cap, before calling the model", async () => {
@@ -140,6 +142,45 @@ describe("gates", () => {
     expect(r.status).toBe("limit");
     expect(r.text).toMatch(/limit/);
     expect(seen).toEqual([]);
+  });
+});
+
+describe("rate limit", () => {
+  it(`stops a person at ${30} questions an hour, and only that person`, async () => {
+    db.conversations.push({ id: "busy", organizationId: "org", userId: "u1" });
+    for (let i = 0; i < 30; i++) db.messages.push({ id: `q${i}`, conversationId: "busy", role: "user", text: "q", createdAt: new Date() });
+    const r = await run();
+    expect(r.status).toBe("rate_limited");
+    expect(seen).toEqual([]);
+    turns.push(() => ({ text: "Fine." }));
+    expect((await run("Me?", { ctx: { ...ctx(), userId: "u2" } })).status).toBe("answered");
+  });
+});
+
+describe("the number check", () => {
+  it("never streams a sentence whose number no tool returned", async () => {
+    turns.push(() => call("summary", { store: "s1", period: null }));
+    turns.push(() => ({ text: "You had 42 orders (table 1). That is 17% more than usual." }));
+    const r = await run();
+    const streamed = r.events.filter((e) => e.type === "text").map((e) => e.delta).join("");
+    expect(streamed).toBe("You had 42 orders (table 1).");
+  });
+
+  it("drops a sentence whose number no tool returned, records it, and sends the checked text", async () => {
+    turns.push(() => call("summary", { store: "s1", period: null }));
+    turns.push(() => ({ text: "You had 42 orders (table 1). That is 17% more than usual." }));
+    const r = await run();
+    expect(r.text).toBe("You had 42 orders (table 1).");
+    const done = r.events.at(-1)!;
+    expect(done).toMatchObject({ type: "done", text: "You had 42 orders (table 1).", grounded: false });
+    expect(db.messages.find((m) => m.role === "assistant")).toMatchObject({ grounded: false, checks: { unmatched: ["17%"], dropped: ["That is 17% more than usual."] } });
+  });
+
+  it("marks an answer whose numbers all came from tools as grounded", async () => {
+    turns.push(() => call("summary", { store: "s1", period: null }));
+    turns.push(() => ({ text: "You had 42 orders (table 1)." }));
+    await run();
+    expect(db.messages.find((m) => m.role === "assistant")).toMatchObject({ grounded: true, checks: undefined });
   });
 });
 

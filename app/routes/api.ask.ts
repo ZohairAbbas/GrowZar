@@ -62,7 +62,7 @@ export async function action({ request }: Route.ActionArgs) {
         });
       } catch (e) {
         console.error("[ask] request failed", e);
-        send({ type: "done", messageId: null, status: "error", text: "Something went wrong while answering. Try again in a moment.", usage: { inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0 }, costMicros: 0, latencyMs: 0 });
+        send({ type: "done", messageId: null, status: "error", text: "Something went wrong while answering. Try again in a moment.", grounded: null, usage: { inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0 }, costMicros: 0, latencyMs: 0 });
       } finally {
         controller.close();
       }

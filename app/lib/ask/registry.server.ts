@@ -4,6 +4,7 @@ import { SECTION_LABELS, type Section } from "../permissions";
 import { guard } from "./guard";
 import { refusal } from "./tools/common.server";
 import { breakdown } from "./tools/breakdown.server";
+import { calculate } from "./tools/calculate.server";
 import { cash } from "./tools/cash.server";
 import { cityCourier } from "./tools/city-courier.server";
 import { comparePeriods } from "./tools/compare.server";
@@ -27,7 +28,7 @@ import type { AskContext, AskTool, ToolResult } from "./types";
  * before anything leaves for the model.
  */
 
-export const TOOLS: AskTool[] = [listStores, summary, breakdown, comparePeriods, cityCourier, cash, stock, customers, marketing, insights, coverage] as AskTool[];
+export const TOOLS: AskTool[] = [listStores, summary, breakdown, comparePeriods, cityCourier, cash, stock, customers, marketing, insights, coverage, calculate] as AskTool[];
 
 const byName = new Map(TOOLS.map((t) => [t.name, t]));
 
