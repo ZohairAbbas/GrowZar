@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ALL_DROPPED, ground, numbersIn, sourceNumbers } from "./grounding";
+import { ALL_DROPPED, ground, numbersIn, sourceNumbers, StreamCheck } from "./grounding";
 import type { ToolResult } from "./types";
 
 const result = (rows: ToolResult["rows"], notes: string[] = []): ToolResult => ({
@@ -60,8 +60,34 @@ describe("ground", () => {
     expect(ground("Profit was PKR 123,456.", SOURCES).text).toBe(ALL_DROPPED);
   });
 
+  it("reads amounts written against their currency, and does not let a small measure pass as a count", () => {
+    expect(numbersIn("Rs.5,000 and PKR5000 and AED1200").map((f) => f.value)).toEqual([5000, 5000, 1200]);
+    expect(ground("Profit was Rs.5,000.", SOURCES).grounded).toBe(false);
+    expect(ground("Delivery rate fell 4 points.", SOURCES).grounded).toBe(false);
+    expect(ground("That is 3 times more.", SOURCES).grounded).toBe(false);
+    expect(ground("It costs PKR 3.", SOURCES).grounded).toBe(false);
+  });
+
+  it("does not take numbers from ids or links as figures", () => {
+    const sources = sourceNumbers([result([{ key: "45678", label: "Hijab", orders: 3 }])]);
+    expect(ground("Variant 45678 sold well.", sources).grounded).toBe(false);
+  });
+
   it("lets small counts through but not small percentages", () => {
     expect(ground("Two of the 4 products lost money.", SOURCES).grounded).toBe(true);
     expect(ground("Returns rose 4%.", SOURCES).grounded).toBe(false);
+  });
+});
+
+describe("StreamCheck", () => {
+  it("lets whole sentences out as they end, and never one with an unmatched number", () => {
+    const c = new StreamCheck(() => SOURCES);
+    const out = [c.push("Hijab lost PKR 36,8"), c.push("77 (table 1). That is 12"), c.push("% of revenue. Delivery "), c.push("rate was 93.3%."), c.flush()].join("");
+    expect(out).toBe("Hijab lost PKR 36,877 (table 1). Delivery rate was 93.3%.");
+  });
+
+  it("keeps line breaks and list items", () => {
+    const c = new StreamCheck(() => SOURCES);
+    expect([c.push("- Hijab: PKR 36,877\n- Sleeves: PKR 9,999\n"), c.flush()].join("")).toBe("- Hijab: PKR 36,877\n\n");
   });
 });

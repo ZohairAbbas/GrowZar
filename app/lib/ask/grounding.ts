@@ -50,31 +50,49 @@ export function asciiDigits(s: string): string {
 
 const DATE = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
 const CITATION = /\(?\btables?\s+\d+(?:\s*(?:,|and|aur|&|-|–)\s*\d+)*\)?/gi;
-const NUMBER = /(?<![\w#.])([-−]?)(\d{1,3}(?:,\d{2,3})+|\d+)(?:\.(\d+))?(?:\s?(k|thousand|hazaa?r|lakhs?|lac|mn|million|crores?|cr|bn|billion|arab)\b)?(\s?%)?/gi;
+const NUMBER = /(?<![\w#.])([-−]?)(\d{1,3}(?:,\d{2,3})+|\d+)(?:\.(\d+))?(?:\s?(k|thousand|hazaa?r|lakhs?|lac|mn|million|crores?|cr|bn|billion|arab)\b)?(\s?%)?(?:\s?([a-z]+))?/gi;
+/** "Rs.5,000", "PKR5000": a currency written against its amount is split off, so the amount is read. */
+const CURRENCY_AGAINST = /\b(rs|pkr|aed|usd|inr|sar|eur|gbp|cop)\.?(?=[-−]?\d)/gi;
+const CURRENCY_BEFORE = /(?:^|[^a-z])(?:rs|pkr|aed|usd|inr|sar|eur|gbp|cop)\.?\s*$/i;
+/** Words after a number that make it a measure, not a count ("6 points", "3 times"). */
+const MEASURE = new Set(["points", "point", "pts", "pt", "percent", "fisad", "times", "x", "guna", "gun"]);
 
-export type Found = { text: string; value: number; decimals: number; scale: number; percent: boolean };
+export type Found = {
+  text: string;
+  value: number;
+  decimals: number;
+  scale: number;
+  percent: boolean;
+  /** Money or a measure ("PKR 5", "6 points"), never a count. */
+  measure: boolean;
+};
 
 /** The numbers a text states, with how precisely it states them. */
 export function numbersIn(raw: string): Found[] {
-  const text = asciiDigits(raw).replace(CITATION, " ").replace(DATE, (_m, y, mo, d) => ` ${y} ${mo} ${d} `);
+  const text = asciiDigits(raw).replace(CITATION, " ").replace(CURRENCY_AGAINST, "$1 ").replace(DATE, (_m, y, mo, d) => ` ${y} ${mo} ${d} `);
   const out: Found[] = [];
   for (const m of text.matchAll(NUMBER)) {
-    const [whole, sign, int, frac, scaleWord, pct] = m;
+    const [, sign, int, frac, scaleWord, pct, after] = m;
     const scale = scaleWord ? (SCALES[scaleWord.toLowerCase()] ?? 1) : 1;
     const value = Number(`${int!.replace(/,/g, "")}${frac ? `.${frac}` : ""}`) * scale * (sign ? -1 : 1);
-    out.push({ text: whole!.trim(), value, decimals: frac?.length ?? 0, scale, percent: Boolean(pct) });
+    const shown = `${sign ?? ""}${int}${frac ? `.${frac}` : ""}${scaleWord ? ` ${scaleWord}` : ""}${pct ? "%" : ""}`;
+    const measure = CURRENCY_BEFORE.test(text.slice(Math.max(0, m.index! - 6), m.index!)) || (after !== undefined && MEASURE.has(after.toLowerCase()));
+    out.push({ text: shown, value, decimals: frac?.length ?? 0, scale, percent: Boolean(pct), measure });
   }
   return out;
 }
 
-/** Every number a set of tool results states, in any field, plus their row counts. */
+/** Ids and links: numbers in them are not figures (a variant id, a store id, a URL's days=30). */
+const NOT_FIGURES = (k: string) => k === "key" || k === "link" || k === "href" || k.endsWith("_key") || k === "id";
+
+/** Every number a set of tool results states, in any field but ids and links, plus their row counts. */
 export function sourceNumbers(results: readonly ToolResult[], extra: readonly string[] = []): number[] {
   const out: number[] = [];
   const walk = (v: unknown) => {
     if (typeof v === "number" && Number.isFinite(v)) out.push(v);
     else if (typeof v === "string") for (const f of numbersIn(v)) out.push(f.value);
     else if (Array.isArray(v)) v.forEach(walk);
-    else if (v && typeof v === "object") Object.values(v).forEach(walk);
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) if (!NOT_FIGURES(k)) walk(x);
   };
   for (const r of results) {
     walk(r);
@@ -84,15 +102,21 @@ export function sourceNumbers(results: readonly ToolResult[], extra: readonly st
   return out;
 }
 
-/** Does the stated number match a source number, at the precision it is stated to? */
+/**
+ * Does the stated number match a source number at the precision it is
+ * stated to: the source rounded, or cut (as the screens cut cents), to the
+ * digits shown equals it exactly.
+ */
 export function matches(f: Found, sources: readonly number[]): boolean {
-  // One unit of the last digit shown: covers rounding and the screens' cutting of cents.
-  const unit = 10 ** -f.decimals * f.scale;
-  const t = Math.abs(f.value);
-  return sources.some((s) => Math.abs(Math.abs(s) - t) < unit + 1e-9 * Math.max(1, t));
+  const per = 10 ** f.decimals / f.scale;
+  const t = Math.round(Math.abs(f.value) * per);
+  return sources.some((s) => {
+    const x = Math.abs(s) * per;
+    return Math.round(x) === t || Math.floor(x + 1e-9) === t;
+  });
 }
 
-const freeCount = (f: Found) => f.decimals === 0 && f.scale === 1 && !f.percent && Math.abs(f.value) <= 10;
+const freeCount = (f: Found) => f.decimals === 0 && f.scale === 1 && !f.percent && !f.measure && Math.abs(f.value) <= 10;
 
 export type Grounding = {
   grounded: boolean;
@@ -109,6 +133,46 @@ function sentences(text: string): string[] {
 
 export const ALL_DROPPED = "Here are the figures Growzar found; the table below shows them.";
 
+/** The sentence's numbers that match nothing. */
+export const unmatchedIn = (sentence: string, sources: readonly number[]) => numbersIn(sentence).filter((f) => !freeCount(f) && !matches(f, sources));
+
+/**
+ * The check as text streams: whole sentences go out once their numbers
+ * match what the tools have returned so far, and a sentence that doesn't
+ * never reaches the screen. `ground` on the full text is the record.
+ */
+export class StreamCheck {
+  private buffer = "";
+  constructor(private readonly sources: () => readonly number[]) {}
+  /** Text that may be shown now. */
+  push(delta: string): string {
+    this.buffer += delta;
+    // Up to the last sentence end followed by space, or the last line break.
+    const cut = Math.max(this.buffer.lastIndexOf("\n") + 1, ...[...this.buffer.matchAll(/[.!?۔](?=\s)/g)].map((m) => m.index! + 1));
+    if (cut <= 0) return "";
+    const ready = this.buffer.slice(0, cut);
+    this.buffer = this.buffer.slice(cut);
+    return this.keep(ready);
+  }
+  /** The rest, at the end of the call. */
+  flush(): string {
+    const rest = this.buffer;
+    this.buffer = "";
+    return this.keep(rest);
+  }
+  private keep(chunk: string): string {
+    const sources = this.sources();
+    // Keep the chunk's shape: drop failing sentences, keep each line's own spaces and line breaks.
+    return chunk.replace(/[^\n]+/g, (line) => {
+      const kept = sentences(line)
+        .filter((s) => !unmatchedIn(s, sources).length)
+        .map((s) => s.trim())
+        .join(" ");
+      return kept ? `${line.match(/^[ \t]*/)![0]}${kept}${line.match(/[ \t]*$/)![0]}` : "";
+    });
+  }
+}
+
 export function ground(text: string, sources: readonly number[]): Grounding {
   const unmatched: string[] = [];
   const dropped: string[] = [];
@@ -121,7 +185,7 @@ export function ground(text: string, sources: readonly number[]): Grounding {
     }
     const parts = sentences(line);
     const ok = parts.filter((s) => {
-      const bad = numbersIn(s).filter((f) => !freeCount(f) && !matches(f, sources));
+      const bad = unmatchedIn(s, sources);
       if (!bad.length) return true;
       unmatched.push(...bad.map((b) => b.text));
       dropped.push(s.trim());

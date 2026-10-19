@@ -158,6 +158,14 @@ describe("rate limit", () => {
 });
 
 describe("the number check", () => {
+  it("never streams a sentence whose number no tool returned", async () => {
+    turns.push(() => call("summary", { store: "s1", period: null }));
+    turns.push(() => ({ text: "You had 42 orders (table 1). That is 17% more than usual." }));
+    const r = await run();
+    const streamed = r.events.filter((e) => e.type === "text").map((e) => e.delta).join("");
+    expect(streamed).toBe("You had 42 orders (table 1).");
+  });
+
   it("drops a sentence whose number no tool returned, records it, and sends the checked text", async () => {
     turns.push(() => call("summary", { store: "s1", period: null }));
     turns.push(() => ({ text: "You had 42 orders (table 1). That is 17% more than usual." }));

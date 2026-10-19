@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db.server";
 import { localDayOf } from "../metrics/order-grain";
 import { addUsage, askModel, assistantItem, costMicros, LlmError, NO_USAGE, runTurn, toolOutputItem, userItem, type Item, type Usage } from "./llm.server";
-import { ground, sourceNumbers, type Grounding } from "./grounding";
+import { ground, sourceNumbers, StreamCheck, type Grounding } from "./grounding";
 import { INSTRUCTIONS, userTurn } from "./prompt";
 import { runTool, toolSpecs } from "./registry.server";
 import type { AskContext, ToolResult } from "./types";
@@ -124,9 +124,6 @@ export async function ask(opts: {
   const blocked = await gate(ctx.organizationId, ctx.userId, ctx.now, { ignoreOrgSwitch: opts.ignoreOrgSwitch, ignoreRateLimit: opts.ignoreOrgSwitch });
   if (blocked) return finish(blocked, MESSAGES[blocked], null);
   const { model, effort } = askModel();
-  const cap = (await prisma.askSettings.findUnique({ where: { organizationId: ctx.organizationId }, select: { monthlyCapMicros: true } }))?.monthlyCapMicros ?? 5_000_000n;
-  if (!(await reserve(ctx.organizationId, monthOf(ctx.now), cap))) return finish("limit", MESSAGES.limit, null);
-
   // The conversation: the member's own, in this organization, or a new one.
   const existing = opts.conversationId
     ? await prisma.askConversation.findFirst({ where: { id: opts.conversationId, organizationId: ctx.organizationId, userId: ctx.userId } })
@@ -145,6 +142,15 @@ export async function ask(opts: {
       ).reverse()
     : [];
   await prisma.askMessage.create({ data: { conversationId: conversation.id, role: "user", text: question } });
+  // Counted again with this question in: a burst sent at once is each other's count.
+  if (!opts.ignoreOrgSwitch) {
+    const lastHour = await prisma.askMessage.count({
+      where: { role: "user", createdAt: { gte: new Date(ctx.now.getTime() - 3_600_000) }, conversation: { organizationId: ctx.organizationId, userId: ctx.userId } },
+    });
+    if (lastHour > RATE_LIMIT_PER_HOUR) return finish("rate_limited", MESSAGES.rate_limited, null);
+  }
+  const cap = (await prisma.askSettings.findUnique({ where: { organizationId: ctx.organizationId }, select: { monthlyCapMicros: true } }))?.monthlyCapMicros ?? 5_000_000n;
+  if (!(await reserve(ctx.organizationId, monthOf(ctx.now), cap))) return finish("limit", MESSAGES.limit, null);
 
   const tz = ctx.stores.find((s) => s.id === opts.activeStoreId)?.timezone ?? ctx.stores[0]?.timezone ?? "UTC";
   const input: Item[] = [
@@ -167,6 +173,8 @@ export async function ask(opts: {
   ctx.tables = [];
   try {
     for (let round = 1; round <= MAX_ROUNDS; round++) {
+      // Only checked sentences reach the screen, against what the tools have returned so far.
+      const check = new StreamCheck(() => sourceNumbers(recorded.map((r) => r.result), [question, localDayOf(ctx.now, tz)]));
       const turn = await runTurn({
         model,
         effort,
@@ -176,8 +184,13 @@ export async function ask(opts: {
         allowTools: round < MAX_ROUNDS,
         safetyId,
         signal,
-        onText: (delta) => onEvent({ type: "text", round, delta }),
+        onText: (delta) => {
+          const ok = check.push(delta);
+          if (ok) onEvent({ type: "text", round, delta: ok });
+        },
       });
+      const rest = check.flush();
+      if (rest) onEvent({ type: "text", round, delta: rest });
       usage = addUsage(usage, turn.usage);
       input.push(...turn.items);
       text = turn.text;
