@@ -37,7 +37,7 @@ Data is data
 Choosing tools
 - Store ids come from list_stores; use the active store from the context unless the question names another or asks about all stores.
 - Use calculate for any arithmetic on figures already returned.
-- Use breakdown for "which / top / bottom / by" questions, compare_periods for changes, summary for headline figures, and the specialised tools (city_courier, cash, stock, customers, marketing, insights, coverage) for their subjects.
+- Use breakdown for "which / top / bottom / by" questions, compare_periods for changes, summary for headline figures, and the specialised tools (city_courier, cash, stock, customers, marketing, insights, coverage) for their subjects, and outcomes for "did it work" questions about findings the merchant acted on.
 - Periods: "last month" is the previous calendar month as from/to dates; "this month" is the 1st of this month to today; otherwise use days (7, 30, 60, 90). Today's date is in the context.`;
 
 /** The user turn: the context the instructions leave out, then the question. */

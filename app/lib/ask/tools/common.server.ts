@@ -66,7 +66,7 @@ export function scopeOf(filters: FiltersArg, options?: StoreSummary["scopeOption
 }
 
 /** A Growzar screen for one store, with the period and filters it was asked with. */
-export function screenLink(section: Section | "compare" | "insights" | "settings/coverage", store: AskStore | null, query: string, extra: Record<string, string | null> = {}) {
+export function screenLink(section: Section | "compare" | "insights" | "results" | "settings/coverage", store: AskStore | null, query: string, extra: Record<string, string | null> = {}) {
   const q = new URLSearchParams(query);
   if (store) q.set("store", store.id);
   for (const [k, v] of Object.entries(extra)) if (v) q.set(k, v);
