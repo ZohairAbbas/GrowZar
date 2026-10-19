@@ -14,3 +14,25 @@ export function readStoreCookie(request: Request): string | null {
   const match = cookie.match(new RegExp(`(?:^|; )${STORE_COOKIE}=([^;]+)`));
   return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
+
+/**
+ * A link that names its store (`?store=`, as "talk to your data" builds
+ * them): remember that store, if the viewer may see it, and reload the same
+ * screen without the parameter, so every link on it keeps working as usual.
+ * Returns nothing when the URL names no store, or one outside `visible`.
+ */
+export function rememberLinkedStore(url: URL, visible: ReadonlyArray<{ id: string }>): Response | null {
+  const asked = url.searchParams.get("store");
+  if (!asked) return null;
+  const rest = new URLSearchParams(url.searchParams);
+  rest.delete("store");
+  const to = `${url.pathname}${rest.size ? `?${rest}` : ""}`;
+  if (!visible.some((s) => s.id === asked)) return new Response(null, { status: 302, headers: { Location: to } });
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: to,
+      "Set-Cookie": `${STORE_COOKIE}=${encodeURIComponent(asked)}; Path=/; Max-Age=${STORE_COOKIE_MAX_AGE}; SameSite=Lax; HttpOnly`,
+    },
+  });
+}

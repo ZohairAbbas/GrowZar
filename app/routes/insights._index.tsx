@@ -2,7 +2,7 @@ import type { Route } from "./+types/insights._index";
 import { prisma } from "~/lib/db.server";
 import { hasPermission, listVisibleStores, requireSection } from "~/lib/authorize.server";
 import { inboxView } from "~/lib/insights/inbox.server";
-import { readStoreCookie } from "~/lib/store-cookie.server";
+import { readStoreCookie, rememberLinkedStore } from "~/lib/store-cookie.server";
 import { storeSummary } from "~/lib/metrics/summaries.server";
 import { PERIODS, periodFrom } from "~/lib/metrics/screens.server";
 import { previousPeriod } from "~/lib/metrics/compare";
@@ -25,6 +25,8 @@ export function meta() {
 export async function loader({ request, url }: Route.LoaderArgs) {
   const viewer = await requireSection(request, "home", "view");
   const stores = await listVisibleStores(viewer);
+  const linked = rememberLinkedStore(url, stores);
+  if (linked) throw linked;
   const remembered = readStoreCookie(request);
   const active = stores.find((s) => s.id === remembered) ?? stores[0] ?? null;
   const tab = parseInsightsTab(url.searchParams.get("tab"));
