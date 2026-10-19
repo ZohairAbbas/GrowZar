@@ -17,12 +17,14 @@ import {
   Wallet,
   Lightbulb,
   Activity,
+  MessageCircleQuestionMark,
 } from "lucide-react";
 
 import type { Route } from "./+types/shell";
 import { auth } from "~/lib/auth.server";
 import { readStoreCookie } from "~/lib/store-cookie.server";
 import { prisma } from "~/lib/db.server";
+import { askEnabled } from "~/lib/ask/loop.server";
 import { getViewer, listVisibleStores, visibleSections } from "~/lib/authorize.server";
 import { SECTIONS, type Section } from "~/lib/permissions";
 import {
@@ -79,6 +81,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     : [];
 
   const organization = organizations.find((o) => o.id === viewer.organizationId);
+  // Ask shows in the navigation only where it is on, for the server and the organization.
+  const ask = askEnabled() && Boolean((await prisma.askSettings.findUnique({ where: { organizationId: viewer.organizationId }, select: { enabled: true } }))?.enabled);
 
   return {
     user: { name: viewer.userId, role: viewer.role },
@@ -93,6 +97,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       displayName: store.displayName,
     })),
     activeStoreId: active?.id ?? null,
+    ask: ask && allowed.has("home"),
     sections: ORDERED_SECTIONS.filter((definition) =>
       allowed.has(definition.section),
     ).map((definition) => ({
@@ -145,7 +150,7 @@ export function Logo() {
 }
 
 export default function Shell({ loaderData }: Route.ComponentProps) {
-  const { organization, organizations, stores, activeStoreId, sections } =
+  const { organization, organizations, stores, activeStoreId, sections, ask } =
     loaderData;
   // Switching a store keeps you on the page you were reading.
   const location = useLocation();
@@ -271,6 +276,21 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
                   >
                     <Lightbulb className="h-[18px] w-[18px] flex-shrink-0 group-[.active]:text-mint" />
                     <span className="flex-1 truncate">Insights</span>
+                  </NavLink>
+                ) : null}
+                {/* Ask about your stores (G-GZR10-3), under Home, where it is turned on. */}
+                {item.section === "home" && ask ? (
+                  <NavLink
+                    to="/ask"
+                    className={({ isActive }) =>
+                      cn(
+                        "group flex items-center gap-3 rounded-full px-3.5 py-2.5 text-sm transition",
+                        isActive ? "active bg-navy font-semibold text-white" : "font-medium text-gray-700 hover:bg-field",
+                      )
+                    }
+                  >
+                    <MessageCircleQuestionMark className="h-[18px] w-[18px] flex-shrink-0 group-[.active]:text-mint" />
+                    <span className="flex-1 truncate">Ask</span>
                   </NavLink>
                 ) : null}
                 {/* What happened after findings were acted on (G-GZR9-5), also under Home. */}

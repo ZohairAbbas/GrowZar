@@ -477,11 +477,17 @@ export function breakdownTable(input: {
   labels: Readonly<Record<string, string>>;
   sort: "top" | "bottom" | "time";
   limit: number;
+  /** Only rows whose first metric is below zero ("which products lost money") or above it. */
+  only?: "negative" | "positive" | null;
 }): BreakdownTable {
   const { groups, dimension, metrics, currency } = input;
   const first = metrics[0]!;
   const notes: string[] = [];
-  const entries = [...groups.entries()].map(([key, raw]) => ({ key, raw, value: valueOf(first, raw) }));
+  const all = [...groups.entries()].map(([key, raw]) => ({ key, raw, value: valueOf(first, raw) }));
+  const entries = input.only ? all.filter((e) => e.value !== null && (input.only === "negative" ? e.value < 0 : e.value > 0)) : all;
+  if (input.only) {
+    notes.push(`${entries.length} of ${all.length} rows have ${input.only === "negative" ? "a negative" : "a positive"} ${METRIC_DEFS[first].label.toLowerCase()}`);
+  }
 
   if (input.sort === "time") {
     entries.sort((a, b) => a.key.localeCompare(b.key));

@@ -23,6 +23,7 @@ import { refreshAdSpend } from "~/lib/metrics/ad-spend.server";
 import { refreshProfitSettings } from "~/lib/metrics/summaries.server";
 import { refreshBuyerNetwork, refreshOrderNetwork } from "~/lib/metrics/buyer-network.server";
 import { runDueDigests } from "~/lib/digest/digest.server";
+import { redactOldMessages } from "~/lib/ask/loop.server";
 
 /**
  * The sync worker.
@@ -344,11 +345,23 @@ const digestTimer = setInterval(() => {
   void digests().catch((error) => console.error("[digest] run failed", error));
 }, DIGEST_INTERVAL_MS);
 
+/**
+ * "Talk to your data" retention (B6): questions and answers past 90 days
+ * lose their text and tool results. Hourly; idempotent.
+ */
+const ASK_RETENTION_INTERVAL_MS = 60 * 60 * 1000;
+const askRetentionTimer = setInterval(() => {
+  void redactOldMessages()
+    .then((n) => n && console.log(`[ask] redacted ${n} message(s) past retention`))
+    .catch((error) => console.error("[ask] retention failed", error));
+}, ASK_RETENTION_INTERVAL_MS);
+
 async function shutdown(signal: string) {
   console.log(`[sync] ${signal}: draining`);
   clearInterval(sweepTimer);
   clearInterval(reconcileTimer);
   clearInterval(digestTimer);
+  clearInterval(askRetentionTimer);
   await eventsWorker.close();
   // Closing the worker lets the job in flight finish. A sync killed mid-run is
   // safe by design, but finishing the page it is on avoids re-fetching it.

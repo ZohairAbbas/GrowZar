@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import { Activity, ArrowRight } from "lucide-react";
+import { AskBox } from "~/components/ask/AskBox";
 import type { AppPrompt } from "~/lib/metrics/next-app";
 import { SUITE_APPS } from "~/lib/apps/app-links";
 import { figuresText, riskLabel, type BuyerNetworkLine } from "~/lib/metrics/buyer-network";
@@ -52,6 +53,7 @@ export function HomePanel({
   period,
   nextApp,
   results,
+  ask = false,
 }: {
   view: HomeView;
   inbox: InboxView;
@@ -59,9 +61,12 @@ export function HomePanel({
   period: { from: string; to: string; query: string };
   nextApp?: { storeId: string; prompts: AppPrompt[] } | null;
   results?: { watched: number; measured: number; watching: number; changed: number } | null;
+  /** Ask is on for this organization: show its box (G-GZR10-3). */
+  ask?: boolean;
 }) {
   return (
     <section className="space-y-6">
+      {ask ? <AskBox /> : null}
       <AttentionList inbox={inbox} period={period.query} />
       {results?.measured ? <ResultsRow results={results} /> : null}
       {nextApp ? <NextAppCard storeId={nextApp.storeId} prompts={nextApp.prompts} /> : null}

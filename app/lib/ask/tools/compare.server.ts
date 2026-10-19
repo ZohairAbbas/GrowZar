@@ -58,6 +58,11 @@ export async function runCompare(args: Args, ctx: AskContext): Promise<ToolResul
     return resolvePeriod({ days: null, ...previousPeriod(p.from, p.to) }, s.timezone, ctx.now);
   });
   if (isRefusal(before)) return before;
+  // The earlier period must end before this one starts: comparing a period with itself always reads "no change".
+  const overlap = now.periods.findIndex((p, i) => before.periods[i]!.to >= p.from);
+  if (overlap >= 0) {
+    return refusal(name, "invalid", `The earlier period (${before.periods[overlap]!.from} to ${before.periods[overlap]!.to}) must end before this one starts (${now.periods[overlap]!.from}). Use against: null for the period just before.`);
+  }
 
   // No comparison against days the store's history does not reach (as Home withdraws it).
   const short = now.stores.filter((s, i) => {
@@ -144,6 +149,6 @@ export const comparePeriods: AskTool<typeof compareSchema> = {
   description:
     "Compare a period with an earlier one (default: the equal-length period just before) for any metric, in total or by a dimension, e.g. 'delivery rate this month vs last month' or 'which city's returns rose most'. Returns this period, the earlier period and the change.",
   schema: compareSchema,
-  sections: (args) => breakdown.sections({ ...args, variant: null }),
+  sections: (args) => breakdown.sections({ ...args, variant: null, only: null }),
   run: runCompare,
 };

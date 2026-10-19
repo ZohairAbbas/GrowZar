@@ -116,6 +116,12 @@ vi.mock("../insights/inbox.server", () => ({
     return { outcomes: [{ detector: "margin_ceiling", status: "found", insights: [insight] }], connected: new Set(), insights: [insight], row: new Map([["margin_ceiling:store", { id: "ins1" }]]), hiddenNow: () => false, visible: [insight], items: [{ id: "ins1", insight }] };
   },
 }));
+vi.mock("../outcomes/results.server", () => ({
+  outcomeLinesOf: async () => [
+    { watchId: "w1", insightId: "ins1", detector: "courier_for_city", status: "measured", since: "1 Oct", text: "Lahore by Leopards: 82% delivered before, 91% since; other routes moved 1 point", signal: null, money: null, moneyValue: null, internal: false, storeId: "s1", actedAt: "2026-10-01T00:00:00Z" },
+    { watchId: "w2", insightId: "ins2", detector: "cash_held", status: "hidden", since: "2 Oct", text: "hidden", signal: null, money: null, moneyValue: null, internal: false, storeId: "s1", actedAt: "2026-10-02T00:00:00Z" },
+  ],
+}));
 vi.mock("../insights/summary", async (orig) => ({
   ...(await orig<typeof import("../insights/summary")>()),
   // A finding that quotes a buyer, to prove the guard masks it.
@@ -180,7 +186,9 @@ const STORES = [
 function ctx(o: { finance?: boolean; sections?: Section[]; stores?: typeof STORES } = {}): AskContext {
   const allowed = new Set<Section>(o.sections ?? ["home", "orders", "shipping", "finance", "customers", "inventory", "marketing", "inbox", "settings"]);
   if (o.finance === false) allowed.delete("finance");
-  return { organizationId: "org", userId: "u", baseCurrency: "PKR", stores: o.stores ?? STORES, can: (s) => allowed.has(s), now: new Date("2026-10-19T12:00:00Z"), memo: new Map() };
+  // An earlier table of the answer, for calculate.
+  const tables: ToolResult[] = [{ tool: "summary", status: "ok", title: "t", columns: [{ key: "label", label: "Store", kind: "text" }, { key: "orders", label: "Orders", kind: "count" }], rows: [{ label: "Lahore Lawn", orders: 68 }, { label: "Dubai Abayas", orders: 68 }], meta: { stores: [], rules: [], gaps: [], notes: [] }, link: null }];
+  return { organizationId: "org", userId: "u", baseCurrency: "PKR", stores: o.stores ?? STORES, can: (s) => allowed.has(s), now: new Date("2026-10-19T12:00:00Z"), memo: new Map(), tables };
 }
 
 const run = (name: string, args: Record<string, unknown>, c = ctx()) => runTool(name, args, c);
@@ -192,10 +200,10 @@ const CALLS: Array<[string, Record<string, unknown>]> = [
   ["list_stores", {}],
   ["summary", { store: null, period: PERIOD }],
   ["summary", { store: "s1", period: PERIOD }],
-  ["breakdown", { store: "s1", metrics: ["orders", "delivery_rate"], by: "city", period: PERIOD, filters: FILTERS, variant: null, order: null, limit: null }],
-  ["breakdown", { store: "s1", metrics: ["profit", "delivered_revenue"], by: "variant", period: PERIOD, filters: FILTERS, variant: null, order: "bottom", limit: null }],
-  ["breakdown", { store: "s1", metrics: ["orders", "buyers"], by: "buyer_type", period: PERIOD, filters: FILTERS, variant: null, order: null, limit: null }],
-  ["breakdown", { store: "s1", metrics: ["orders", "return_rate"], by: "campaign", period: PERIOD, filters: FILTERS, variant: null, order: null, limit: null }],
+  ["breakdown", { store: "s1", metrics: ["orders", "delivery_rate"], by: "city", period: PERIOD, filters: FILTERS, variant: null, order: null, only: null, limit: null }],
+  ["breakdown", { store: "s1", metrics: ["profit", "delivered_revenue"], by: "variant", period: PERIOD, filters: FILTERS, variant: null, order: "bottom", only: null, limit: null }],
+  ["breakdown", { store: "s1", metrics: ["orders", "buyers"], by: "buyer_type", period: PERIOD, filters: FILTERS, variant: null, order: null, only: null, limit: null }],
+  ["breakdown", { store: "s1", metrics: ["orders", "return_rate"], by: "campaign", period: PERIOD, filters: FILTERS, variant: null, order: null, only: null, limit: null }],
   ["compare_periods", { store: "s1", metrics: ["delivery_rate", "orders"], by: "none", period: PERIOD, against: null, filters: FILTERS, order: null, limit: null }],
   ["city_courier", { store: "s1", period: PERIOD, city: null, courier: null, limit: null }],
   ["cash", { store: "s1", view: "owed", period: null }],
@@ -212,6 +220,8 @@ const CALLS: Array<[string, Record<string, unknown>]> = [
   ["marketing", { store: "s1", view: "offers", period: null, limit: null }],
   ["insights", { store: "s1", insight: null, period: null }],
   ["coverage", { store: "s1", period: null, gaps_only: null }],
+  ["outcomes", { store: "s1", detector: null, status: null }],
+  ["calculate", { op: "share", values: [{ table: 1, row: "Lahore Lawn", column: "orders" }, { table: 1, row: "Dubai Abayas", column: "orders" }] }],
 ];
 
 /** Every key and string anywhere in a result. */
@@ -273,7 +283,8 @@ describe("every tool", () => {
   });
 
   it("states the rules, and links every answer to a screen", () => {
-    for (const { name, result } of results.filter((r) => r.result.status === "ok")) {
+    // calculate rests on earlier tables, whose links stand for it.
+    for (const { name, result } of results.filter((r) => r.result.status === "ok" && r.name !== "calculate")) {
       expect(result.link, name).not.toBeNull();
       expect(result.meta.stores.length, name).toBeGreaterThan(0);
     }
@@ -284,7 +295,7 @@ describe("permissions", () => {
   it("refuses a money metric to a viewer without Finance, by any tool", async () => {
     const c = ctx({ finance: false });
     for (const [name, args] of [
-      ["breakdown", { store: "s1", metrics: ["orders", "profit"], by: "none", period: null, filters: null, variant: null, order: null, limit: null }],
+      ["breakdown", { store: "s1", metrics: ["orders", "profit"], by: "none", period: null, filters: null, variant: null, order: null, only: null, limit: null }],
       ["compare_periods", { store: "s1", metrics: ["delivered_revenue"], by: "none", period: null, against: null, filters: null, order: null, limit: null }],
       ["cash", { store: "s1", view: "owed", period: null }],
       ["stock", { store: "s1", state: null, search: null, sort: "profit", period: null, limit: null }],
@@ -303,11 +314,11 @@ describe("permissions", () => {
 
   it("asks for the section a breakdown's view belongs to", async () => {
     const homeOnly = ctx({ sections: ["home"] });
-    const byCity = await run("breakdown", { store: "s1", metrics: ["orders"], by: "city", period: null, filters: null, variant: null, order: null, limit: null }, homeOnly);
+    const byCity = await run("breakdown", { store: "s1", metrics: ["orders"], by: "city", period: null, filters: null, variant: null, order: null, only: null, limit: null }, homeOnly);
     expect(byCity.title).toMatch(/Shipping/);
-    const byProduct = await run("breakdown", { store: "s1", metrics: ["orders"], by: "product", period: null, filters: null, variant: null, order: null, limit: null }, homeOnly);
+    const byProduct = await run("breakdown", { store: "s1", metrics: ["orders"], by: "product", period: null, filters: null, variant: null, order: null, only: null, limit: null }, homeOnly);
     expect(byProduct.title).toMatch(/Orders/);
-    const total = await run("breakdown", { store: "s1", metrics: ["orders"], by: "none", period: null, filters: null, variant: null, order: null, limit: null }, homeOnly);
+    const total = await run("breakdown", { store: "s1", metrics: ["orders"], by: "none", period: null, filters: null, variant: null, order: null, only: null, limit: null }, homeOnly);
     expect(total.status).toBe("ok");
   });
 
@@ -318,7 +329,7 @@ describe("permissions", () => {
   });
 
   it("answers a store outside the viewer's scope as one that does not exist, by id or by name", async () => {
-    const byId = await run("breakdown", { store: "s3", metrics: ["orders"], by: "none", period: null, filters: null, variant: null, order: null, limit: null });
+    const byId = await run("breakdown", { store: "s3", metrics: ["orders"], by: "none", period: null, filters: null, variant: null, order: null, only: null, limit: null });
     const byName = await run("summary", { store: "Hidden Store", period: null });
     const nowhere = await run("summary", { store: "nope", period: null });
     for (const r of [byId, byName, nowhere]) {
@@ -335,7 +346,7 @@ describe("permissions", () => {
   it("rejects arguments the schema does not allow, even if the model sends them", async () => {
     const extra = await run("summary", { store: null, period: null, organizationId: "other-org" });
     expect(extra.status).toBe("invalid");
-    const bad = await run("breakdown", { store: "s1", metrics: ["orders; DROP TABLE"], by: "city", period: null, filters: null, variant: null, order: null, limit: null });
+    const bad = await run("breakdown", { store: "s1", metrics: ["orders; DROP TABLE"], by: "city", period: null, filters: null, variant: null, order: null, only: null, limit: null });
     expect(bad.status).toBe("invalid");
   });
 });
@@ -344,7 +355,7 @@ describe("empty and thin data", () => {
   const EMPTY = { days: null, from: "2026-01-01", to: "2026-01-31" };
 
   it("says there were no orders, never a zero", async () => {
-    const b = await run("breakdown", { store: "s1", metrics: ["delivery_rate"], by: "city", period: EMPTY, filters: null, variant: null, order: null, limit: null });
+    const b = await run("breakdown", { store: "s1", metrics: ["delivery_rate"], by: "city", period: EMPTY, filters: null, variant: null, order: null, only: null, limit: null });
     expect(b.status).toBe("no_data");
     expect(b.rows).toEqual([]);
     const s = await run("summary", { store: "s1", period: EMPTY });
@@ -357,6 +368,12 @@ describe("empty and thin data", () => {
     expect(r.status).toBe("invalid");
   });
 
+  it("refuses to compare a period with itself or an overlapping one", async () => {
+    const r = await run("compare_periods", { store: "s1", metrics: ["orders"], by: "none", period: { days: 30, from: null, to: null }, against: { days: 30, from: null, to: null }, filters: null, order: null, limit: null });
+    expect(r.status).toBe("invalid");
+    expect(r.title).toMatch(/must end before this one starts/);
+  });
+
   it("withdraws a comparison against days before the store's history", async () => {
     const r = await run("compare_periods", { store: "s1", metrics: ["orders"], by: "none", period: null, against: { days: null, from: "2026-07-01", to: "2026-07-30" }, filters: null, order: null, limit: null });
     expect(r.status).toBe("not_enough_data");
@@ -365,10 +382,10 @@ describe("empty and thin data", () => {
 
 describe("mixed-currency organization", () => {
   it("adds counts across stores but never money in two currencies", async () => {
-    const counts = await run("breakdown", { store: null, metrics: ["orders", "delivery_rate"], by: "courier", period: null, filters: null, variant: null, order: null, limit: null });
+    const counts = await run("breakdown", { store: null, metrics: ["orders", "delivery_rate"], by: "courier", period: null, filters: null, variant: null, order: null, only: null, limit: null });
     expect(counts.status).toBe("ok");
     expect(counts.rows.find((r) => r.key === "leopards")!.orders).toBe(86);
-    const money = await run("breakdown", { store: null, metrics: ["delivered_revenue"], by: "courier", period: null, filters: null, variant: null, order: null, limit: null });
+    const money = await run("breakdown", { store: null, metrics: ["delivered_revenue"], by: "courier", period: null, filters: null, variant: null, order: null, only: null, limit: null });
     expect(money.status).toBe("invalid");
     expect(money.title).toMatch(/different currencies/);
   });
@@ -388,20 +405,26 @@ describe("mixed-currency organization", () => {
 });
 
 describe("answers", () => {
+  it("answers 'did it work' from the Results page's lines, leaving out what the merchant hid", async () => {
+    const r = await run("outcomes", { store: null, detector: "courier_for_city", status: null });
+    expect(r.rows).toEqual([expect.objectContaining({ key: "ins1", status: "measured", outcome: expect.stringContaining("91% since") })]);
+    expect(r.meta.notes.join(" ")).toMatch(/marked "this wasn't us" and left out/);
+  });
+
   it("compares delivery rate in points against the previous period", async () => {
     const r = await run("compare_periods", { store: "s1", metrics: ["delivery_rate"], by: "none", period: null, against: null, filters: null, order: null, limit: null });
     expect(r.rows[0]).toMatchObject({ delivery_rate: 84.6, delivery_rate_before: 50, delivery_rate_change: 34.6 });
   });
 
   it("matches a filter to the period's own spelling and links the screen with it", async () => {
-    const r = await run("breakdown", { store: "s1", metrics: ["orders"], by: "courier", period: null, filters: { city: "lahore", courier: null }, variant: null, order: null, limit: null });
+    const r = await run("breakdown", { store: "s1", metrics: ["orders"], by: "courier", period: null, filters: { city: "lahore", courier: null }, variant: null, order: null, only: null, limit: null });
     expect(r.rows.map((x) => x.key)).toEqual(["leopards"]);
     expect(r.link!.href).toContain("store=s1");
     expect(r.link!.href).toContain("days=30");
   });
 
   it("says when no screen shows the view", async () => {
-    const r = await run("breakdown", { store: "s1", metrics: ["aov"], by: "day", period: null, filters: null, variant: null, order: null, limit: null });
+    const r = await run("breakdown", { store: "s1", metrics: ["aov"], by: "day", period: null, filters: null, variant: null, order: null, only: null, limit: null });
     expect(r.link!.exact).toBe(false);
   });
 

@@ -43,6 +43,7 @@
     "jose": "^6.2.12",
     "libphonenumber-js": "^1.13.14",
     "lucide-react": "^1.47.0",
+    "openai": "7.28.0",
     "pg": "^8.23.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
