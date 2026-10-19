@@ -303,11 +303,11 @@ describe("permissions", () => {
 
   it("asks for the section a breakdown's view belongs to", async () => {
     const homeOnly = ctx({ sections: ["home"] });
-    const byCity = await run("breakdown", { store: "s1", metrics: ["orders"], by: "city", period: null, filters: null, variant: null, order: null, limit: null }, homeOnly);
+    const byCity = await run("breakdown", { store: "s1", metrics: ["orders"], by: "city", period: null, filters: null, variant: null, order: null, only: null, limit: null }, homeOnly);
     expect(byCity.title).toMatch(/Shipping/);
-    const byProduct = await run("breakdown", { store: "s1", metrics: ["orders"], by: "product", period: null, filters: null, variant: null, order: null, limit: null }, homeOnly);
+    const byProduct = await run("breakdown", { store: "s1", metrics: ["orders"], by: "product", period: null, filters: null, variant: null, order: null, only: null, limit: null }, homeOnly);
     expect(byProduct.title).toMatch(/Orders/);
-    const total = await run("breakdown", { store: "s1", metrics: ["orders"], by: "none", period: null, filters: null, variant: null, order: null, limit: null }, homeOnly);
+    const total = await run("breakdown", { store: "s1", metrics: ["orders"], by: "none", period: null, filters: null, variant: null, order: null, only: null, limit: null }, homeOnly);
     expect(total.status).toBe("ok");
   });
 

@@ -27,7 +27,7 @@ export const TIMEOUT_MS = 60_000;
 /** Earlier turns of the conversation sent with a question (text only; tools are called again). */
 export const HISTORY_MESSAGES = 8;
 
-export type AskStatus = "answered" | "refused" | "limit" | "disabled" | "timeout" | "error";
+export type AskStatus = "answered" | "refused" | "limit" | "disabled" | "timeout" | "cancelled" | "error";
 
 export type AskEvent =
   | { type: "start"; conversationId: string }
@@ -45,6 +45,7 @@ const MESSAGES: Record<Exclude<AskStatus, "answered">, string> = {
   disabled: "Asking about your data isn't turned on for this organization.",
   limit: "Your organization has reached this month's limit for questions. It resets on the 1st; an owner can see the usage in Settings → Ask.",
   refused: "I can't help with that one. Ask about your orders, deliveries, couriers, cash, stock, customers or marketing.",
+  cancelled: "The question was stopped before it was answered.",
   timeout: "That took too long to answer. Try a narrower question, for one store or a shorter period.",
   error: "Something went wrong while answering. Try again in a moment.",
 };
@@ -60,6 +61,26 @@ export async function gate(organizationId: string, now: Date, opts: { ignoreOrgS
   const cap = settings?.monthlyCapMicros ?? 5_000_000n;
   if ((usage?.costMicros ?? 0n) >= cap) return "limit";
   return null;
+}
+
+/**
+ * Held against the month's cap before the model is called, then settled to
+ * what the answer cost. Parallel questions each hold their share, so a burst
+ * cannot pass the cap together; a typical answer costs $0.003–0.016 (eval,
+ * 2026-10-19).
+ */
+export const RESERVE_MICROS = 50_000n;
+
+/** Hold RESERVE_MICROS of the month, atomically, if it fits under the cap. */
+async function reserve(organizationId: string, month: string, cap: bigint): Promise<boolean> {
+  const rows = await prisma.$queryRaw<Array<{ costMicros: bigint }>>`
+    INSERT INTO ask_usage_monthly ("organizationId", month, "costMicros")
+    VALUES (${organizationId}, ${month}, ${RESERVE_MICROS})
+    ON CONFLICT ("organizationId", month) DO UPDATE
+      SET "costMicros" = ask_usage_monthly."costMicros" + EXCLUDED."costMicros"
+      WHERE ask_usage_monthly."costMicros" + EXCLUDED."costMicros" <= ${cap}
+    RETURNING "costMicros"`;
+  return rows.length > 0 && RESERVE_MICROS <= cap;
 }
 
 type Recorded = { name: string; args: unknown; table: number; result: ToolResult };
@@ -85,6 +106,8 @@ export async function ask(opts: {
   const blocked = await gate(ctx.organizationId, ctx.now, { ignoreOrgSwitch: opts.ignoreOrgSwitch });
   if (blocked) return finish(blocked, MESSAGES[blocked], null);
   const { model, effort } = askModel();
+  const cap = (await prisma.askSettings.findUnique({ where: { organizationId: ctx.organizationId }, select: { monthlyCapMicros: true } }))?.monthlyCapMicros ?? 5_000_000n;
+  if (!(await reserve(ctx.organizationId, monthOf(ctx.now), cap))) return finish("limit", MESSAGES.limit, null);
 
   // The conversation: the member's own, in this organization, or a new one.
   const existing = opts.conversationId
@@ -138,6 +161,11 @@ export async function ask(opts: {
       usage = addUsage(usage, turn.usage);
       input.push(...turn.items);
       text = turn.text;
+      // Cut off by the output limit or a filter: say so rather than pass a half answer as whole.
+      if (turn.incomplete && !turn.calls.length) {
+        if (text.trim()) text = `${text.trim()}\n\n(This answer was cut short.)`;
+        break;
+      }
       if (turn.refusal) {
         status = "refused";
         text = MESSAGES.refused;
@@ -167,7 +195,7 @@ export async function ask(opts: {
   } catch (e) {
     const err = e instanceof LlmError ? e : new LlmError("failed", e instanceof Error ? e.message : String(e));
     // However the failure surfaced, a passed deadline is a timeout.
-    status = err.kind === "timeout" || timeout.signal.aborted ? "timeout" : "error";
+    status = opts.signal?.aborted ? "cancelled" : err.kind === "timeout" || timeout.signal.aborted ? "timeout" : "error";
     text = MESSAGES[status];
     console.error(`[ask] ${status}: ${err.kind} ${err.status ?? ""} ${err.message}`);
   } finally {
@@ -193,24 +221,17 @@ export async function ask(opts: {
       latencyMs,
     },
   });
-  // Every model call is paid for, whatever the outcome.
-  await prisma.askUsageMonthly.upsert({
+  // Settle the reservation to what was spent. An answer that broke off mid-call
+  // keeps the whole reservation: the provider bills that call, and its usage never came back.
+  const spent = status === "timeout" || status === "error" || status === "cancelled" ? (BigInt(cost) > RESERVE_MICROS ? BigInt(cost) : RESERVE_MICROS) : BigInt(cost);
+  await prisma.askUsageMonthly.update({
     where: { organizationId_month: { organizationId: ctx.organizationId, month: monthOf(ctx.now) } },
-    create: {
-      organizationId: ctx.organizationId,
-      month: monthOf(ctx.now),
-      questions: 1,
-      inputTokens: BigInt(usage.inputTokens),
-      cachedTokens: BigInt(usage.cachedTokens),
-      outputTokens: BigInt(usage.outputTokens),
-      costMicros: BigInt(cost),
-    },
-    update: {
+    data: {
       questions: { increment: 1 },
       inputTokens: { increment: BigInt(usage.inputTokens) },
       cachedTokens: { increment: BigInt(usage.cachedTokens) },
       outputTokens: { increment: BigInt(usage.outputTokens) },
-      costMicros: { increment: BigInt(cost) },
+      costMicros: { increment: spent - RESERVE_MICROS },
     },
   });
   onEvent({ type: "done", messageId: message.id, status, text, usage, costMicros: cost, latencyMs });
@@ -230,7 +251,8 @@ export async function redactOldMessages(now = new Date()): Promise<number> {
   const before = new Date(now.getTime() - RETENTION_DAYS * 86_400_000);
   const r = await prisma.askMessage.updateMany({
     where: { createdAt: { lt: before }, redactedAt: null },
-    data: { text: null, toolCalls: Prisma.DbNull, redactedAt: now },
+    // `checks` holds the dropped sentences: answer text too.
+    data: { text: null, toolCalls: Prisma.DbNull, checks: Prisma.DbNull, redactedAt: now },
   });
   return r.count;
 }

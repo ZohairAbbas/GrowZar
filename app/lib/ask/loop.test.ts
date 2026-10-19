@@ -10,15 +10,26 @@ const db = { settings: new Map<string, Row>(), usage: new Map<string, Row>(), co
 let ids = 0;
 vi.mock("../db.server", () => ({
   prisma: {
+    // The cap reservation: an upsert that adds only if the month stays under the cap.
+    $queryRaw: async (strings: TemplateStringsArray, organizationId: string, month: string, add: bigint, cap: bigint) => {
+      void strings;
+      const k = `${organizationId}:${month}`;
+      const row = db.usage.get(k);
+      if (!row) {
+        db.usage.set(k, { organizationId, month, questions: 0, inputTokens: 0n, cachedTokens: 0n, outputTokens: 0n, costMicros: add });
+        return [{ costMicros: add }];
+      }
+      if ((row.costMicros as bigint) + add > cap) return [];
+      row.costMicros = (row.costMicros as bigint) + add;
+      return [{ costMicros: row.costMicros }];
+    },
     askSettings: { findUnique: async ({ where }: { where: { organizationId: string } }) => db.settings.get(where.organizationId) ?? null },
     askUsageMonthly: {
       findUnique: async ({ where }: { where: { organizationId_month: { organizationId: string; month: string } } }) =>
         db.usage.get(`${where.organizationId_month.organizationId}:${where.organizationId_month.month}`) ?? null,
-      upsert: async ({ where, create, update }: { where: { organizationId_month: { organizationId: string; month: string } }; create: Row; update: Record<string, { increment: number | bigint }> }) => {
-        const k = `${where.organizationId_month.organizationId}:${where.organizationId_month.month}`;
-        const row = db.usage.get(k);
-        if (!row) db.usage.set(k, { ...create });
-        else for (const [f, v] of Object.entries(update)) row[f] = (row[f] as bigint | number) + (v.increment as never);
+      update: async ({ where, data }: { where: { organizationId_month: { organizationId: string; month: string } }; data: Record<string, { increment: number | bigint }> }) => {
+        const row = db.usage.get(`${where.organizationId_month.organizationId}:${where.organizationId_month.month}`)!;
+        for (const [f, v] of Object.entries(data)) row[f] = (row[f] as bigint | number) + (v.increment as never);
       },
     },
     askConversation: {
@@ -38,7 +49,7 @@ vi.mock("../db.server", () => ({
       },
       updateMany: async ({ where, data }: { where: { createdAt: { lt: Date } }; data: Row }) => {
         const hit = db.messages.filter((m) => (m.createdAt as Date) < where.createdAt.lt && !m.redactedAt);
-        for (const m of hit) Object.assign(m, { text: data.text, toolCalls: null, redactedAt: data.redactedAt });
+        for (const m of hit) Object.assign(m, { text: data.text, toolCalls: null, checks: null, redactedAt: data.redactedAt });
         return { count: hit.length };
       },
     },
@@ -158,7 +169,31 @@ describe("the loop", () => {
     await run();
     const usage = db.usage.get("org:2026-10")!;
     expect(usage.questions).toBe(1);
+    // The reservation is settled to exactly what was spent.
     expect(usage.costMicros).toBe(BigInt(costMicros("gpt-6.1-sol", { inputTokens: 1000, cachedTokens: 800, outputTokens: 100, reasoningTokens: 0 })));
+  });
+
+  it("holds a share of the cap for each question in flight, so a burst can't pass it together", async () => {
+    db.usage.set("org:2026-10", { organizationId: "org", month: "2026-10", questions: 0, inputTokens: 0n, cachedTokens: 0n, outputTokens: 0n, costMicros: 4_920_000n });
+    // Room for one reservation of 50,000 under the 5,000,000 cap, not two.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    turns.push(async () => {
+      await held;
+      return { text: "Done." };
+    });
+    const first = run("One?");
+    await new Promise((r) => setTimeout(r, 10));
+    const second = await run("Two?");
+    expect(second.status).toBe("limit");
+    release();
+    expect((await first).status).toBe("answered");
+  });
+
+  it("says when an answer was cut short", async () => {
+    turns.push(() => ({ text: "Lahore was", incomplete: "max_output_tokens" }));
+    const r = await run();
+    expect(r.text).toBe("Lahore was\n\n(This answer was cut short.)");
   });
 
   it(`stops calling tools after ${MAX_ROUNDS} model calls: the last may only answer`, async () => {
@@ -203,6 +238,8 @@ describe("the loop", () => {
     vi.useRealTimers();
     expect(r.status).toBe("timeout");
     expect(db.messages.find((m) => m.role === "assistant")!.status).toBe("timeout");
+    // The call that broke off is billed; its whole reservation stays counted.
+    expect(db.usage.get("org:2026-10")!.costMicros).toBe(50_000n);
   });
 
   it("continues the member's own conversation with its earlier text, and starts a new one otherwise", async () => {
@@ -233,7 +270,7 @@ describe("retention", () => {
       { id: "new", role: "assistant", text: "new answer", toolCalls: [{}], createdAt: new Date("2026-10-01T00:00:00Z"), redactedAt: null },
     );
     expect(await redactOldMessages(new Date("2026-10-19T00:00:00Z"))).toBe(1);
-    expect(db.messages[0]).toMatchObject({ text: null, toolCalls: null, feedback: "up", costMicros: 10n });
+    expect(db.messages[0]).toMatchObject({ text: null, toolCalls: null, checks: null, feedback: "up", costMicros: 10n });
     expect(db.messages[1]).toMatchObject({ text: "new answer" });
   });
 });
