@@ -34,6 +34,7 @@ CREATE TABLE "ask_messages" (
     "costMicros" BIGINT NOT NULL DEFAULT 0,
     "latencyMs" INTEGER,
     "grounded" BOOLEAN,
+    "checks" JSONB,
     "feedback" TEXT,
     "feedbackNote" TEXT,
     "redactedAt" TIMESTAMP(3),

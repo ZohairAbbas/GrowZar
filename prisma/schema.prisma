@@ -1227,6 +1227,8 @@ model AskMessage {
   latencyMs       Int?
   /// Every number in the text matched a tool result (G-GZR10-4); null until checked.
   grounded        Boolean?
+  /// What the checks found: numbers that matched nothing and the sentences dropped for them (G-GZR10-4).
+  checks          Json?
   /// up | down
   feedback        String?
   feedbackNote    String?
