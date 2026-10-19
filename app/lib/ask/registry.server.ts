@@ -13,6 +13,7 @@ import { customers } from "./tools/customers.server";
 import { insights } from "./tools/insights.server";
 import { listStores } from "./tools/list-stores.server";
 import { marketing } from "./tools/marketing.server";
+import { outcomes } from "./tools/outcomes.server";
 import { stock } from "./tools/stock.server";
 import { summary } from "./tools/summary.server";
 import type { AskContext, AskTool, ToolResult } from "./types";
@@ -28,7 +29,7 @@ import type { AskContext, AskTool, ToolResult } from "./types";
  * before anything leaves for the model.
  */
 
-export const TOOLS: AskTool[] = [listStores, summary, breakdown, comparePeriods, cityCourier, cash, stock, customers, marketing, insights, coverage, calculate] as AskTool[];
+export const TOOLS: AskTool[] = [listStores, summary, breakdown, comparePeriods, cityCourier, cash, stock, customers, marketing, insights, outcomes, coverage, calculate] as AskTool[];
 
 const byName = new Map(TOOLS.map((t) => [t.name, t]));
 

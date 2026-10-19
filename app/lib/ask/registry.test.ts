@@ -116,6 +116,12 @@ vi.mock("../insights/inbox.server", () => ({
     return { outcomes: [{ detector: "margin_ceiling", status: "found", insights: [insight] }], connected: new Set(), insights: [insight], row: new Map([["margin_ceiling:store", { id: "ins1" }]]), hiddenNow: () => false, visible: [insight], items: [{ id: "ins1", insight }] };
   },
 }));
+vi.mock("../outcomes/results.server", () => ({
+  outcomeLinesOf: async () => [
+    { watchId: "w1", insightId: "ins1", detector: "courier_for_city", status: "measured", since: "1 Oct", text: "Lahore by Leopards: 82% delivered before, 91% since; other routes moved 1 point", signal: null, money: null, moneyValue: null, internal: false, storeId: "s1", actedAt: "2026-10-01T00:00:00Z" },
+    { watchId: "w2", insightId: "ins2", detector: "cash_held", status: "hidden", since: "2 Oct", text: "hidden", signal: null, money: null, moneyValue: null, internal: false, storeId: "s1", actedAt: "2026-10-02T00:00:00Z" },
+  ],
+}));
 vi.mock("../insights/summary", async (orig) => ({
   ...(await orig<typeof import("../insights/summary")>()),
   // A finding that quotes a buyer, to prove the guard masks it.
@@ -214,6 +220,7 @@ const CALLS: Array<[string, Record<string, unknown>]> = [
   ["marketing", { store: "s1", view: "offers", period: null, limit: null }],
   ["insights", { store: "s1", insight: null, period: null }],
   ["coverage", { store: "s1", period: null, gaps_only: null }],
+  ["outcomes", { store: "s1", detector: null, status: null }],
   ["calculate", { op: "share", values: [{ table: 1, row: "Lahore Lawn", column: "orders" }, { table: 1, row: "Dubai Abayas", column: "orders" }] }],
 ];
 
@@ -398,6 +405,12 @@ describe("mixed-currency organization", () => {
 });
 
 describe("answers", () => {
+  it("answers 'did it work' from the Results page's lines, leaving out what the merchant hid", async () => {
+    const r = await run("outcomes", { store: null, detector: "courier_for_city", status: null });
+    expect(r.rows).toEqual([expect.objectContaining({ key: "ins1", status: "measured", outcome: expect.stringContaining("91% since") })]);
+    expect(r.meta.notes.join(" ")).toMatch(/marked "this wasn't us" and left out/);
+  });
+
   it("compares delivery rate in points against the previous period", async () => {
     const r = await run("compare_periods", { store: "s1", metrics: ["delivery_rate"], by: "none", period: null, against: null, filters: null, order: null, limit: null });
     expect(r.rows[0]).toMatchObject({ delivery_rate: 84.6, delivery_rate_before: 50, delivery_rate_change: 34.6 });
