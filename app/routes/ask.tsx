@@ -11,6 +11,7 @@ import { askEnabled, type AskEvent } from "~/lib/ask/loop.server";
 import type { ToolResult } from "~/lib/ask/types";
 import { guard } from "~/lib/ask/guard";
 import { AnswerTables, AnswerText, Feedback } from "~/components/ask/Answer";
+import { ASK_PRIVACY } from "~/lib/ask/privacy";
 
 export function meta() {
   return [{ title: "Ask · Growzar" }];
@@ -281,6 +282,12 @@ export default function Ask({ loaderData }: Route.ComponentProps) {
             <ArrowUp className="h-5 w-5" />
           </button>
         </form>
+        <p className="pb-2 text-xs text-gray-500">
+          {ASK_PRIVACY.short}{" "}
+          <Link to="/settings/ask" className="underline hover:text-gray-700">
+            More
+          </Link>
+        </p>
       </div>
 
       <aside className="space-y-2">
