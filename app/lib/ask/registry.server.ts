@@ -14,6 +14,7 @@ import { insights } from "./tools/insights.server";
 import { listStores } from "./tools/list-stores.server";
 import { marketing } from "./tools/marketing.server";
 import { outcomes } from "./tools/outcomes.server";
+import { cashForecastTool, monthEndTool, orderRiskSummary, planBudget } from "./tools/plan.server";
 import { stock } from "./tools/stock.server";
 import { summary } from "./tools/summary.server";
 import type { AskContext, AskTool, ToolResult } from "./types";
@@ -29,7 +30,11 @@ import type { AskContext, AskTool, ToolResult } from "./types";
  * before anything leaves for the model.
  */
 
-export const TOOLS: AskTool[] = [listStores, summary, breakdown, comparePeriods, cityCourier, cash, stock, customers, marketing, insights, outcomes, coverage, calculate] as AskTool[];
+export const TOOLS: AskTool[] = [
+  listStores, summary, breakdown, comparePeriods, cityCourier, cash, stock, customers, marketing, insights, outcomes, coverage, calculate,
+  // Phase 11, offered only where their gate lets the viewer see them; after the rest, so other viewers' prompts keep their bytes.
+  cashForecastTool, monthEndTool, orderRiskSummary, planBudget,
+] as AskTool[];
 
 const byName = new Map(TOOLS.map((t) => [t.name, t]));
 
@@ -44,6 +49,8 @@ export async function runTool(name: string, args: unknown, ctx: AskContext): Pro
   const tool = byName.get(name);
   if (!tool) return refusal(name, "invalid", `There is no tool called ${name}.`);
   if (!ctx.can("home")) return refusal(name, "forbidden", notAllowed("home"));
+
+  if (tool.gate && !tool.gate(ctx)) return refusal(name, "forbidden", "This isn't available to you yet.");
 
   const parsed = tool.schema.safeParse(args);
   if (!parsed.success) {
@@ -95,7 +102,10 @@ export function strictSchema(schema: z.ZodType): JsonSchema {
 
 export type ToolSpec = { name: string; description: string; parameters: JsonSchema };
 
-/** The tool list sent with every request, in a fixed order so the prompt prefix stays byte-stable (caching). */
-export function toolSpecs(): ToolSpec[] {
-  return TOOLS.map((t) => ({ name: t.name, description: t.description, parameters: strictSchema(t.schema) }));
+/**
+ * The tool list sent with every request, in a fixed order so the prompt prefix
+ * stays byte-stable (caching); gated tools only for a viewer their gate lets in.
+ */
+export function toolSpecs(ctx?: AskContext): ToolSpec[] {
+  return TOOLS.filter((t) => !t.gate || (ctx && t.gate(ctx))).map((t) => ({ name: t.name, description: t.description, parameters: strictSchema(t.schema) }));
 }

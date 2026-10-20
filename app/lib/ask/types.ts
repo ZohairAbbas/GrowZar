@@ -32,6 +32,10 @@ export type AskContext = {
   memo: Map<string, Promise<unknown>>;
   /** This answer's tool results so far, as the model numbers them (table 1 first), for `calculate`. */
   tables?: ToolResult[];
+  /** Plan's tools (G-GZR11-7): only where the viewer can see Plan (PLAN_ENABLED, internal until approved). */
+  planTools?: boolean;
+  /** The return-risk tool: RETURN_RISK_ENABLED, internal until the bands are approved. */
+  riskTools?: boolean;
 };
 
 /** A cell: a figure, a label, or nothing ("not enough data" says why in `meta`). */
@@ -98,5 +102,7 @@ export type AskTool<S extends z.ZodType = z.ZodType> = {
   schema: S;
   /** The section the viewer must be able to view; may depend on the arguments (a money metric needs Finance). */
   sections: (args: z.infer<S>) => Section[];
+  /** Whether this viewer gets the tool at all; a tool without one is always offered. */
+  gate?: (ctx: AskContext) => boolean;
   run: (args: z.infer<S>, ctx: AskContext) => Promise<ToolResult>;
 };

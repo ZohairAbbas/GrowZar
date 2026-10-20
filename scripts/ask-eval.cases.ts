@@ -4,6 +4,9 @@
  * case names the tool call that answers it, and the eval runs that call
  * itself and reads the figures out of the result.
  *
+ * Plan's cases (G-GZR11-7) run with Plan's and return risk's gates open, as
+ * for an internal viewer; plan_budget saves a plan each time it runs.
+ *
  * Stores are the Pilot organization's: Y yx4fu1-ax (PKR, Courierify +
  * Financify), D 0dscam-qn (PKR, every app), Z zainvault (AED, Financify,
  * no deliveries yet), P the Courierify test store (no orders).
@@ -158,6 +161,13 @@ export function cases(today: string): Case[] {
     { role: "staff", en: "What share of our buyers are repeat buyers?", ru: "Hamare kitne percent buyers repeat buyers hain?", kind: "forbidden", tools: ["customers"], expect: [{ tool: "customers", args: { store: STORES.Y, view: "repeat", period: null }, pick: [{ column: "repeat_share" }] }] },
     { role: "staff", en: "What was the ROAS of our biggest campaign?", ru: "Hamari sab se bari campaign ka ROAS kya tha?", kind: "forbidden", tools: ["marketing"], expect: [{ tool: "marketing", args: { store: STORES.Y, view: "campaigns", period: null, limit: null }, pick: [{ row: 0, column: "spend" }] }] },
     { role: "staff", en: "What is our average order value?", ru: "Hamara average order value kya hai?", kind: "forbidden", tools: ["breakdown"], expect: [{ tool: "breakdown", args: bd("Y", ["aov"], "none", P30), pick: [{ column: "aov" }] }] },
+
+    // ── Plan (G-GZR11-7): forecasts, return risk and the simulator; internal-only, so the eval sets the gates ──
+    { store: "D", en: "How much COD will become due this week?", ru: "Is hafte kitna COD due hoga?", kind: "answer", tools: ["cash_forecast"], expect: [{ tool: "cash_forecast", args: { store: STORES.D }, pick: [{ row: 0, column: "due_likely" }] }] },
+    { store: "D", en: "How many orders will this month end with?", ru: "Ye mahina kitne orders par khatam hoga?", kind: "answer", tools: ["month_end"], expect: [{ tool: "month_end", args: { store: STORES.D }, pick: [{ row: 0, column: "orders_likely" }] }] },
+    { store: "D", en: "How many orders not shipped yet look likely to come back?", ru: "Jo orders abhi ship nahi hue un mein se kitne wapas aa sakte hain?", kind: "answer", tools: ["order_risk_summary"], expect: [{ tool: "order_risk_summary", args: { store: STORES.D }, pick: [{ row: 0, column: "orders" }] }] },
+    { en: "I have PKR 100,000 for the next 30 days. Where should it go?", ru: "Mere paas agle 30 din ke liye 100,000 rupay hain. Kahan lagaun?", kind: "no_data", tools: ["plan_budget"] },
+    { store: "D", role: "staff", en: "How much cash will couriers pay me over the next 4 weeks?", ru: "Agle 4 hafton mein couriers mujhe kitna paisa denge?", kind: "forbidden", tools: ["cash_forecast"], expect: [{ tool: "cash_forecast", args: { store: STORES.D }, pick: [{ row: 0, column: "due_likely" }] }] },
 
     // ── Out of scope ──
     { en: "What will the weather be in Karachi tomorrow?", ru: "Kal Karachi mein mausam kaisa hoga?", kind: "out_of_scope", tools: [] },

@@ -5,7 +5,7 @@ import type { Route } from "./+types/plan";
 import { prisma } from "~/lib/db.server";
 import { readFormData } from "~/lib/form.server";
 import { Forbidden, hasPermission, listVisibleStores, requireSection } from "~/lib/authorize.server";
-import { readStoreCookie } from "~/lib/store-cookie.server";
+import { readStoreCookie, rememberLinkedStore } from "~/lib/store-cookie.server";
 import { planVisible } from "~/lib/forecast/plan-access.server";
 import { FORECAST_STATUS, parseSimRequest, withoutMoney } from "~/lib/forecast/plan-form";
 import { formOptions, forecasts, parseWhatIf, runAndSave, savedPlan, savedPlans, whatIfOn } from "~/lib/forecast/plan.server";
@@ -27,10 +27,13 @@ export function meta() {
  * accounts only (P11-13, P11-14). Money also needs finance:view; without it
  * the loader sends orders and dates only, so nothing reaches the page.
  */
-async function context(request: Request) {
+async function context(request: Request, url?: URL) {
   const viewer = await requireSection(request, "plan", "view");
   if (!(await planVisible(viewer.userId))) throw new Response("Not found", { status: 404 });
   const stores = await listVisibleStores(viewer);
+  // A link from Ask names its store (?store=): remember it, as the sections do.
+  const linked = url ? rememberLinkedStore(url, stores) : null;
+  if (linked) throw linked;
   const remembered = readStoreCookie(request);
   const active = stores.find((s) => s.id === remembered) ?? stores[0] ?? null;
   const canSeeMoney = await hasPermission(request, viewer.organizationId, "finance", "view");
@@ -38,7 +41,7 @@ async function context(request: Request) {
 }
 
 export async function loader({ request, url }: Route.LoaderArgs) {
-  const { active, canSeeMoney } = await context(request);
+  const { active, canSeeMoney } = await context(request, url);
   if (!active) return { kind: "empty" as const };
   const connections = await prisma.appConnection.findMany({ where: { storeId: active.id }, select: { app: true, status: true, lastSyncedAt: true } });
   const state = sectionState(SECTION_DEFINITIONS.plan, connections);

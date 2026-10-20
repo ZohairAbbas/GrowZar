@@ -31,12 +31,49 @@ const summaryOf = (storeId: string, from: string, to: string, scope?: Scope) => 
 
 vi.mock("../db.server", () => ({
   prisma: {
-    appConnection: { findMany: async () => [{ storeId: "s1", app: "COURIERIFY" }, { storeId: "s1", app: "FINANCIFY" }] },
+    appConnection: { findMany: async () => [{ storeId: "s1", app: "COURIERIFY" }, { storeId: "s1", app: "FINANCIFY" }], findFirst: async () => ({ app: "COURIERIFY" }) },
     orderGrain: {
       aggregate: async () => ({ _min: { localDay: "2026-08-01" } }),
       groupBy: async () => [],
     },
   },
+}));
+// Plan's forecasts and the simulator (G-GZR11-7), as /plan would show them.
+const RANGE = (x: number) => ({ low: x * 0.8, likely: x, high: x * 1.2 });
+const MONTH = (month: string) => ({
+  month, daysInMonth: 31, daysElapsed: 19, currency: "PKR", orders: { soFar: 300, toCome: RANGE(200), total: RANGE(500) },
+  deliveredRevenue: RANGE(900_000), profit: RANGE(120_000), adSpend: { soFar: 300_000, projected: 490_000 }, unresolvedAtMonthEnd: 0.2, trend: 1, notes: [],
+});
+vi.mock("../forecast/plan.server", () => ({
+  forecasts: async () => ({
+    cash: {
+      asOf: "2026-10-19T12:00:00Z", currency: "PKR",
+      weeks: Array.from({ length: 4 }, (_, i) => ({ from: `2026-10-${19 + i}`, to: `2026-10-${25 + i}` })),
+      due: { byPayer: [{ payer: "leopards", orders: 40, weeks: [RANGE(50_000), RANGE(20_000), RANGE(5000), RANGE(0)], total: RANGE(75_000) }], weeks: [RANGE(50_000), RANGE(20_000), RANGE(5000), RANGE(0)], total: RANGE(75_000) },
+      paid: { byPayer: [{ payer: "leopards", basis: "measured", reason: null, weeks: [RANGE(30_000), RANGE(40_000), RANGE(5000), RANGE(0)], total: RANGE(75_000) }], weeks: [RANGE(30_000), RANGE(40_000), RANGE(5000), RANGE(0)], total: RANGE(75_000) },
+      untimed: [{ payer: "smartlane", basis: "unknown", reason: "no settlement has been recorded", deliveredUnpaid: 120_000, deliveredParcels: 30, expected: RANGE(40_000) }],
+      overdue: [], notTracked: { orders: 0, expected: RANGE(0) }, excluded: { noOdds: 0, otherCurrency: 0 }, basis: { open: [], held: [] },
+    },
+    month: { current: MONTH("2026-10"), previous: MONTH("2026-09") },
+  }),
+  runAndSave: async () => "plan-1",
+  savedPlan: async () => ({
+    id: "plan-1", createdAt: "2026-10-19T12:00:00Z", version: "11.5.0", status: "plan", asOf: "2026-10-19T12:00:00Z", currency: "PKR",
+    request: { budget: 100_000, horizonDays: 30, include: { ads: true, stock: false, buffer: true }, keepInStock: [], minBuffer: 0, excludePlatforms: [], leadTimes: {}, payoutLags: {} },
+    lines: [{ kind: "campaign", key: "facebook:1", label: "Campaign Eid Sale", platform: "facebook", amount: 60_000, buys: "2,000 a day", deliveredOrders: RANGE(30), profit: RANGE(40_000), cashBackBy: "2026-12-01", products: [], notes: [] }],
+    totals: { allocated: 100_000, kept: 0, deliveredOrders: RANGE(30), profit: RANGE(40_000), cashBackBy: "2026-12-01" },
+    assumptions: ["Each ad line is judged on its delivered profit per rupee."], leftOut: [],
+  }),
+}));
+vi.mock("../forecast/return-risk.server", () => ({
+  storeRisk: async () => ({
+    cuts: { high: 1, low: -1, storeRate: 0.3, orders: 400 },
+    orders: new Map([
+      ["1", { band: "high", reasons: ["declined the WhatsApp confirmation: 60% of 40 came back"] }],
+      ["2", { band: "medium", reasons: [] }],
+      ["3", { band: "low", reasons: ["paid in advance: 5% of 60 came back"] }],
+    ]),
+  }),
 }));
 vi.mock("../metrics/summaries.server", () => ({
   storeSummary: async (id: string, from: string, to: string, scope: Scope) => summaryOf(id, from, to, scope),
@@ -184,11 +221,11 @@ const STORES = [
 ];
 
 function ctx(o: { finance?: boolean; sections?: Section[]; stores?: typeof STORES } = {}): AskContext {
-  const allowed = new Set<Section>(o.sections ?? ["home", "orders", "shipping", "finance", "customers", "inventory", "marketing", "inbox", "settings"]);
+  const allowed = new Set<Section>(o.sections ?? ["home", "orders", "shipping", "finance", "plan", "customers", "inventory", "marketing", "inbox", "settings"]);
   if (o.finance === false) allowed.delete("finance");
   // An earlier table of the answer, for calculate.
   const tables: ToolResult[] = [{ tool: "summary", status: "ok", title: "t", columns: [{ key: "label", label: "Store", kind: "text" }, { key: "orders", label: "Orders", kind: "count" }], rows: [{ label: "Lahore Lawn", orders: 68 }, { label: "Dubai Abayas", orders: 68 }], meta: { stores: [], rules: [], gaps: [], notes: [] }, link: null }];
-  return { organizationId: "org", userId: "u", baseCurrency: "PKR", stores: o.stores ?? STORES, can: (s) => allowed.has(s), now: new Date("2026-10-19T12:00:00Z"), memo: new Map(), tables };
+  return { organizationId: "org", userId: "u", baseCurrency: "PKR", stores: o.stores ?? STORES, can: (s) => allowed.has(s), now: new Date("2026-10-19T12:00:00Z"), memo: new Map(), tables, planTools: true, riskTools: true };
 }
 
 const run = (name: string, args: Record<string, unknown>, c = ctx()) => runTool(name, args, c);
@@ -222,6 +259,10 @@ const CALLS: Array<[string, Record<string, unknown>]> = [
   ["coverage", { store: "s1", period: null, gaps_only: null }],
   ["outcomes", { store: "s1", detector: null, status: null }],
   ["calculate", { op: "share", values: [{ table: 1, row: "Lahore Lawn", column: "orders" }, { table: 1, row: "Dubai Abayas", column: "orders" }] }],
+  ["cash_forecast", { store: "s1" }],
+  ["month_end", { store: "s1" }],
+  ["order_risk_summary", { store: "s1" }],
+  ["plan_budget", { store: "s1", budget: 100000, days: null, include: null, exclude_platforms: null, payout_lags: null }],
 ];
 
 /** Every key and string anywhere in a result. */
@@ -248,10 +289,14 @@ describe("every tool", () => {
 
   it("has a call here, and a strict schema the provider accepts", () => {
     expect(new Set(CALLS.map(([n]) => n))).toEqual(new Set(TOOLS.map((t) => t.name)));
-    const specs = toolSpecs();
+    const specs = toolSpecs(ctx());
     expect(specs.map((s) => s.name)).toEqual(TOOLS.map((t) => t.name));
     // Byte-stable between requests, so the provider's prompt cache holds.
-    expect(JSON.stringify(toolSpecs())).toBe(JSON.stringify(specs));
+    expect(JSON.stringify(toolSpecs(ctx()))).toBe(JSON.stringify(specs));
+    // A viewer without Plan gets exactly the tools they had before Phase 11, byte for byte.
+    const before = toolSpecs({ ...ctx(), planTools: false, riskTools: false });
+    expect(before.map((s) => s.name)).toEqual(TOOLS.filter((t) => !t.gate).map((t) => t.name));
+    expect(JSON.stringify(specs).startsWith(JSON.stringify(before).slice(0, -1))).toBe(true);
   });
 
   it("answers each call, or refuses it only for a role without the section", () => {
@@ -437,6 +482,14 @@ describe("answers", () => {
     const r = await run("insights", { store: "s1", insight: null, period: null });
     expect(r.rows[0]!.headline).toBe("Profit is a ceiling; ask [phone removed]");
     expect(r.link!.href).toContain("/insights?");
+  });
+
+  it("refuses Plan's tools to a viewer their gate keeps out, whatever the role", async () => {
+    const c = { ...ctx(), planTools: false, riskTools: false };
+    for (const name of ["cash_forecast", "month_end", "plan_budget", "order_risk_summary"]) {
+      const args = CALLS.find(([n]) => n === name)![1];
+      expect((await run(name, args, c)).status, name).toBe("forbidden");
+    }
   });
 
   it("builds a strict schema for every tool", () => {
