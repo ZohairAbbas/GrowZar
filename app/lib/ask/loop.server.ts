@@ -125,7 +125,7 @@ export async function answer(opts: {
     ...opts.history.map((m) => (m.role === "user" ? userItem(m.text) : assistantItem(m.text))),
     userItem(userTurn(ctx, question, opts.activeStoreId, localDayOf(ctx.now, tz))),
   ];
-  const tools = toolSpecs();
+  const tools = toolSpecs(ctx);
   const safetyId = createHash("sha256").update(`growzar:${ctx.userId}`).digest("hex").slice(0, 32);
 
   // One deadline for the whole answer, joined to the caller's (a closed tab).

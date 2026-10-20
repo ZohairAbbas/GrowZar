@@ -58,6 +58,9 @@ function ctxFor(role: string): AskContext {
     can: (section) => can(role, section, "view"),
     now,
     memo: new Map(),
+    // Plan's tools (G-GZR11-7) are internal-only; the eval asks as an internal viewer would.
+    planTools: can(role, "plan", "view"),
+    riskTools: true,
   };
 }
 
