@@ -10,9 +10,10 @@ import { bandOf, fitCuts, reasonsOf, RISK_OPEN_DAYS, RISK_OUTCOMES, RISK_SCREENS
  * backtest shares.
  *
  * Shown only while the switch is on (`RETURN_RISK_ENABLED`), to internal
- * accounts until Zohair approves the bands (pack §10, P11-14), on stores
- * with Courierify (P11-8: zainvault has no courier data), on orders not yet
- * with the courier: not shipped, or booked and not picked up (P11-9).
+ * accounts and to the organizations in `RETURN_RISK_ORGS` (the pilot,
+ * approved 2026-10-20; pack §10, P11-14), on stores with Courierify (P11-8:
+ * zainvault has no courier data), on orders not yet with the courier: not
+ * shipped, or booked and not picked up (P11-9).
  */
 
 const DAY_MS = 86_400_000;
@@ -103,14 +104,31 @@ export function riskOfOpenOrders(orders: readonly RiskOrder[], open: ReadonlySet
 const cache = new Map<string, { at: number; value: StoreRisk }>();
 const CACHE_MS = 5 * 60_000;
 
-/** Whether this viewer sees return risk on this store. */
 /** The kill switch, read like Ask's (ASK_ENABLED). */
 export const returnRiskEnabled = () => ["on", "true", "1"].includes((process.env.RETURN_RISK_ENABLED ?? "").trim().toLowerCase());
 
+/**
+ * Organizations whose members see return risk, comma-separated ids in
+ * RETURN_RISK_ORGS: the pilot's switch until a per-organization setting
+ * replaces it at the wider rollout.
+ */
+export const riskOrgs = (): ReadonlySet<string> =>
+  new Set(
+    (process.env.RETURN_RISK_ORGS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+
+/** Whether this viewer sees return risk on this store. */
 export async function riskVisible(storeId: string, userId: string): Promise<boolean> {
   if (!returnRiskEnabled()) return false;
-  const courierify = await prisma.appConnection.findFirst({ where: { storeId, app: "COURIERIFY", status: "CONNECTED" }, select: { app: true } });
-  return !!courierify && (await viewerIsInternal(userId));
+  const store = await prisma.store.findUnique({
+    where: { id: storeId },
+    select: { organizationId: true, connections: { where: { app: "COURIERIFY", status: "CONNECTED" }, select: { app: true } } },
+  });
+  if (!store?.connections.length) return false;
+  return riskOrgs().has(store.organizationId) || (await viewerIsInternal(userId));
 }
 
 /** Today's open orders' risk, cached for five minutes per store. */
