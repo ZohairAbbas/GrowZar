@@ -80,7 +80,7 @@ const weekday = (day: string) => new Date(`${day}T00:00:00Z`).getUTCDay();
 const normal = (next: () => number) => Math.sqrt(-2 * Math.log(1 - next())) * Math.cos(2 * Math.PI * next());
 
 /** Revenue and profit (before ad spend) of one order, by Finance's own rules. */
-function valueOf(o: RollupOrder, currency: string): { revenue: number; profit: number } {
+export function valueOf(o: RollupOrder, currency: string): { revenue: number; profit: number } {
   const b = bucketOf("order", [o]);
   return { revenue: num(b.deliveredRevenue.find((m) => m.currency === currency), currency), profit: Number(profitAfterReturns(b, currency, null).amount) };
 }
