@@ -34,7 +34,7 @@ export type AskContext = {
   tables?: ToolResult[];
   /** Plan's tools (G-GZR11-7): only where the viewer can see Plan (PLAN_ENABLED, internal until approved). */
   planTools?: boolean;
-  /** The return-risk tool: RETURN_RISK_ENABLED, internal until the bands are approved. */
+  /** The return-risk tool: RETURN_RISK_ENABLED, for internal accounts and the organizations in RETURN_RISK_ORGS. */
   riskTools?: boolean;
 };
 

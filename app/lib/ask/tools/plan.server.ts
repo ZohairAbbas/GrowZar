@@ -15,7 +15,8 @@ import { FORBIDDEN_STORE, oneStoreArg, pickOneStore, refusal, screenLink } from 
  * screen give the same figures for the same inputs: ranges are seeded.
  *
  * Gated like the screens (pack §10, P11-14): Plan's tools only where the
- * viewer can see Plan, the risk tool only where return risk is on. A
+ * viewer can see Plan, the risk tool only where return risk is on for them
+ * (internal accounts, and the pilot's organizations in RETURN_RISK_ORGS). A
  * forecast that failed its backtest says so in its rules, every time.
  */
 
@@ -181,7 +182,6 @@ async function runRiskSummary(args: z.infer<typeof storeOnly>, ctx: AskContext):
       rules: [
         "A band and its reasons, never a percentage. Scored from this store's own history only: the buyer's earlier orders, first or repeat, Courierify's network label, the route, the product, the WhatsApp confirmation, offers and payment method.",
         `High = the riskiest slice whose return rate was at least twice the store's odds (${r0(risk.cuts.storeRate * 100)}% of its recent orders came back); ${risk.cuts.high === null ? "no slice reached it, so no order is high" : "low = half the odds or less"}.`,
-        "The bands are still waiting for approval, so this is for internal use.",
       ],
       gaps: [],
       notes: top.map(([r, n]) => `${n} high-risk order(s): ${r}`),
