@@ -3,7 +3,7 @@ import { readMoney, type Money } from "../metrics/money";
 import type { RollupOrder } from "../metrics/rollups";
 import { toRollupOrder } from "../metrics/rollups.server";
 import { knownAt } from "../outcomes/as-of.server";
-import { DeliveryTimes, observations, OutcomeOdds } from "./outcome-odds";
+import { DeliveryTimes, observations, ODDS_WINDOW_DAYS, OutcomeOdds, Spreads, TIMES_MATURE_DAYS } from "./outcome-odds";
 import { payoutCycles, type PaidParcel, type PayoutCycle } from "./payout-cycle";
 
 /**
@@ -35,6 +35,8 @@ export type ForecastBase = {
   parcels: Parcel[];
   odds: OutcomeOdds;
   deliveryTimes: DeliveryTimes;
+  /** Week-to-week spread per courier, so a forecast's runs move a courier's parcels together. */
+  spreads: Spreads;
   payoutCycles: Map<string, PayoutCycle>;
 };
 
@@ -85,7 +87,8 @@ export async function loadForecastBase(storeId: string, asOf: Date = new Date())
     rows,
     parcels,
     odds: new OutcomeOdds(obs),
-    deliveryTimes: new DeliveryTimes(obs),
+    deliveryTimes: new DeliveryTimes(observations(rows, asOf, ODDS_WINDOW_DAYS, TIMES_MATURE_DAYS), obs),
+    spreads: new Spreads(obs),
     payoutCycles: payoutCycles(paid, asOf),
   };
 }

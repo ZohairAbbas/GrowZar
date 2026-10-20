@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { RollupOrder } from "../metrics/rollups";
 import { compare, score, weekdaysBetween } from "./backtest";
-import { DeliveryTimes, MIN_CELL, observations, OutcomeOdds, type Observation } from "./outcome-odds";
+import { DeliveryTimes, MIN_CELL, observations, OutcomeOdds, spreadOf, Spreads, type Observation } from "./outcome-odds";
 import { MATURE_DAYS, payoutCycles, type PaidParcel } from "./payout-cycle";
 import { bootstrap, quantile, rangeOf, rng } from "./stats";
 
@@ -11,7 +11,7 @@ const DAY = 86_400_000;
 const T = new Date("2026-10-01T00:00:00Z");
 const daysBefore = (n: number) => new Date(T.getTime() - n * DAY);
 const obs = (n: number, o: Partial<Observation>): Observation[] =>
-  Array.from({ length: n }, () => ({ courier: "trax", city: "lahore", delivered: true, decidedAfterDays: 5, ...o }));
+  Array.from({ length: n }, () => ({ courier: "trax", city: "lahore", delivered: true, decidedAfterDays: 5, week: 0, ...o }));
 
 describe("ranges", () => {
   it("interpolates quantiles and knows nothing from nothing", () => {
@@ -72,30 +72,63 @@ describe("outcome odds", () => {
       ...obs(30, { decidedAfterDays: 14, delivered: false }),
     ]);
     expect(odds.at("trax", "lahore", 0)!.pDelivered).toBeCloseTo(0.7);
-    expect(odds.at("trax", "lahore", 7)).toEqual({ pDelivered: 0.25, n: 40, level: "courier_city", aged: true });
+    expect(odds.at("trax", "lahore", 7)).toMatchObject({ n: 40, level: "courier_city", aged: true });
+    expect(odds.at("trax", "lahore", 7)!.pDelivered).toBeCloseTo(0.25);
+  });
+
+  it("is not fooled when a courier times its deliveries but not its returns", () => {
+    // Half the orders come back, but only 10 of the 50 returns are timed. Reading timed orders alone
+    // would put a 7-day-old order at 50 / 60 delivered; both outcomes are equally slow here, so it is 50%.
+    const odds = new OutcomeOdds([
+      ...obs(50, { decidedAfterDays: 10 }),
+      ...obs(10, { delivered: false, decidedAfterDays: 10 }),
+      ...obs(40, { delivered: false, decidedAfterDays: null }),
+    ]);
+    expect(odds.at("trax", "lahore", 7)!.pDelivered).toBeCloseTo(0.5);
   });
 
   it("says when it had to fall back to the odds of a new order", () => {
     const odds = new OutcomeOdds(obs(40, { decidedAfterDays: null }));
     expect(odds.at("trax", "lahore", 7)).toMatchObject({ aged: false, n: 40 });
+    // Timed deliveries but no timed returns: no trustworthy timing either.
+    expect(new OutcomeOdds([...obs(40, {}), ...obs(20, { delivered: false, decidedAfterDays: null })]).at("trax", "lahore", 3)).toMatchObject({ aged: false });
   });
 
-  it("reads only decided orders placed in the window before the date, and times only courier-timed outcomes", () => {
-    const order = (o: Partial<RollupOrder>) => ({ courier: "Trax", city: "Lahore", outcome: "delivered", createdAt: daysBefore(10), outcomeTiming: null, ...o }) as RollupOrder;
+  it("reads only decided orders placed in the window, 21+ days before the date, and times only courier-timed outcomes", () => {
+    const order = (o: Partial<RollupOrder>) => ({ courier: "Trax", city: "Lahore", outcome: "delivered", createdAt: daysBefore(25), outcomeTiming: null, ...o }) as RollupOrder;
     const got = observations(
       [
-        order({ outcomeTiming: { basis: "happened_on", at: daysBefore(4) } }),
+        order({ createdAt: daysBefore(30), outcomeTiming: { basis: "happened_on", at: daysBefore(24) } }),
         order({ outcome: "returned", outcomeTiming: { basis: "status_as_of", at: daysBefore(1) } }),
         order({ outcome: "in_transit" }),
         order({ createdAt: daysBefore(200) }),
         order({ createdAt: new Date(T.getTime() + DAY) }),
+        order({ createdAt: daysBefore(20), outcomeTiming: { basis: "happened_on", at: daysBefore(17) } }),
       ],
       T,
     );
     expect(got).toEqual([
-      { courier: "trax", city: "lahore", delivered: true, decidedAfterDays: 6 },
-      { courier: "trax", city: "lahore", delivered: false, decidedAfterDays: null },
+      { courier: "trax", city: "lahore", delivered: true, decidedAfterDays: 6, week: Math.floor(daysBefore(30).getTime() / (7 * DAY)) },
+      { courier: "trax", city: "lahore", delivered: false, decidedAfterDays: null, week: Math.floor(daysBefore(25).getTime() / (7 * DAY)) },
     ]);
+  });
+});
+
+describe("week-to-week spread", () => {
+  it("is zero when every week is alike, and grows when weeks differ beyond chance", () => {
+    const steady = [0, 1, 2, 3].flatMap((week) => [...obs(16, { week }), ...obs(4, { week, delivered: false })]);
+    expect(spreadOf(steady)).toEqual({ odds: 0, days: 0 });
+    const swinging = [0, 1, 2, 3].flatMap((week) => [...obs(week % 2 ? 19 : 10, { week, decidedAfterDays: week % 2 ? 3 : 7 }), ...obs(week % 2 ? 1 : 10, { week, delivered: false })]);
+    const s = spreadOf(swinging);
+    expect(s.odds!).toBeGreaterThan(0.15);
+    expect(s.days!).toBeCloseTo(2.31, 1);
+  });
+
+  it("needs four weeks of ten orders, and falls back from courier to store", () => {
+    expect(spreadOf(obs(30, {}))).toEqual({ odds: null, days: null });
+    const spreads = new Spreads([...[0, 1, 2, 3].flatMap((week) => obs(20, { week, courier: "tcs" })), ...obs(5, { courier: "trax" })]);
+    expect(spreads.of("trax")).toMatchObject({ level: "store" });
+    expect(spreads.of("tcs")).toMatchObject({ level: "courier" });
   });
 });
 
@@ -103,7 +136,13 @@ describe("delivery times", () => {
   it("gives days from now for an order already some days old, from deliveries that took longer", () => {
     const times = new DeliveryTimes([...obs(30, { decidedAfterDays: 3 }), ...obs(30, { decidedAfterDays: 9 }), ...obs(10, { delivered: false, decidedAfterDays: 20 })]);
     expect(times.median("trax", "lahore")).toBe(6);
-    expect(times.remaining("trax", "lahore", 5)).toMatchObject({ n: 30, level: "courier_city", days: Array(30).fill(4) });
+    expect(times.remaining("trax", "lahore", 5)).toMatchObject({ n: 30, level: "courier_city", days: Array(30).fill(4), complete: true });
+  });
+
+  it("falls back to the shorter history when the longer one is too thin, and says so", () => {
+    const times = new DeliveryTimes(obs(5, { decidedAfterDays: 20 }), obs(30, { decidedAfterDays: 6 }));
+    expect(times.remaining("trax", "lahore", 2)).toMatchObject({ n: 30, complete: false });
+    expect(times.remaining("trax", "lahore", 8)).toBeNull();
   });
 });
 
