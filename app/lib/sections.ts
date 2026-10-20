@@ -67,6 +67,17 @@ export const SECTION_DEFINITIONS: Record<Section, SectionDefinition> = {
       "Settlements against what was booked",
     ],
   },
+  plan: {
+    section: "plan",
+    label: SECTION_LABELS.plan,
+    requires: ["COURIERIFY", "FINANCIFY"],
+    blurb: "Where your next rupee should go, when your cash comes back, and how the month ends.",
+    preview: [
+      "A plan for a budget across ads, stock and a cash buffer",
+      "When each courier's cash comes back, week by week",
+      "Orders, revenue and profit to month end, against last month",
+    ],
+  },
   customers: {
     section: "customers",
     label: SECTION_LABELS.customers,

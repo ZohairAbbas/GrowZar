@@ -15,6 +15,7 @@ import {
   Truck,
   Users,
   Wallet,
+  Compass,
   Lightbulb,
   Activity,
   MessageCircleQuestionMark,
@@ -26,6 +27,7 @@ import { reportClientError } from "~/lib/client-error";
 import { readStoreCookie } from "~/lib/store-cookie.server";
 import { prisma } from "~/lib/db.server";
 import { askEnabled } from "~/lib/ask/loop.server";
+import { planVisible } from "~/lib/forecast/plan-access.server";
 import { getViewer, listVisibleStores, visibleSections } from "~/lib/authorize.server";
 import { SECTIONS, type Section } from "~/lib/permissions";
 import {
@@ -52,6 +54,7 @@ const SECTION_ICONS: Record<Section, typeof Home> = {
   orders: ShoppingCart,
   shipping: Truck,
   finance: Wallet,
+  plan: Compass,
   customers: Users,
   inventory: Boxes,
   marketing: Megaphone,
@@ -84,6 +87,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   const organization = organizations.find((o) => o.id === viewer.organizationId);
   // Ask shows in the navigation only where it is on, for the server and the organization.
   const ask = askEnabled() && Boolean((await prisma.askSettings.findUnique({ where: { organizationId: viewer.organizationId }, select: { enabled: true } }))?.enabled);
+  // Plan shows only behind its switch, to internal accounts until approved (pack §10, P11-14).
+  const plan = allowed.has("plan") && (await planVisible(viewer.userId));
 
   return {
     user: { name: viewer.userId, role: viewer.role },
@@ -100,7 +105,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     activeStoreId: active?.id ?? null,
     ask: ask && allowed.has("home"),
     sections: ORDERED_SECTIONS.filter((definition) =>
-      allowed.has(definition.section),
+      allowed.has(definition.section) && (definition.section !== "plan" || plan),
     ).map((definition) => ({
       section: definition.section,
       label: definition.label,

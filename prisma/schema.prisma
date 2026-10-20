@@ -91,6 +91,7 @@ model Store {
   buyerNetwork   BuyerNetwork[]
   orderNetwork   OrderNetwork[]
   appPrompts     AppPromptEvent[]
+  plans          Plan[]
 
   @@index([organizationId])
   @@map("stores")
@@ -1257,4 +1258,30 @@ model AskUsageMonthly {
 
   @@id([organizationId, month])
   @@map("ask_usage_monthly")
+}
+
+/// A budget plan the simulator made (G-GZR11-6, pack §5.6): what was asked,
+/// what came back, and as of when, so a merchant can come back to it and
+/// Phase 9's outcome engine can later compare plan and actual.
+model Plan {
+  id             String   @id @default(uuid())
+  storeId        String
+  organizationId String
+  createdById    String
+  createdAt      DateTime @default(now())
+  /// The data the plan was made from stood at this moment.
+  asOf           DateTime
+  /// The simulator's version, so an old plan is read by the rules it was made with.
+  version        String
+  /// plan | refused
+  status         String
+  /// The SimRequest as submitted.
+  inputs         Json
+  /// The Plan (lines, totals, assumptions, what was left out) or the refusal's fix list.
+  output         Json
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, createdAt])
+  @@map("plans")
 }
