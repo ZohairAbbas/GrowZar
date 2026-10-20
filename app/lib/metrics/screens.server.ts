@@ -1,3 +1,4 @@
+import { RISK_OPEN_DAYS, RISK_OUTCOMES } from "../forecast/return-risk";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "../db.server";
@@ -351,6 +352,8 @@ export async function ordersView(
   scope: Scope = { courier: null, city: null },
   previous: { from: string; to: string } | null = null,
   confirmation: string | null = null,
+  /** High return-risk orders (G-GZR11-4), for the `risk_high` filter. */
+  returnRisk?: ReadonlySet<string>,
 ): Promise<OrdersView> {
   // A confirmation state picked in the funnel narrows the list like an outcome chip.
   const statuses = confirmation ? statusesOf(confirmation) : undefined;
@@ -396,18 +399,23 @@ export async function ordersView(
     const cashFilter = filter.kind === "awaiting_payout" || filter.kind === "unpaid";
     // Open orders by network risk are today's too: the last 30 days, whatever the period.
     const networkFilter = filter.kind === "network_high";
+    // So are orders at return risk: not yet with the courier, the last 30 days.
+    const riskFilter = filter.kind === "risk_high";
     const all = await prisma.orderGrain.findMany({
       where: cashFilter
         ? { storeId, outcome: "delivered", uncollectedAmount: { not: null }, ...scopeWhere(scope) }
         : networkFilter
           ? { storeId, outcome: { in: [...OPEN_OUTCOMES] }, createdAt: { gte: new Date(Date.now() - OPEN_DAYS * 86_400_000) }, ...scopeWhere(scope) }
-          : where,
+          : riskFilter
+            ? { storeId, outcome: { in: [...RISK_OUTCOMES] }, createdAt: { gte: new Date(Date.now() - RISK_OPEN_DAYS * 86_400_000) }, ...scopeWhere(scope) }
+            : where,
       orderBy: [{ createdAt: "desc" }, { orderId: "desc" }],
     });
     const ctx = {
       payers: filter.kind === "awaiting_payout" ? await loadPayerHistories(storeId) : [],
       contact: filter.kind === "stuck" && filter.wrote ? await loadBuyerContact(storeId) : null,
       highRisk: filter.kind === "network_high" ? await highRiskOrders(storeId) : undefined,
+      returnRisk,
       asOf: new Date(),
     };
     const hit = all.filter((r) => matchesFilter(toRollupOrder(r), filter, store.currency, ctx));

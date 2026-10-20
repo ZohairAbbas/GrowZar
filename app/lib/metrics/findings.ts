@@ -14,6 +14,7 @@
  *  - shows measured money only. No "worth PKR X" estimate appears before a
  *    detector's backtest passes (PLAN.md §3, the money rule).
  */
+import { RISK_OPEN_DAYS, RISK_OUTCOMES } from "../forecast/return-risk";
 import { AGE_BUCKETS, ageOf, type AgeFilter } from "./matrices";
 import { courierDeductions, isStuck, STUCK_DAYS } from "./cash";
 import { returnsView, type ParcelFacts } from "./returns";
@@ -103,7 +104,9 @@ export type OrderFilter =
   /** Courierify parcels with no status change for STUCK_DAYS (Phase 4c, A3); `wrote`: only those whose buyer wrote in (I7). */
   | { kind: "stuck"; wrote?: true }
   /** Open orders (last 30 days) whose buyer Courierify rated high when ordering, or rates high today if not yet asked (G-GZR5-16/17). */
-  | { kind: "network_high" };
+  | { kind: "network_high" }
+  /** Orders not yet with the courier (last 30 days) this store's own history rates high return risk (G-GZR11-4). */
+  | { kind: "risk_high" };
 
 export type MarginFinding = {
   kind: "margin";
@@ -1105,6 +1108,7 @@ export function parseOrderFilter(params: URLSearchParams): OrderFilter | null {
   if (params.get("stuck") === "1") return { kind: "stuck" };
   if (params.get("stuck") === "wrote") return { kind: "stuck", wrote: true };
   if (params.get("network") === "high") return { kind: "network_high" };
+  if (params.get("risk") === "high") return { kind: "risk_high" };
   const unpaid = params.get("unpaid");
   const age = params.get("age");
   if (unpaid && /^[a-z0-9_-]{1,40}$/.test(unpaid)) {
@@ -1149,6 +1153,8 @@ export function orderFilterQuery(filter: OrderFilter): string {
       return filter.wrote ? "stuck=wrote" : "stuck=1";
     case "network_high":
       return "network=high";
+    case "risk_high":
+      return "risk=high";
     case "unpaid":
       return filter.age === "any" ? `unpaid=${filter.courier}` : `unpaid=${filter.courier}&age=${filter.age}`;
   }
@@ -1162,7 +1168,7 @@ export function matchesFilter(
   o: RollupOrder,
   filter: OrderFilter,
   currency: string | null,
-  ctx?: { payers?: PayerHistory[]; asOf?: Date; contact?: BuyerContact | null; highRisk?: ReadonlySet<string> },
+  ctx?: { payers?: PayerHistory[]; asOf?: Date; contact?: BuyerContact | null; highRisk?: ReadonlySet<string>; returnRisk?: ReadonlySet<string> },
 ): boolean {
   switch (filter.kind) {
     case "variant":
@@ -1190,6 +1196,15 @@ export function matchesFilter(
         (OPEN_OUTCOMES as readonly string[]).includes(o.outcome) &&
         !!o.createdAt &&
         asOf.getTime() - o.createdAt.getTime() <= OPEN_DAYS * 86_400_000
+      );
+    }
+    case "risk_high": {
+      const asOf = ctx?.asOf ?? new Date();
+      return (
+        !!ctx?.returnRisk?.has(o.orderId) &&
+        (RISK_OUTCOMES as readonly string[]).includes(o.outcome) &&
+        !!o.createdAt &&
+        asOf.getTime() - o.createdAt.getTime() <= RISK_OPEN_DAYS * 86_400_000
       );
     }
     case "unpaid":

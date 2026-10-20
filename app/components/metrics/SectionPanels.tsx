@@ -379,6 +379,8 @@ const FILTER_LABEL = (f: NonNullable<OrdersView["filter"]>) =>
           ? "orders the buyer never answered on WhatsApp, not yet with the courier"
           : f.kind === "network_high"
           ? "open orders from the last 30 days whose buyer Courierify's network rates high risk"
+          : f.kind === "risk_high"
+          ? "orders from the last 30 days, not yet with the courier, that this store's own history rates high return risk"
           : f.kind === "stuck" && f.wrote
           ? "parcels with no courier status change for days whose buyer has written to the store on WhatKaBot since ordering"
           : f.kind === "stuck"
@@ -430,12 +432,15 @@ export function OrdersPanel({
   scope = "",
   funnel,
   confirmation,
+  risk = null,
 }: {
   view: OrdersView;
   period: string;
   scope?: string;
   funnel: ConfirmationFunnel;
   confirmation: string | null;
+  /** Return risk on orders not yet with the courier (G-GZR11-4); null while it is off for this viewer. */
+  risk?: OrdersRisk | null;
 }) {
   const disagree = view.filter?.kind === "disagree";
   return (
@@ -459,6 +464,13 @@ export function OrdersPanel({
             <span className="font-display text-lg font-bold">Showing {view.total.toLocaleString()}</span>{" "}
             <span className="text-navy-muted">{FILTER_LABEL(view.filter)}.</span>
           </p>
+          {view.filter.kind === "risk_high" && risk
+            ? risk.actions.map((a) => (
+                <a key={a.href} href={a.href} target="_blank" rel="noreferrer" className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/20">
+                  {a.label}
+                </a>
+              ))
+            : null}
           <Link
             to={`/orders?${period}${scope ? `&${scope}` : ""}`}
             className="rounded-full bg-mint px-4 py-2 text-sm font-bold text-navy hover:bg-mint-200"
@@ -466,6 +478,18 @@ export function OrdersPanel({
             Show all orders
           </Link>
         </div>
+      ) : null}
+      {!view.filter && risk && risk.high > 0 ? (
+        <Link
+          to={`/orders?${period}${scope ? `&${scope}` : ""}&risk=high`}
+          className="flex items-center justify-between gap-3 rounded-2xl bg-coral-50 px-5 py-3 text-sm text-coral-700 hover:bg-coral-100"
+        >
+          <span>
+            <span className="font-semibold">{risk.high.toLocaleString()} order{risk.high === 1 ? "" : "s"} not yet with the courier</span> look like returns, from this
+            store's own history. Confirm before shipping.
+          </span>
+          <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
+        </Link>
       ) : null}
       {view.filter ? null : (
         <ConfirmationFunnelView funnel={funnel} period={period} scope={scope} active={confirmation} min={MIN_DECIDED_TO_RATE} />
@@ -507,6 +531,7 @@ export function OrdersPanel({
               {disagree ? <th className="px-5 py-3">Financify says</th> : null}
               <th className="px-5 py-3">Confirmation</th>
               <th className="px-5 py-3">Courier · city</th>
+              {risk ? <th className="px-5 py-3">Return risk</th> : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -535,6 +560,11 @@ export function OrdersPanel({
                 <td className="px-5 py-3 text-gray-600">
                   {r.courier?.replace(/^financify:/, "") ?? "—"} · {r.city ?? "—"}
                 </td>
+                {risk ? (
+                  <td className="px-5 py-3">
+                    {risk.rows[r.orderId] ? <RiskCell value={risk.rows[r.orderId]!} /> : <span className="text-gray-400">—</span>}
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>
@@ -546,6 +576,27 @@ export function OrdersPanel({
         ) : null}
       </div>
     </section>
+  );
+}
+
+export type OrdersRisk = {
+  rows: Record<string, { band: "high" | "medium" | "low"; reasons: string[] }>;
+  /** High-risk orders not yet with the courier, last 30 days. */
+  high: number;
+  actions: Array<{ label: string; href: string }>;
+};
+
+const RISK_STYLE = { high: "bg-coral-100 text-coral-700", medium: "bg-gray-100 text-gray-700", low: "bg-mint-50 text-mint-700" } as const;
+
+/** A band and its reasons (P11-4: never a percentage). */
+function RiskCell({ value }: { value: OrdersRisk["rows"][string] }) {
+  return (
+    <div className="max-w-xs">
+      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${RISK_STYLE[value.band]}`} title={value.reasons.join("\n")}>
+        {value.band}
+      </span>
+      {value.band !== "medium" && value.reasons[0] ? <p className="mt-1 text-xs text-gray-500">{value.reasons.join("; ")}</p> : null}
+    </div>
   );
 }
 
