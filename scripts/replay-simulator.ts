@@ -46,9 +46,12 @@ for (const store of stores) {
   const all: ReplayLine[] = [];
   const out: string[] = [];
   const byK = new Map(KS.map((k) => [k, [] as ReplayLine[]]));
+  // With campaigns as their own lines, for the day they come back (CAMPAIGN_LINES).
+  const withCampaigns: ReplayLine[] = [];
   for (let t = start.getTime(); t <= last.getTime(); t += every * DAY_MS) {
     const then = await loadSimData(store.id, new Date(t));
     for (const k of KS) byK.get(k)!.push(...replayAt(then, today, { k }));
+    withCampaigns.push(...replayAt(then, today, { campaignLines: true }));
     const lines = replayAt(then, today);
     all.push(...lines);
     const s = scoreReplay(lines);
@@ -58,8 +61,10 @@ for (const store of stores) {
   }
   const s = scoreReplay(all);
   console.log(`## ${shop}\n\n- **${all.length} line-dates**: actual inside low–high ${pct(s.coverage)} (bar 80%), bias on totals ${pct(s.bias)} (bar ±15%). ${all.length ? (s.passes ? "**Passes.**" : "**Fails.**") : "Nothing to replay."}`);
+  const wc = scoreReplay(withCampaigns);
+  console.log(`- With campaign lines: ${wc.tested} line-dates, inside ${pct(wc.coverage)}, bias ${pct(wc.bias)}.`);
   for (const kind of ["campaign", "platform_group"] as const) {
-    const r = scoreReplay(all.filter((l) => l.kind === kind));
+    const r = scoreReplay(withCampaigns.filter((l) => l.kind === kind));
     console.log(`- ${kind === "campaign" ? "Campaign lines" : "Platform groups"}: ${r.tested} line-dates, inside ${pct(r.coverage)}, bias ${pct(r.bias)}.`);
   }
   console.log(`\n| Pooling k | Inside | Bias |\n|---|---|---|`);

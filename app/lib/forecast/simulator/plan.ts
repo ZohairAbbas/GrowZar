@@ -24,7 +24,7 @@
 
 import { DAY_MS, type Range } from "../stats";
 import { gateFixes } from "./gate";
-import { atSpend, buildNodes, K, rangeFrom, rateDraws, SPEND_CAP, type AdNode } from "./nodes";
+import { atSpend, buildNodes, K, MIN_LINE_DAYS, MIN_LINE_ORDERS, rangeFrom, rateDraws, SPEND_CAP, type AdNode } from "./nodes";
 import type { Plan, PlanLine, SimData, SimRequest, StockItem } from "./types";
 
 export const DRAWS = 500;
@@ -86,7 +86,9 @@ export function simulate(data: SimData, req: SimRequest, { draws = DRAWS, seed =
     });
   }
 
-  const { nodes, window, unattributedShare } = req.include.ads ? buildNodes(data, req.excludePlatforms) : { nodes: [] as AdNode[], window: null, unattributedShare: 0 };
+  const { nodes, window, unattributedShare, thin } = req.include.ads
+    ? buildNodes(data, req.excludePlatforms)
+    : { nodes: [] as AdNode[], window: null, unattributedShare: 0, thin: [] };
   const ledger = ledgerOf(data, req, unattributedShare);
   const stockIn = req.include.stock && data.stock !== null;
   const buyable = (v: { item: StockItem; lead: number | null }) => stockIn && v.lead !== null && v.lead < H && v.item.unitCost !== null && v.item.unitCost > 0;
@@ -253,6 +255,7 @@ export function simulate(data: SimData, req: SimRequest, { draws = DRAWS, seed =
   );
   if (!req.include.ads) leftOut.push("ads: left out of this plan");
   for (const p of req.excludePlatforms) leftOut.push(`${p}: left out as you asked`);
+  for (const t of thin) leftOut.push(`${t.label}: not enough data to plan (${t.n} decided orders and ${t.spendDays} days of spend; a line needs ${MIN_LINE_ORDERS} and ${MIN_LINE_DAYS})`);
   if (req.include.stock && data.stock === null) leftOut.push("stock: Inventorify is not connected, so stock is not planned");
   if (!req.include.stock) leftOut.push("stock: left out of this plan");
   if (left > 0.5) leftOut.push(`${Math.round(left).toLocaleString("en-US")} kept as cash: no further step earned more than it cost`);

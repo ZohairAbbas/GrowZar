@@ -22,8 +22,12 @@ const dayOf = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
 /** `then`: the store as at the replay date; `now`: today's data, for what happened after it. */
-export function replayAt(then: SimData, now: SimData, { days = REPLAY_DAYS, draws = 500, seed = 11, k }: { days?: number; draws?: number; seed?: number; k?: number } = {}): ReplayLine[] {
-  const { nodes } = buildNodes(then, [], k === undefined ? {} : { k });
+export function replayAt(
+  then: SimData,
+  now: SimData,
+  { days = REPLAY_DAYS, draws = 500, seed = 11, k, campaignLines }: { days?: number; draws?: number; seed?: number; k?: number; campaignLines?: boolean } = {},
+): ReplayLine[] {
+  const { nodes } = buildNodes(then, [], { ...(k === undefined ? {} : { k }), ...(campaignLines === undefined ? {} : { campaignLines }) });
   const from = then.today;
   const to = addDays(from, days);
   const out: ReplayLine[] = [];
