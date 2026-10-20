@@ -287,4 +287,10 @@ export class Spreads {
     this.cache.set(key, found);
     return found;
   }
+
+  /** The whole store's spread (not the "unknown courier" cell). */
+  store(): Spread | null {
+    const s = spreadOf(this.pool.all());
+    return s.odds !== null && s.days !== null ? { odds: s.odds, days: s.days, level: "store" } : null;
+  }
 }
