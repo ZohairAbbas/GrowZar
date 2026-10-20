@@ -13,7 +13,11 @@
  * A campaign's figure is pooled with its platform's, by weight n / (n + K)
  * for its n decided orders: a thin campaign reads close to its platform. A
  * campaign gets its own plan line with MIN_LINE_ORDERS decided orders and
- * MIN_LINE_DAYS days of spend; the rest are grouped per platform.
+ * MIN_LINE_DAYS days of spend; the rest are grouped per platform. Campaign
+ * lines are off for now (CAMPAIGN_LINES): one line per platform. A platform
+ * line needs the same data as a campaign line, or it is left out as too thin
+ * to plan (2026-10-20, Zohair: in the replay, a platform with PKR 8,422 of
+ * spend was the line furthest out).
  */
 
 import { DAY_MS, quantile, rng, type Range } from "../stats";
@@ -27,6 +31,13 @@ export const MATURE_DAYS = 21;
  * low–high, 100 put 89%; best campaigns fade, so they lean on their platform.
  */
 export const K = 100;
+/**
+ * Campaigns as their own plan lines. Off (2026-10-20, Zohair, option (a)): in
+ * the replay, campaign lines read 28% high and platform groups 20% low; the
+ * pack keeps a level that fails grouped at its parent. Turn on once a
+ * campaign-level replay has its bias under 15%.
+ */
+export const CAMPAIGN_LINES = false;
 export const MIN_LINE_ORDERS = 30;
 export const MIN_LINE_DAYS = 14;
 /** Never plan a day's spend above this multiple of the highest the store has spent on the line. */
@@ -114,8 +125,15 @@ function productsOf(orders: readonly SimOrder[]) {
 export function buildNodes(
   data: SimData,
   excludePlatforms: readonly string[] = [],
-  { k = K }: { k?: number } = {},
-): { nodes: AdNode[]; window: ReturnType<typeof windowOf>; unattributedShare: number; drift: { value: number; lines: number } } {
+  { k = K, campaignLines = CAMPAIGN_LINES }: { k?: number; campaignLines?: boolean } = {},
+): {
+  nodes: AdNode[];
+  window: ReturnType<typeof windowOf>;
+  unattributedShare: number;
+  drift: { value: number; lines: number };
+  /** Platform lines left out as too thin to plan. */
+  thin: Array<{ label: string; n: number; spendDays: number }>;
+} {
   const win = windowOf(data);
   const inWindow = (d: string) => d >= win.from && d < win.to;
   const spend = data.spend.filter((s) => inWindow(s.day));
@@ -129,6 +147,7 @@ export function buildNodes(
   const platforms = [...new Set(spend.map((s) => s.platform.toLowerCase()))].filter((p) => !excluded.has(p)).sort();
 
   const nodes: AdNode[] = [];
+  const rest: AdNode[] = [];
   for (const platform of platforms) {
     // A platform's own daily rows; where Financify sent none (yx4fu1-ax's Snapchat), its campaigns' sum.
     const own = spend.filter((s) => s.level === "platform" && s.platform.toLowerCase() === platform);
@@ -173,15 +192,22 @@ export function buildNodes(
     const lines: AdNode[] = [];
     for (const [key, c] of campaigns) {
       const orders = pOrders.filter((o) => o.campaignKey === key);
-      if (orders.length >= MIN_LINE_ORDERS && c.days.size >= MIN_LINE_DAYS && c.spend > 0)
+      if (campaignLines && orders.length >= MIN_LINE_ORDERS && c.days.size >= MIN_LINE_DAYS && c.spend > 0)
         lines.push(node(key, "campaign", data.campaignNames.get(key) ?? key, c.spend, [...c.days.values()], orders));
     }
     nodes.push(...lines);
     const ownKeys = new Set(lines.map((n) => n.key));
     const restSpend = pSpend - lines.reduce((a, n) => a + n.spend, 0);
     const restDays = pSpendDays.map((d) => d.amount - lines.reduce((a, n) => a + (campaigns.get(n.key)?.days.get(d.day) ?? 0), 0)).filter((x) => x > 0);
-    if (restSpend > 0) nodes.push(node(`${platform}:other`, "platform_group", `Other campaigns on ${platform}`, restSpend, restDays, pOrders.filter((o) => !o.campaignKey || !ownKeys.has(o.campaignKey))));
+    if (restSpend > 0) rest.push(node(`${platform}:other`, "platform_group", lines.length ? `Other campaigns on ${platform}` : `${platform[0]!.toUpperCase()}${platform.slice(1)} ads`, restSpend, restDays, pOrders.filter((o) => !o.campaignKey || !ownKeys.has(o.campaignKey))));
   }
+  // A platform line needs what a campaign line needs; thinner ones are left out.
+  const thin: Array<{ label: string; n: number; spendDays: number }> = [];
+  for (const g of rest) {
+    if (g.n >= MIN_LINE_ORDERS && g.spendDays >= MIN_LINE_DAYS) nodes.push(g);
+    else thin.push({ label: g.label, n: g.n, spendDays: g.spendDays });
+  }
+
   // Drift, from the window's halves, for every line with enough orders in each.
   const mid = new Date((Date.parse(`${win.from}T00:00:00Z`) + Date.parse(`${win.to}T00:00:00Z`)) / 2).toISOString().slice(0, 10);
   const logs: number[] = [];
@@ -199,7 +225,7 @@ export function buildNodes(
   }
   const drift = logs.length >= MIN_DRIFT_LINES ? Math.sqrt(logs.reduce((x, l) => x + l * l, 0) / logs.length) : DRIFT_DEFAULT;
   for (const n of nodes) n.drift = drift;
-  return { nodes, window: win, unattributedShare, drift: { value: drift, lines: logs.length } };
+  return { nodes, window: win, unattributedShare, drift: { value: drift, lines: logs.length }, thin };
 }
 
 /**

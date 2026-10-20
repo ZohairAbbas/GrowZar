@@ -69,18 +69,31 @@ describe("the gate", () => {
 });
 
 describe("the hierarchy", () => {
-  it("gives a well-measured campaign its own line and groups the rest under the platform", () => {
-    const { nodes, window } = buildNodes(store());
+  it("plans one line per platform while campaign lines are off", () => {
+    expect(buildNodes(store()).nodes.map((n) => [n.kind, n.label, n.n])).toEqual([["platform_group", "Facebook ads", 100]]);
+  });
+
+  it("with campaign lines on, gives a well-measured campaign its own line; the thin rest is left out", () => {
+    const { nodes, window, thin } = buildNodes(store(), [], { campaignLines: true });
     expect(window).toEqual(windowOf(store()));
-    expect(nodes.map((n) => [n.kind, n.key, n.n])).toEqual([
-      ["campaign", "facebook:A", 90],
-      ["platform_group", "facebook:other", 10],
-    ]);
-    const [a, rest] = nodes;
+    expect(nodes.map((n) => [n.kind, n.key, n.n])).toEqual([["campaign", "facebook:A", 90]]);
+    // The other campaigns have 10 decided orders: a line needs 30.
+    expect(thin).toEqual([{ label: "Other campaigns on facebook", n: 10, spendDays: 90 }]);
     // A's own 3.0 per rupee, pooled with the platform's (90×3000 + 10×600) / 135,000 = 2.04.
     const w = 90 / (90 + K);
-    expect(a!.perRupee).toBeCloseTo(w * 3 + (1 - w) * (276_000 / 135_000));
-    expect(rest!.perRupee).toBeLessThan(a!.perRupee);
+    expect(nodes[0]!.perRupee).toBeCloseTo(w * 3 + (1 - w) * (276_000 / 135_000));
+  });
+
+  it("leaves out a platform too thin to plan, and says why", () => {
+    const s = store();
+    for (let d = 22; d <= 26; d++) s.spend.push({ day: day(d), level: "platform", key: "snapchat", platform: "snapchat", amount: 300 });
+    s.orders.push(order(23, { platform: "snapchat", campaignKey: "snapchat:1" }));
+    const built = buildNodes(s);
+    expect(built.nodes.map((n) => n.label)).toEqual(["Facebook ads"]);
+    expect(built.thin).toEqual([{ label: "Snapchat ads", n: 1, spendDays: 5 }]);
+    const plan = simulate(s, request());
+    if (plan.status !== "plan") throw new Error("refused");
+    expect(plan.leftOut).toContain("Snapchat ads: not enough data to plan (1 decided orders and 5 days of spend; a line needs 30 and 14)");
   });
 
   it("leaves out a platform the merchant excludes", () => {
@@ -108,9 +121,10 @@ describe("the plan", () => {
     expect(delay).toMatchObject({ median: 8, p90: 13, lag: 3 });
     const [buffer, ...rest] = plan.lines;
     expect(buffer).toMatchObject({ kind: "buffer", amount: Math.round((100_000 * 8) / 38) });
-    const a = rest.find((l) => l.key === "facebook:A")!;
+    const a = rest.find((l) => l.key === "facebook:other")!;
     expect(a.amount).toBeGreaterThan(0);
-    expect(a.amount / 30).toBeLessThanOrEqual(1.5 * 1000 + 1e-6);
+    // The platform has spent 1,500 a day: never more than 1.5× that.
+    expect(a.amount / 30).toBeLessThanOrEqual(1.5 * 1500 + 1e-6);
     expect(a.profit.low).toBeLessThanOrEqual(a.profit.likely);
     expect(a.cashBackBy).toBe(day(-43));
     expect(plan.totals.allocated + plan.totals.kept).toBeCloseTo(100_000);
@@ -164,7 +178,7 @@ describe("the replay", () => {
       now.spend.push({ day: day(-d + 1), level: "campaign", key: "facebook:A", platform: "facebook", amount: 1000 });
       now.orders.push(order(-d + 1, { campaignKey: "facebook:A", platform: "facebook", contribution: 2500 }));
     }
-    const lines = replayAt(store(), now);
+    const lines = replayAt(store(), now, { campaignLines: true });
     const a = lines.find((l) => l.key === "facebook:A")!;
     expect(a.spend).toBe(30_000);
     expect(a.actual).toBeCloseTo(2.5);
