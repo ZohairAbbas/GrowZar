@@ -166,8 +166,10 @@ export function cases(today: string): Case[] {
     { store: "D", en: "How much COD will become due this week?", ru: "Is hafte kitna COD due hoga?", kind: "answer", tools: ["cash_forecast"], expect: [{ tool: "cash_forecast", args: { store: STORES.D }, pick: [{ row: 0, column: "due_likely" }] }] },
     { store: "D", en: "How many orders will this month end with?", ru: "Ye mahina kitne orders par khatam hoga?", kind: "answer", tools: ["month_end"], expect: [{ tool: "month_end", args: { store: STORES.D }, pick: [{ row: 0, column: "orders_likely" }] }] },
     { store: "D", en: "How many orders not shipped yet look likely to come back?", ru: "Jo orders abhi ship nahi hue un mein se kitne wapas aa sakte hain?", kind: "answer", tools: ["order_risk_summary"], expect: [{ tool: "order_risk_summary", args: { store: STORES.D }, pick: [{ row: 0, column: "orders" }] }] },
-    { en: "I have PKR 100,000 for the next 30 days. Where should it go?", ru: "Mere paas agle 30 din ke liye 100,000 rupay hain. Kahan lagaun?", kind: "no_data", tools: ["plan_budget"] },
-    { store: "D", role: "staff", en: "How much cash will couriers pay me over the next 4 weeks?", ru: "Agle 4 hafton mein couriers mujhe kitna paisa denge?", kind: "forbidden", tools: ["cash_forecast"], expect: [{ tool: "cash_forecast", args: { store: STORES.D }, pick: [{ row: 0, column: "due_likely" }] }] },
+    // yx4fu1-ax is refused: a right answer says why, quoting the fix list's figures.
+    { en: "I have PKR 100,000 for the next 30 days. Where should it go?", ru: "Mere paas agle 30 din ke liye 100,000 rupay hain. Kahan lagaun?", kind: "answer", tools: ["plan_budget"] },
+    // Staff never get cash_forecast offered (no Plan); refusing through cash is right too.
+    { store: "D", role: "staff", en: "How much cash will couriers pay me over the next 4 weeks?", ru: "Agle 4 hafton mein couriers mujhe kitna paisa denge?", kind: "forbidden", tools: ["cash_forecast", "cash"], expect: [{ tool: "cash_forecast", args: { store: STORES.D }, pick: [{ row: 0, column: "due_likely" }] }] },
 
     // ── Out of scope ──
     { en: "What will the weather be in Karachi tomorrow?", ru: "Kal Karachi mein mausam kaisa hoga?", kind: "out_of_scope", tools: [] },
