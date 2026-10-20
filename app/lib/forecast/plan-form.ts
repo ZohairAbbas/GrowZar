@@ -17,7 +17,7 @@ export const SIM_VERSION = "11.5.0";
 export const FORECAST_STATUS = {
   cash: { passes: false, note: "Backtest 2026-10-20: 78% of payer-weeks inside low–high on both PKR stores (bar 80%)." },
   monthEnd: { passes: false, note: "Backtest 2026-10-20: orders 67% / 75% inside low–high, revenue 50% on 0dscam-qn; only 3 months can be tested yet." },
-  simulator: { passes: true, note: "Replay 2026-10-20: 89% of 0dscam-qn's lines inside low–high, bias −5% (bar 80%, ±15%); campaign lines +28%, platform groups −20%." },
+  simulator: { passes: true, note: "Replay 2026-10-20, one line per platform: 5 of 6 of 0dscam-qn's lines inside low–high, bias 0% (bar 80%, ±15%). Accurate on totals, but the evidence is thin: three dates." },
 } as const;
 
 export const HORIZONS = { min: 7, max: 60, default: 30 } as const;
