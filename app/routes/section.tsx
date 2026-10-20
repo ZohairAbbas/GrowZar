@@ -69,6 +69,7 @@ import { NO_SCOPE, parseScope, scopeQuery } from "~/lib/metrics/scope";
 import { storeCoverage } from "~/lib/metrics/coverage.server";
 import { coverageLine } from "~/lib/metrics/coverage";
 import { orderFilterQuery, parseOrderFilter } from "~/lib/metrics/findings";
+import { riskActions, riskVisible, storeRisk } from "~/lib/forecast/return-risk.server";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   return [{ title: loaderData ? `${loaderData.label} · Growzar` : "Growzar" }];
@@ -211,7 +212,9 @@ async function buildMetrics(
   // A bare `city` is the filter bar's now (D2), not the city card's filter:
   // the two select the same orders, and one banner is enough.
   const parsed = section === "orders" ? parseOrderFilter(url.searchParams) : null;
-  const filter = parsed?.kind === "city" ? null : parsed;
+  // Return risk (G-GZR11-4): behind its switch, internal accounts only until the bands are approved.
+  const riskOn = section === "orders" && (await riskVisible(storeId, (await inboxViewer()).userId));
+  const filter = parsed?.kind === "city" || (parsed?.kind === "risk_high" && !riskOn) ? null : parsed;
   const confirmation = section === "orders" && isConfirmationGroup(url.searchParams.get("confirmation")) ? url.searchParams.get("confirmation") : null;
   // So does an outcome picked from the Orders chips.
   const outcome = section === "orders" ? parseOutcome(url.searchParams) : null;
@@ -260,14 +263,25 @@ async function buildMetrics(
         ageing: await storePayoutAgeing(storeId, summary.store.currency, scope),
         depth: await financeDepth(storeId, summary),
       };
-    case "orders":
+    case "orders": {
+      const risk = riskOn ? await storeRisk(storeId) : null;
+      const highRisk = risk ? new Set([...risk.orders].filter(([, r]) => r.band === "high").map(([id]) => id)) : undefined;
+      const view = await ordersView(storeId, period.from, period.to, filter, outcome, scope, before, confirmation, highRisk);
       return {
         ...base,
         kind: "orders" as const,
-        view: compared(await ordersView(storeId, period.from, period.to, filter, outcome, scope, before, confirmation)),
+        view: compared(view),
         funnel: confirmationFunnel(summary.rows),
         confirmation,
+        risk: risk
+          ? {
+              rows: Object.fromEntries(view.rows.flatMap((r) => (risk.orders.has(r.orderId) ? [[r.orderId, risk.orders.get(r.orderId)!]] : []))),
+              high: highRisk!.size,
+              actions: await riskActions(storeId, summary.store.shopDomain),
+            }
+          : null,
       };
+    }
     case "shipping":
       return {
         ...base,
@@ -423,7 +437,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
           ) : null}
           {metrics.kind === "marketing" && metrics.offers ? <OffersPanel view={metrics.offers} canSeeMoney={metrics.canSeeMoney} /> : null}
           {metrics.kind === "marketing" && metrics.messaging ? <MessagingPanel view={metrics.messaging} periodDays={metrics.period.days} /> : null}
-          {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} /> : null}
+          {metrics.kind === "orders" ? <OrdersPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} funnel={metrics.funnel} confirmation={metrics.confirmation} risk={metrics.risk} /> : null}
           {metrics.kind === "shipping" ? <ShippingPanel view={metrics.view} depth={metrics.depth} period={metrics.period.query} scope={metrics.scope} /> : null}
           {metrics.kind === "customers" ? <CustomersPanel view={metrics.view} canSeeMoney={metrics.canSeeMoney} canMessage={metrics.consent?.byCustomer ?? null} network={metrics.topNetwork} /> : null}
           {metrics.kind === "customers" && metrics.network ? <BuyerNetworkPanel view={metrics.network} period={metrics.period.query} /> : null}
