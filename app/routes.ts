@@ -79,6 +79,8 @@ export default [
     route("insights/:insightId", "routes/insights.$insightId.tsx"),
     // What happened after findings were acted on, per store and organization (G-GZR9-5).
     route("results", "routes/results.tsx"),
+    // Forecasts and the budget simulator (G-GZR11-6), behind PLAN_ENABLED.
+    route("plan", "routes/plan.tsx"),
     // Ask about your stores (Phase 10, G-GZR10-3).
     route("ask", "routes/ask.tsx"),
   ]),

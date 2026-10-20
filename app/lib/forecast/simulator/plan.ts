@@ -224,14 +224,14 @@ export function simulate(data: SimData, req: SimRequest, { draws = DRAWS, seed =
     const amount = units * v.item.unitCost!;
     lines.push({
       kind: "stock", key: `stock:${id}`, label: `Stock: ${v.item.title}`, platform: null, amount,
-      buys: `${Math.ceil(units).toLocaleString("en-US")} units at ${Math.round(v.item.unitCost!).toLocaleString("en-US")}, arriving in ${v.lead} days (${v.item.leadSource === "merchant" ? "your lead time" : v.item.leadSource === "measured" ? "measured from your orders to this supplier" : "Inventorify's setting"})`,
+      buys: `${Math.ceil(units).toLocaleString("en-US")} unit${Math.ceil(units) === 1 ? "" : "s"} at ${Math.round(v.item.unitCost!).toLocaleString("en-US")}, arriving in ${v.lead} days (${v.item.leadSource === "merchant" ? "your lead time" : v.item.leadSource === "measured" ? "measured from your orders to this supplier" : "Inventorify's setting"})`,
       deliveredOrders: null,
       // Stock bought for an ad line earns through that line; only stock sold without ads earns here.
       profit: fixed(b.organic * (v.item.unitMargin ?? 0)),
       cashBackBy: addDays(data.today, H + delay.p90), products: [{ variantId: id, title: v.item.title, share: 1 }],
       notes: [
         ...(b.forced ? ["kept in stock as you asked"] : []),
-        ...(b.forAds ? [`${Math.ceil(b.forAds).toLocaleString("en-US")} units for the sales the ad lines make (counted there)`] : []),
+        ...(b.forAds ? [`${Math.ceil(b.forAds).toLocaleString("en-US")} unit${Math.ceil(b.forAds) === 1 ? "" : "s"} for the sales the ad lines make (counted there)`] : []),
       ],
     });
   }

@@ -20,6 +20,8 @@ export const SECTIONS = [
   "orders",
   "shipping",
   "finance",
+  // Forecasts and the budget simulator (G-GZR11-6). Money in it also needs finance:view.
+  "plan",
   "customers",
   "inventory",
   "marketing",
@@ -136,6 +138,7 @@ export const SECTION_LABELS: Record<Section, string> = {
   orders: "Orders",
   shipping: "Shipping",
   finance: "Finance",
+  plan: "Plan",
   customers: "Customers",
   inventory: "Inventory",
   marketing: "Marketing",
