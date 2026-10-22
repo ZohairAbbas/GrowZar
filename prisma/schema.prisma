@@ -1285,3 +1285,276 @@ model Plan {
   @@index([storeId, createdAt])
   @@map("plans")
 }
+
+// ── Books (B1, D-62..D-91) ──────────────────────────────────────────────────
+// Ported from Financify's Books at 0cc8732. The database enforces what Prisma
+// can't: balanced entries, permanent posted history and the closed-period lock
+// (migration 20261022120000_books_engine).
+
+model BkBook {
+  id                   String    @id @default(cuid())
+  /// One book per organization (D-65). No relation: books outlive an uninstall (D-71).
+  organizationId       String    @unique
+  /// ISO 4217. Fixed once anything is posted.
+  currency             String    @db.VarChar(3)
+  /// Minor units per major unit as a power of ten (PKR/USD 2, JPY 0).
+  currencyDecimals     Int       @default(2)
+  /// 1–12. July (7) for Pakistan.
+  fiscalYearStartMonth Int       @default(7)
+  /// Nothing may be posted on or before this date.
+  lockedThrough        DateTime? @db.Date
+  settings             Json      @default("{}")
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  accounts         BkAccount[]
+  contacts         BkContact[]
+  documents        BkDocument[]
+  connectors       BkConnector[]
+  taxRates         BkTaxRate[]
+
+  @@map("bk_books")
+}
+
+model BkAccount {
+  id         String    @id @default(cuid())
+  bookId     String
+  code       String
+  name       String
+  /// asset | liability | equity | income | expense
+  type       String
+  /// bank | cash | card | ad_wallet | receivable | payable | stock | tax | other …
+  subtype    String    @default("other")
+  /// Accounts the engine relies on (opening_balance, retained_earnings…). Renamable, never archivable.
+  systemKey  String?
+  /// A sub-account rolls up into its parent in reports (one level deep).
+  parentId   String?
+  /// Money accounts only: the account's own currency when it isn't the book's (a USD card).
+  currency   String?   @db.VarChar(3)
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  book BkBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([bookId, code])
+  @@unique([bookId, systemKey])
+  @@index([bookId, type])
+  @@map("bk_accounts")
+}
+
+model BkContact {
+  id            String    @id @default(cuid())
+  bookId        String
+  name          String
+  /// supplier | customer | courier | gateway | ad_platform | other
+  kinds         String[]
+  email         String?
+  phone         String?
+  notes         String?
+  /// Last account used with this contact, offered first next time.
+  lastAccountId String?
+  archivedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  book BkBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@index([bookId, name])
+  @@map("bk_contacts")
+}
+
+model BkDocument {
+  id           String    @id @default(cuid())
+  bookId       String
+  /// expense | money_in | transfer | owner_in | owner_out | opening | manual
+  type         String
+  /// Assigned on posting, gapless per type (EXP-0001).
+  number       String?
+  /// draft | posted | cancelled
+  status       String    @default("draft")
+  date         DateTime  @db.Date
+  contactId    String?
+  /// The form as entered (validated per type); the posting engine reads only this.
+  data         Json
+  /// Base-currency minor units, for lists.
+  total        BigInt    @default(0)
+  memo         String?
+  /// manual, or an importer's key.
+  source       String    @default("manual")
+  sourceRef    String?
+  /// The store it belongs to (D-65); null for organization-level items such as rent.
+  storeId      String?
+  /// Free labels (a sales channel, a brand) for reports by tag. Not part of the ledger.
+  tags         String[]  @default([])
+  createdBy    String?
+  postedAt     DateTime?
+  cancelledAt  DateTime?
+  cancelReason String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  book         BkBook          @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  entries      BkEntry[]
+
+  @@unique([bookId, source, sourceRef])
+  @@unique([bookId, number])
+  @@index([bookId, status, date])
+  @@index([bookId, type, date])
+  @@index([bookId, contactId])
+  @@index([tags], type: Gin)
+  @@map("bk_documents")
+}
+
+model BkSequence {
+  bookId String
+  prefix String
+  next   Int    @default(1)
+
+  @@id([bookId, prefix])
+  @@map("bk_sequences")
+}
+
+model BkEntry {
+  id         String   @id @default(cuid())
+  bookId     String
+  documentId String
+  /// post | cancel
+  kind       String
+  date       DateTime @db.Date
+  createdAt  DateTime @default(now())
+
+  document BkDocument    @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  lines    BkEntryLine[]
+
+  @@index([bookId, date])
+  @@index([documentId])
+  @@map("bk_entries")
+}
+
+model BkEntryLine {
+  id          BigInt   @id @default(autoincrement())
+  entryId     String
+  bookId      String
+  accountId   String
+  contactId   String?
+  /// Copied from the document: the store dimension of every report (D-65).
+  storeId     String?
+  /// Signed base-currency minor units: + debit, − credit.
+  amount      BigInt
+  /// Lines on a foreign-currency account: the amount in that currency (same sign as `amount`).
+  fxAmount    BigInt?
+  /// Copied from the entry so balances are one index scan.
+  date        DateTime @db.Date
+  description String?
+
+  entry BkEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
+
+  @@index([bookId, accountId, date])
+  @@index([bookId, storeId, accountId, date])
+  @@index([bookId, contactId])
+  @@index([entryId])
+  @@map("bk_entry_lines")
+}
+
+model BkAuditEvent {
+  id         BigInt   @id @default(autoincrement())
+  bookId     String
+  /// Growzar user id; null for connectors and the worker.
+  actor      String?
+  action     String
+  documentId String?
+  detail     Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([bookId, createdAt])
+  @@index([documentId])
+  @@map("bk_audit_events")
+}
+
+model BkConnector {
+  id            String    @id @default(cuid())
+  bookId        String
+  /// shopify_sales | courierify_payouts | ad_spend | bank_statements
+  key           String
+  enabled       Boolean   @default(false)
+  /// draft | auto
+  mode          String    @default("draft")
+  /// First day to bring in.
+  startDate     DateTime? @db.Date
+  /// Account mapping and source options, validated per connector.
+  settings      Json      @default("{}")
+  /// Last whole day brought in; the next run starts the day after.
+  syncedThrough DateTime? @db.Date
+  /// Set while a run is in progress (a run older than 15 minutes is treated as dead).
+  runningSince  DateTime?
+  lastRunAt     DateTime?
+  lastStatus    String?
+  lastMessage   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  book BkBook           @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  runs BkConnectorRun[]
+
+  @@unique([bookId, key])
+  @@map("bk_connectors")
+}
+
+model BkConnectorRun {
+  id          String    @id @default(cuid())
+  connectorId String
+  bookId      String
+  /// manual | auto | preview
+  trigger     String
+  /// running | ok | partial | error
+  status      String    @default("running")
+  fromDate    DateTime? @db.Date
+  toDate      DateTime? @db.Date
+  created     Int       @default(0)
+  updated     Int       @default(0)
+  skipped     Int       @default(0)
+  message     String?
+  detail      Json      @default("{}")
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+
+  connector BkConnector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+
+  @@index([connectorId, startedAt])
+  @@map("bk_connector_runs")
+}
+
+model BkAllocation {
+  id        String    @id @default(cuid())
+  bookId    String
+  paymentId String
+  billId    String
+  amount    BigInt
+  voidedAt  DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([bookId, billId])
+  @@index([paymentId])
+  @@map("bk_allocations")
+}
+
+model BkTaxRate {
+  id         String    @id @default(cuid())
+  bookId     String
+  name       String
+  /// sales | purchase | withholding
+  kind       String
+  /// Basis points: 1800 = 18%.
+  rateBp     Int
+  /// Where the tax goes; null only for purchase tax that can't be claimed (it joins the cost).
+  accountId  String?
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  book BkBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([bookId, name])
+  @@map("bk_tax_rates")
+}
