@@ -107,6 +107,9 @@ export default [
       route("bank/rules", "routes/books.bank.rules.tsx"),
       route("bank/:accountId", "routes/books.bank.$accountId._index.tsx"),
       route("bank/:accountId/reconcile", "routes/books.bank.$accountId.reconcile.tsx"),
+      // The parcel register and couriers' own files (B5b).
+      route("couriers", "routes/books.couriers._index.tsx"),
+      route("couriers/files", "routes/books.couriers.files.tsx"),
     ]),
   ]),
 

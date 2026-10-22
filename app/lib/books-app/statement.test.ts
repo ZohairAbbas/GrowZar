@@ -40,3 +40,20 @@ describe("what leaves the browser (D-72)", () => {
     expect(mapping).toMatchObject({ descCols: [1, 2], amountCol: 3 });
   });
 });
+
+describe("courier files leave the browser without the buyer's details", () => {
+  it("a settlement file: only the columns Books reads, and it reads the same", async () => {
+    const { minimiseSheet } = await import("./statement");
+    const { readSettlementFile } = await import("../books/courier-sheet");
+    const text = [
+      "PostEx Settlement Report",
+      "Tracking Number,Order Ref,Customer Name,Phone,Address,Status,COD Amount,Delivery Charges,Net Payable,Payment Date",
+      "PX111,#1001,Test Buyer,03001234567,House 1 Street 2,Delivered,1500,150,1350,2026-10-12",
+      "PX112,#1002,Other Buyer,03007654321,Flat 3,Returned,0,100,-100,2026-10-12",
+    ].join("\n");
+    const small = minimiseSheet(text, "settlement")!;
+    expect(small).not.toMatch(/Buyer|0300|Street|Flat|Customer|Phone|Address/);
+    expect(readSettlementFile(small, 2).lines).toEqual(readSettlementFile(text, 2).lines);
+    expect(minimiseSheet("just,some\nwords,here", "settlement")).toBeNull();
+  });
+});

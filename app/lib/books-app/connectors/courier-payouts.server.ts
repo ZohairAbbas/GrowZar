@@ -6,8 +6,9 @@ import { BooksError, createAccount, discardDraft, listAccounts, postDocument, up
 import { isMoneySubtype, type AccountType } from "../../books/chart";
 import { formatDate, todayIn } from "../../books/dates";
 import { isIsoDate } from "../../books/posting";
-import { courierName, payoutDay, planPayout, planSums, type PayoutAccounts, type PayoutMapping, type SettlementWire } from "./courier-payouts";
+import { courierName, minor, payoutDay, planPayout, planSums, type PayoutAccounts, type PayoutMapping, type SettlementWire } from "./courier-payouts";
 import { postDifference } from "./corrections.server";
+import { stampPayout } from "./parcels.server";
 import type { RunResult } from "./runs.server";
 
 /**
@@ -172,6 +173,20 @@ export async function runCourierPayouts(book: BookView, connector: BkConnector, 
           if (res.action === "created") r.created++;
           else if (res.action === "updated") r.updated++;
           else r.skipped++;
+          // The parcels it paid, in the register (B5b).
+          if (res.doc.status !== "cancelled") {
+            await stampPayout(
+              book,
+              store.id,
+              res.doc.id,
+              day,
+              ref,
+              (st.lines ?? []).map((l) => {
+                const kept = l.deductions.reduce((t, d) => t + minor(d.amount, book.decimals), 0n);
+                return { orderId: l.orderId, status: l.status, collected: minor(l.collectedAmount, book.decimals), net: minor(l.netAmount, book.decimals), kept };
+              }),
+            );
+          }
           // Courierify changed a payout already saved (a parcel's charges re-split): the difference posts on its own.
           if (res.action === "kept" && res.doc.status === "posted") {
             await postDifference(book, { source: "courierify_payouts", base, day, today, current: planSums(plan), memo: `${name} changed payout ${ref} (${res.doc.number}) after it was saved`, storeId: store.id, contactName: name, mode: connector.mode }, r);

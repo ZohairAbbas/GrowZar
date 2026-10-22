@@ -18,6 +18,9 @@ import {
   type ShopOrder,
 } from "../../books/connectors/shopify-sales";
 import { toSums } from "./ad-spend";
+import { updateRegister } from "../../books/connectors/parcels.server";
+import { linkLoadsheets } from "../../books/courier-sheets.server";
+import { refreshRegister } from "./parcels.server";
 import { postDifference } from "./corrections.server";
 import { factsAvailable, manualEvidence, releaseDays, statusFromOutcome, toShopOrder, type FeedOrder } from "./sales";
 import type { RunResult } from "./runs.server";
@@ -233,12 +236,22 @@ async function parcelEventsFor(ctx: StoreCtx, from: string, to: string, known: S
   }
   const skipped = new Set(skipRows.map((r) => r.orderId));
   const statusOf = new Map(ctx.grain.map((g) => [g.orderId, statusFromOutcome(g.outcome)]));
+  // The register's own evidence (B5b): a settlement file's paid and returned parcels, a loadsheet's dispatch date.
+  const register = await prisma.bkParcel.findMany({ where: { bookId: book.id, storeId: ctx.storeId }, select: { orderId: true, settledStatus: true, settledAt: true, payoutDocId: true, dispatchedOn: true } });
+  for (const p of register) if (p.settledStatus === "returned") statusOf.set(p.orderId, "RETURNED");
+  const registerFacts = register.map((p) => ({
+    orderId: p.orderId,
+    deliveredDay: null,
+    returnedDay: null,
+    settledDay: (p.settledStatus === "delivered" || p.payoutDocId) && p.settledAt ? p.settledAt.toISOString().slice(0, 10) : null,
+  }));
+  const dispatched = register.filter((p) => p.dispatchedOn).map((p) => ({ orderId: p.orderId, outcome: "in_transit", day: p.dispatchedOn!.toISOString().slice(0, 10) }));
   const basis = m.codBasis ?? "order";
   let hold: Parameters<typeof parcelChanges>[0]["hold"] = undefined;
   if (m.held && (basis === "delivery" || basis === "dispatch" || basis === "money")) {
     // Growzar knows the day each order was delivered (or paid), so a sale is let in on that day, never
     // just because tracking says delivered now (Financify's rule, made for tracking without dates).
-    hold = { account: m.held, onDay: releaseDays(basis, { grain: ctx.grain, parcels: ctx.parcels }), deliveredReleases: false };
+    hold = { account: m.held, onDay: releaseDays(basis, { grain: [...ctx.grain, ...dispatched], parcels: [...ctx.parcels, ...registerFacts] }), deliveredReleases: false };
   } else if (m.held && [...active.values()].some((a) => a.lines[m.held!] !== undefined)) {
     // Switched back to "when ordered": everything still held is let in now.
     hold = { account: m.held, onDay: new Map(), allOut: true };
@@ -347,6 +360,9 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
           }
           if (s.missingCost) r.notes.push(`${store.name}, ${formatDate(s.day)}: ${s.missingCost} item${s.missingCost === 1 ? "" : "s"} with no cost${s.estimatedCost ? " (estimated)" : " (left out)"}`);
         }
+        // The parcel register: what each cash-on-delivery order owes, by the same rules (B5b).
+        await updateRegister(book, mapping, orders, ctx.start, chunkTo, store.id);
+        await linkLoadsheets(book);
         const skips = parcelEvents.filter((p) => p.kind === "skip");
         if (skips.length) await prisma.bkParcelEvent.createMany({ data: skips.map((p) => ({ bookId: book.id, storeId: store.id, orderId: p.orderId, orderName: p.orderName, day: toDbDate(p.day), kind: "skip", lines: {} })), skipDuplicates: true });
         progress[store.id] = chunkTo;
@@ -354,6 +370,7 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
         r.to = chunkTo;
         if (firstWaiting) break;
       }
+      await refreshRegister(book, store.id);
       if (to < yesterday && !r.notes.some((n) => n.startsWith(store.name))) {
         r.status = "partial";
         r.notes.push(`${store.name}: brought in up to ${formatDate(progress[store.id] ?? to)}; the next run carries on`);
