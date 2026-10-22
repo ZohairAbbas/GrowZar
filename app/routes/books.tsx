@@ -1,8 +1,9 @@
-import { Outlet, redirect } from "react-router";
-import { BookOpen } from "lucide-react";
+import { Link, Outlet, redirect } from "react-router";
+import { BookOpen, Plus } from "lucide-react";
 
 import type { Route } from "./+types/books";
 import { requireBooks } from "~/lib/books-app/access.server";
+import { countDrafts } from "~/lib/books/books.server";
 import { formatDate } from "~/lib/books/dates";
 import { Notice } from "~/components/metrics/Metrics";
 import { BooksTabs } from "~/components/books/BooksUi";
@@ -31,6 +32,7 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     currency: book.currency,
     startDate: formatDate(book.settings.startDate ?? null),
     closedThrough: book.lockedThrough ? formatDate(book.lockedThrough) : null,
+    drafts: await countDrafts(book),
   };
 }
 
@@ -41,7 +43,8 @@ export default function BooksLayout({ loaderData: d }: Route.ComponentProps) {
   return (
     <div className="space-y-5">
       <header className="space-y-3">
-        <div>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
           <h1 className="flex items-center gap-2 font-display text-2xl font-bold text-gray-900">
             <BookOpen className="h-6 w-6 text-accent-600" /> Books
           </h1>
@@ -52,8 +55,14 @@ export default function BooksLayout({ loaderData: d }: Route.ComponentProps) {
           ) : (
             <p className="mt-1 text-sm text-gray-600">Set up your organization's books. It takes a few minutes, and nothing is posted until you finish.</p>
           )}
+          </div>
+          {d.setUp && d.canManage ? (
+            <Link to="/books/new" className="inline-flex h-10 items-center gap-1.5 rounded-full bg-navy px-5 text-sm font-semibold text-white hover:bg-navy-surface">
+              <Plus className="h-4 w-4" /> Record
+            </Link>
+          ) : null}
         </div>
-        {d.setUp ? <BooksTabs /> : null}
+        {d.setUp ? <BooksTabs drafts={d.drafts} /> : null}
       </header>
       <Outlet />
     </div>
