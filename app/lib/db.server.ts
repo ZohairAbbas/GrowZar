@@ -21,11 +21,17 @@ function createClient() {
     throw new Error("DATABASE_URL is not set");
   }
 
-  const adapter = new PrismaPg({
-    connectionString,
-    max: Number(process.env.DATABASE_POOL ?? 4),
-    connectionTimeoutMillis: 10_000,
-  });
+  // DATABASE_SCHEMA is set only by database tests, which run in a private
+  // schema of growzar_shadow (Books, D-91). Production uses public.
+  const schema = process.env.DATABASE_SCHEMA;
+  const adapter = new PrismaPg(
+    {
+      connectionString,
+      max: Number(process.env.DATABASE_POOL ?? 4),
+      connectionTimeoutMillis: 10_000,
+    },
+    schema ? { schema } : undefined,
+  );
 
   return new PrismaClient({
     adapter,
