@@ -5,6 +5,7 @@ import { booksEnabled, booksOn } from "../switch.server";
 import { runAdSpend } from "./ad-spend.server";
 import { runCourierPayouts } from "./courier-payouts.server";
 import { runSales } from "./sales.server";
+import { runInventorify } from "./inventorify.server";
 import { runConnector, type Runner } from "./runs.server";
 
 /**
@@ -17,6 +18,7 @@ export const RUNNERS: Partial<Record<ConnectorKey, Runner>> = {
   ad_spend: runAdSpend,
   courierify_payouts: (book, connector) => runCourierPayouts(book, connector),
   shopify_sales: runSales,
+  inventorify: (book, connector) => runInventorify(book, connector),
 };
 
 const EVERY_MS = 6 * 60 * 60 * 1000;
