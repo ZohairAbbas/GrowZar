@@ -1325,6 +1325,7 @@ model BkBook {
   contacts         BkContact[]
   documents        BkDocument[]
   connectors       BkConnector[]
+  parcelEvents     BkParcelEvent[]
   taxRates         BkTaxRate[]
 
   @@map("bk_books")
@@ -1410,6 +1411,7 @@ model BkDocument {
 
   book         BkBook          @relation(fields: [bookId], references: [id], onDelete: Cascade)
   entries      BkEntry[]
+  parcelEvents BkParcelEvent[]
 
   @@unique([bookId, source, sourceRef])
   @@unique([bookId, number])
@@ -1572,3 +1574,29 @@ model BkTaxRate {
   @@unique([bookId, name])
   @@map("bk_tax_rates")
 }
+
+/// A cash-on-delivery order's change on a sales day (B3c; Financify's
+/// bk_parcel_events): held until delivered or paid, released, returned,
+/// adjusted, reinstated, or "skip" (nothing to take back). `lines` are signed
+/// account amounts in minor units; a day's events are part of its sales entry.
+model BkParcelEvent {
+  id         String   @id @default(cuid())
+  bookId     String
+  /// The store the order belongs to (D-65).
+  storeId    String?
+  orderId    String
+  orderName  String
+  day        DateTime @db.Date
+  kind       String
+  lines      Json
+  documentId String?
+  createdAt  DateTime @default(now())
+
+  book     BkBook      @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  document BkDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@unique([bookId, orderId, day, kind])
+  @@index([bookId, day])
+  @@map("bk_parcel_events")
+}
+
