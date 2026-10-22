@@ -10,13 +10,14 @@
  * share that cap, so a suite holds at most two (one per side of the
  * concurrency tests) and suites run one at a time.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 export const TEST_DATABASE_URL = process.env.BOOKS_TEST_DATABASE_URL;
 
-const MIGRATION = fileURLToPath(new URL("../../../../prisma/migrations/20261022120000_books_engine/migration.sql", import.meta.url));
+const MIGRATIONS = fileURLToPath(new URL("../../../../prisma/migrations/", import.meta.url));
+const BOOKS_MIGRATION = "20261022120000_books_engine";
 
 /** The URL without its query string (Prisma-only parameters such as connection_limit upset pg). */
 function baseUrl(url: string): string {
@@ -36,8 +37,10 @@ async function withClient<T>(url: string, fn: (c: pg.Client) => Promise<T>): Pro
 /**
  * Create the schema, apply the migration, and point `~/lib/db.server` at it.
  * Call before the first import of db.server. Returns a function that drops it.
+ * `all`: every Growzar migration in order, for tests that also need stores,
+ * ad spend or other Growzar tables (the connectors, B3).
  */
-export async function openTestSchema(): Promise<() => Promise<void>> {
+export async function openTestSchema(opts: { all?: boolean } = {}): Promise<() => Promise<void>> {
   const url = TEST_DATABASE_URL;
   if (!url) throw new Error("BOOKS_TEST_DATABASE_URL is not set");
   const schema = `books_test_${process.pid}_${Date.now()}`;
@@ -47,7 +50,8 @@ export async function openTestSchema(): Promise<() => Promise<void>> {
     if (!/shadow|scratch|test/.test(db)) throw new Error(`Refusing to run against database "${db}"`);
     await c.query(`CREATE SCHEMA "${schema}"`);
     await c.query(`SET search_path TO "${schema}"`);
-    await c.query(readFileSync(MIGRATION, "utf8"));
+    const names = opts.all ? readdirSync(MIGRATIONS).filter((n) => /^\d{14}_/.test(n)).sort() : [BOOKS_MIGRATION];
+    for (const n of names) await c.query(readFileSync(`${MIGRATIONS}${n}/migration.sql`, "utf8"));
   });
   // Prisma's generated queries name the schema; the raw SQL in the services
   // and the triggers' functions find it through search_path.

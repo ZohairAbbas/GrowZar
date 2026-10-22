@@ -1,7 +1,10 @@
+import { Link } from "react-router";
 import { CheckCircle2, Download, PenLine, RefreshCw } from "lucide-react";
 
 import type { Route } from "./+types/books.sources";
 import { prisma } from "~/lib/db.server";
+import { getConnector } from "~/lib/books-app/connectors/runs.server";
+import { formatDate } from "~/lib/books/dates";
 import { requireBook } from "~/lib/books-app/access.server";
 import { SOURCE_LABELS, installHref, storeCoverage, type SourceStatus } from "~/lib/books-app/coverage";
 import { APP_LABELS } from "~/lib/sections";
@@ -23,7 +26,17 @@ export async function loader({ request }: Route.LoaderArgs) {
     orderBy: { shopDomain: "asc" },
     select: { id: true, shopDomain: true, displayName: true, connections: { select: { app: true, status: true, capabilities: true } } },
   });
+  const adSpend = await getConnector(book, "ad_spend");
   return {
+    // The connectors built so far (B3); the rest join this list as they land.
+    connectors: [
+      {
+        key: "ad_spend",
+        name: "Ad spend",
+        to: "/books/connectors/ad-spend",
+        state: !adSpend.exists ? "Not set up" : !adSpend.enabled ? "Off" : `On${adSpend.mode === "auto" ? ", saving automatically" : ", as drafts"}${adSpend.syncedThrough ? `, through ${formatDate(adSpend.syncedThrough)}` : ""}`,
+      },
+    ],
     stores: stores.map((s) => ({
       id: s.id,
       name: s.displayName ?? s.shopDomain,
@@ -68,6 +81,22 @@ export default function BooksSources({ loaderData: d }: Route.ComponentProps) {
   return (
     <div className="space-y-5">
       <p className="text-sm text-gray-600">What reaches your books from each store. Automatic entries arrive each day as drafts you check and save, or saved for you once you trust them.</p>
+      <Card title="Connections">
+        <ul className="divide-y divide-gray-100">
+          {d.connectors.map((c) => (
+            <li key={c.key} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+              <span className="font-semibold text-gray-900">{c.name}</span>
+              <span className="flex items-center gap-3 text-gray-600">
+                {c.state}
+                <Link to={c.to} className="font-semibold text-accent-600">
+                  {c.state === "Not set up" ? "Set up" : "Settings"}
+                </Link>
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-xs text-gray-500">Sales, courier payouts and goods received are on their way.</p>
+      </Card>
       {d.stores.map((s) => (
         <Card key={s.id} title={s.name}>
           <ul className="divide-y divide-gray-100">
