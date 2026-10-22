@@ -40,9 +40,17 @@ export const RESOLVED_SHARE = 0.8;
 export const UNRESOLVED_SHARE = 0.2;
 
 /** One saved order and when, if ever, it resolved (paid, received back, delivered or returned). */
-export type Followed = { orderId: string; resolvedAt: Date | null; how?: string; money?: Money | null };
+export type Followed = {
+  orderId: string;
+  resolvedAt: Date | null;
+  how?: string;
+  money?: Money | null;
+  /** I4 (D-93): its payout also reached the bank in Books' matched statements; absent when Books can't tell. */
+  inBank?: boolean;
+};
 
-export type FollowCheck = { day: number; resolved: number; total: number; share: number; amount: string | null; how?: Record<string, number> };
+/** `inBankAmount` (D-93): of the amount resolved, what Books' bank statements show; only when Books can tell. */
+export type FollowCheck = { day: number; resolved: number; total: number; share: number; amount: string | null; how?: Record<string, number>; inBankAmount?: string | null };
 
 const sumMoney = (list: ReadonlyArray<Money | null | undefined>, currency: string | null): string | null => {
   if (!currency) return null;
@@ -58,6 +66,7 @@ export function followChecks(items: readonly Followed[], actedAt: Date, now: Dat
     const done = items.filter((i) => i.resolvedAt && i.resolvedAt <= by);
     const how: Record<string, number> = {};
     for (const i of done) if (i.how) how[i.how] = (how[i.how] ?? 0) + 1;
+    const bankKnown = items.some((i) => i.inBank !== undefined);
     return {
       day,
       resolved: done.length,
@@ -65,6 +74,7 @@ export function followChecks(items: readonly Followed[], actedAt: Date, now: Dat
       share: items.length ? Math.round((1000 * done.length) / items.length) / 1000 : 0,
       amount: sumMoney(done.map((i) => i.money), currency),
       ...(Object.keys(how).length ? { how } : {}),
+      ...(bankKnown ? { inBankAmount: sumMoney(done.filter((i) => i.inBank).map((i) => i.money), currency) } : {}),
     };
   });
 }
@@ -83,15 +93,20 @@ type Parcel = Record<string, unknown>;
 const date = (v: unknown) => (typeof v === "string" && !Number.isNaN(Date.parse(v)) ? new Date(v) : null);
 const latest = (ds: ReadonlyArray<Date | null>) => (ds.some((d) => d === null) ? null : ds.reduce<Date | null>((a, d) => (!a || d! > a ? d : a), null));
 
-/** I4: an owed order is paid once every delivered parcel with COD on it is settled; when, by the last settlement. */
-export function cashFollowed(items: readonly WatchItem[], parcelsByOrder: ReadonlyMap<string, readonly Parcel[]>): Followed[] {
+/**
+ * I4: an owed order is paid once every delivered parcel with COD on it is
+ * settled; when, by the last settlement. With Books' matched bank statements
+ * (`inBank`: Courierify settlement ids whose payout the bank shows, D-93), a
+ * paid order also says whether the money reached the bank; it is paid either way.
+ */
+export function cashFollowed(items: readonly WatchItem[], parcelsByOrder: ReadonlyMap<string, readonly Parcel[]>, inBank: ReadonlySet<string> | null = null): Followed[] {
   return items.map((i) => {
     const ps = (parcelsByOrder.get(i.orderId) ?? []).filter((p) => p.status === "delivered");
-    const settled = ps.map((p) => {
-      const s = (p.settlement ?? {}) as Record<string, unknown>;
-      return s.settled === true ? date(s.settledAt) : null;
-    });
-    return { orderId: i.orderId, resolvedAt: ps.length ? latest(settled) : null, how: "paid", money: i.money ?? null };
+    const s = ps.map((p) => (p.settlement ?? {}) as Record<string, unknown>);
+    const resolvedAt = ps.length ? latest(s.map((x) => (x.settled === true ? date(x.settledAt) : null))) : null;
+    const f: Followed = { orderId: i.orderId, resolvedAt, how: "paid", money: i.money ?? null };
+    if (inBank) f.inBank = !!resolvedAt && s.every((x) => typeof x.settlementId === "string" && inBank.has(x.settlementId));
+    return f;
   });
 }
 

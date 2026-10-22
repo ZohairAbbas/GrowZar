@@ -12,7 +12,7 @@ import { formOptions, forecasts, parseWhatIf, runAndSave, savedPlan, savedPlans,
 import type { SimRequest } from "~/lib/forecast/simulator/types";
 import { sectionState, SECTION_DEFINITIONS } from "~/lib/sections";
 import { Notice } from "~/components/metrics/Metrics";
-import { CashForecastCard, MonthEndCard, PlanForm, PlanResult, SavedPlans, WhatIfs } from "~/components/plan/PlanPanels";
+import { CashForecastCard, CashHistoryCard, MonthEndCard, PlanForm, PlanResult, SavedPlans, WhatIfs } from "~/components/plan/PlanPanels";
 
 export function meta() {
   return [{ title: "Plan · Growzar" }];
@@ -48,7 +48,7 @@ export async function loader({ request, url }: Route.LoaderArgs) {
   if (state.kind !== "open") return { kind: "locked" as const, storeName: active.displayName ?? active.shopDomain };
 
   const id = url.searchParams.get("id");
-  const [{ cash, month }, options, list, plan] = await Promise.all([forecasts(active.id), formOptions(active.id), savedPlans(active.id), id ? savedPlan(active.id, id) : null]);
+  const [{ cash, month, history }, options, list, plan] = await Promise.all([forecasts(active.id), formOptions(active.id), savedPlans(active.id), id ? savedPlan(active.id, id) : null]);
   const ask = plan ? parseWhatIf(url.searchParams) : null;
   const whatIf = plan && ask ? await whatIfOn(active.id, plan, ask) : null;
   return {
@@ -59,6 +59,7 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     // Plan is internal-only for now: everyone who reaches it sees where each forecast stands.
     internal: true,
     cash: canSeeMoney ? cash : null,
+    history: canSeeMoney ? history : null,
     month: canSeeMoney ? month : { current: { ...month.current, deliveredRevenue: null, profit: null, adSpend: null }, previous: { ...month.previous, deliveredRevenue: null, profit: null, adSpend: null } },
     options,
     plans: list.map((p) => ({ id: p.id, createdAt: p.createdAt.toISOString(), status: p.status, budget: canSeeMoney ? ((p.inputs as SimRequest | null)?.budget ?? null) : null })),
@@ -113,6 +114,7 @@ export default function PlanPage({ loaderData, actionData }: Route.ComponentProp
       </section>
 
       {d.cash ? <CashForecastCard cash={d.cash} status={d.status.cash} internal={d.internal} /> : <Notice>The cash forecast needs Finance access.</Notice>}
+      {d.cash && d.history?.length ? <CashHistoryCard rows={d.history} currency={d.cash.currency ?? ""} /> : null}
       <MonthEndCard month={d.month} canSeeMoney={d.canSeeMoney} status={d.status.monthEnd} internal={d.internal} />
     </div>
   );

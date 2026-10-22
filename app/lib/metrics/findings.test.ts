@@ -278,6 +278,15 @@ describe("I4: COD a courier or 3PL has not paid, against its own rhythm", () => 
     expect(f).toMatchObject({ payer: "orio", orders: 4, cod: [pkr("20000.00")], lastPaidDay: "2026-08-25", medianGapDays: 1, daysLate: 37 });
   });
 
+  it("says when the payer's last payout reached the bank, only where Books can tell (D-93)", () => {
+    const [f] = cashHeldFindings(input([], { cash: { asOf, payers: [orio, tcs], awaiting: times(4, () => delivered(30)), lastInBank: new Map([["tcs", "2026-09-30"]]) } })) as Exclude<ReturnType<typeof cashHeldFindings>, { kind: "skip" }>;
+    expect(f!.lastInBankOn).toBeNull();
+    const [t] = cashHeldFindings(input([], { cash: { asOf, payers: [orio, tcs], awaiting: times(11, () => delivered(15, { courier: "tcs", fulfilledVia: null })), lastInBank: new Map([["tcs", "2026-09-30"]]) } })) as Exclude<ReturnType<typeof cashHeldFindings>, { kind: "skip" }>;
+    expect(t!.lastInBankOn).toBe("2026-09-30");
+    const [n] = cashHeldFindings(cashInput(times(4, () => delivered(30)))) as Exclude<ReturnType<typeof cashHeldFindings>, { kind: "skip" }>;
+    expect(n).not.toHaveProperty("lastInBankOn");
+  });
+
   it("marks Orio as known only by uploaded statements, and no other payer", () => {
     const [f] = cashHeldFindings(cashInput(times(4, () => delivered(30)))) as Exclude<ReturnType<typeof cashHeldFindings>, { kind: "skip" }>;
     expect(f!.byUpload).toBe(true);

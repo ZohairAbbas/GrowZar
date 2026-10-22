@@ -3,6 +3,8 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.server";
 import { loadForecastBase } from "./base.server";
 import { forecastCash, type CashForecast } from "./cash";
+import type { HistoryRow } from "./cash-history";
+import { forecastHistory, keepWeekForecast } from "./cash-history.server";
 import { monthEnd } from "./month-end.server";
 import type { MonthEnd } from "./month-end";
 import { SIM_VERSION } from "./plan-form";
@@ -37,11 +39,14 @@ export async function lastLags(storeId: string): Promise<Record<string, number>>
   return lags && typeof lags === "object" ? lags : {};
 }
 
-export async function forecasts(storeId: string): Promise<{ cash: CashForecast; month: { current: MonthEnd; previous: MonthEnd } }> {
+export async function forecasts(storeId: string): Promise<{ cash: CashForecast; month: { current: MonthEnd; previous: MonthEnd }; history: HistoryRow[] }> {
   const now = new Date();
   const base = await loadForecastBase(storeId, now);
   const lags = await lastLags(storeId);
-  return { cash: forecastCash(base, { merchantLags: new Map(Object.entries(lags)) }), month: await monthEnd(storeId, now, base) };
+  const cash = forecastCash(base, { merchantLags: new Map(Object.entries(lags)) });
+  // D-94: the week's first forecast is kept, and earlier weeks' are shown against what happened.
+  await keepWeekForecast(storeId, cash);
+  return { cash, month: await monthEnd(storeId, now, base), history: await forecastHistory(storeId, base) };
 }
 
 export type FormOptions = {

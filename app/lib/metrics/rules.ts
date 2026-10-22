@@ -30,7 +30,7 @@ export const DISPLAY_RULES: readonly DisplayRule[] = [
   { id: 14, title: "Product cost (COGS)", status: "implemented", where: "order grain cogs from Financify, order-time cost, completeness kept" },
   { id: 15, title: "Net profit", status: "implemented", where: "Financify's settings stored and compared; Growzar's own figure is 'profit after returns', never 'net profit'" },
   { id: 16, title: "ROAS", status: "implemented", where: "rollups.roas = delivered revenue ÷ ad spend (text inverted; confirmed 2026-09-30)" },
-  { id: 17, title: "Cash collected / settlements", status: "implemented", where: "'paid by courier' from settled delivered parcels; 'received in bank' shown as not available" },
+  { id: 17, title: "Cash collected / settlements", status: "implemented", where: "'paid by courier' from settled delivered parcels; 'received in bank' from courier payouts matched to bank statements in Books (B7), else shown as not available" },
   { id: 18, title: "Suppliers and purchase orders", status: "implemented", where: "Inventory section: units on order per variant and open purchase orders, from Inventorify (the owner)" },
   { id: 19, title: "Number of customers / repeat rate", status: "implemented", where: "Growzar's customer record by normalised phone; screens count it, never an app's count" },
   { id: 20, title: "Customer lifetime value / order count", status: "implemented", where: "order grain grouped by customerId" },

@@ -16,6 +16,7 @@ import { marketing } from "./tools/marketing.server";
 import { outcomes } from "./tools/outcomes.server";
 import { cashForecastTool, monthEndTool, orderRiskSummary, planBudget } from "./tools/plan.server";
 import { stock } from "./tools/stock.server";
+import { booksBalances, booksReport } from "./tools/books.server";
 import { summary } from "./tools/summary.server";
 import type { AskContext, AskTool, ToolResult } from "./types";
 
@@ -34,6 +35,8 @@ export const TOOLS: AskTool[] = [
   listStores, summary, breakdown, comparePeriods, cityCourier, cash, stock, customers, marketing, insights, outcomes, coverage, calculate,
   // Phase 11, offered only where their gate lets the viewer see them; after the rest, so other viewers' prompts keep their bytes.
   cashForecastTool, monthEndTool, orderRiskSummary, planBudget,
+  // Books (B7, D-73), offered only to viewers who can open Books.
+  booksBalances, booksReport,
 ] as AskTool[];
 
 const byName = new Map(TOOLS.map((t) => [t.name, t]));

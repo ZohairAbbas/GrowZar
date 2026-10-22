@@ -4,6 +4,8 @@ import { roleChecker } from "../role-check.server";
 import { planVisible } from "../forecast/plan-access.server";
 import { returnRiskEnabled, riskOrgs } from "../forecast/return-risk.server";
 import { viewerIsInternal } from "../outcomes/results.server";
+import { scopeAllowsBooks } from "../books-app/access";
+import { booksOn } from "../books-app/switch.server";
 import type { AskContext } from "./types";
 
 /**
@@ -23,6 +25,7 @@ export async function askContext(request: Request, now = new Date()): Promise<As
   return {
     planTools: can(viewer.role, "plan", "view") && (await planVisible(viewer.userId)),
     riskTools: returnRiskEnabled() && (internal || riskOrgs().has(viewer.organizationId)),
+    booksTools: can(viewer.role, "books", "view") && scopeAllowsBooks(viewer.scopedStoreIds) && (await booksOn(viewer.organizationId)),
     organizationId: viewer.organizationId,
     userId: viewer.userId,
     baseCurrency: org.baseCurrency,

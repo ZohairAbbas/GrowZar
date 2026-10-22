@@ -93,6 +93,8 @@ export type CoverageInput = {
   adSpendFetchedAt?: Date | null;
   /** "Now", for judging freshness. */
   asOf?: Date;
+  /** Courier payouts in the period, and how many Books' matched bank statements show (B7); absent when Books can't tell. */
+  bankReceipts?: { inBank: number; payouts: number } | null;
   /** Orders whose outcome was withheld as one-sided (`outcome-sources.ts`), and the carriers. */
   withheld?: { orders: number; returned: number; inTransit: number; couriers: string[] };
 };
@@ -482,19 +484,39 @@ export function coverageReport(input: CoverageInput): CoverageReport {
         sections: ["marketing"],
       });
     }
-    items.push({
-      key: "bank_receipts",
-      app: "FINANCIFY",
-      label: "Money received in bank",
-      phrase: "money received in bank",
-      have: null,
-      of: null,
-      unit: null,
-      status: "missing",
-      gap: "Financify's cash ledger has not recorded a settlement for this store",
-      effect: "Finance shows what couriers paid out, not what reached the bank account",
-      sections: ["finance"],
-    });
+    // Rule #17's second stage comes from Books' matched bank statements (B7, D-68).
+    const bank = input.bankReceipts
+      ? counted(
+          {
+            key: "bank_receipts",
+            app: "FINANCIFY",
+            label: "Money received in bank",
+            phrase: "courier payouts seen in the bank",
+            unit: "payouts",
+            effect: "Finance's \"received in bank\" counts only payouts matched to a bank statement line in Books",
+            sections: ["finance"],
+          },
+          input.bankReceipts.inBank,
+          input.bankReceipts.payouts,
+          (n) => `${plural(n, "courier payout")} not matched to a bank statement line in Books yet`,
+        )
+      : null;
+    if (bank) items.push(bank);
+    else if (!input.bankReceipts) {
+      items.push({
+        key: "bank_receipts",
+        app: "FINANCIFY",
+        label: "Money received in bank",
+        phrase: "money received in bank",
+        have: null,
+        of: null,
+        unit: null,
+        status: "missing",
+        gap: "no bank statement is matched in Books for this store",
+        effect: "Finance shows what couriers paid out, not what reached the bank account",
+        sections: ["finance"],
+      });
+    }
   }
 
   if (has("COURIERIFY") || has("FINANCIFY")) {

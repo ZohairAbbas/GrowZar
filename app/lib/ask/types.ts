@@ -36,6 +36,8 @@ export type AskContext = {
   planTools?: boolean;
   /** The return-risk tool: RETURN_RISK_ENABLED, for internal accounts and the organizations in RETURN_RISK_ORGS. */
   riskTools?: boolean;
+  /** Books' tools (B7, D-73): only where the viewer can open Books (books:view, every store in scope, Books on). */
+  booksTools?: boolean;
 };
 
 /** A cell: a figure, a label, or nothing ("not enough data" says why in `meta`). */

@@ -25,6 +25,9 @@ import { refreshBuyerNetwork, refreshOrderNetwork } from "~/lib/metrics/buyer-ne
 import { runDueDigests } from "~/lib/digest/digest.server";
 import { redactOldMessages } from "~/lib/ask/loop.server";
 import { runDueConnectors } from "~/lib/books-app/connectors/schedule.server";
+import { keepDueForecasts } from "~/lib/forecast/cash-history.server";
+import { planEnabled } from "~/lib/forecast/plan-access.server";
+import { lastLags } from "~/lib/forecast/plan.server";
 
 /**
  * The sync worker.
@@ -379,6 +382,29 @@ const booksTimer = setInterval(() => {
   void books().catch((error) => console.error("[books] run failed", error));
 }, BOOKS_INTERVAL_MS);
 
+/**
+ * Plan's kept forecasts (D-94): hourly, any store with Courierify whose
+ * forecast for this week isn't kept yet gets one, so a week nobody opened
+ * Plan still has its forecast to compare. Only while Plan is on.
+ */
+const FORECAST_INTERVAL_MS = 60 * 60 * 1000;
+let forecastsRunning = false;
+
+async function keepForecasts() {
+  if (forecastsRunning || !planEnabled()) return;
+  forecastsRunning = true;
+  try {
+    const n = await keepDueForecasts(new Date(), lastLags);
+    if (n) console.log(`[plan] kept this week's cash forecast for ${n} store(s)`);
+  } finally {
+    forecastsRunning = false;
+  }
+}
+
+const forecastTimer = setInterval(() => {
+  void keepForecasts().catch((error) => console.error("[plan] keeping forecasts failed", error));
+}, FORECAST_INTERVAL_MS);
+
 async function shutdown(signal: string) {
   console.log(`[sync] ${signal}: draining`);
   clearInterval(sweepTimer);
@@ -386,6 +412,7 @@ async function shutdown(signal: string) {
   clearInterval(digestTimer);
   clearInterval(askRetentionTimer);
   clearInterval(booksTimer);
+  clearInterval(forecastTimer);
   await eventsWorker.close();
   // Closing the worker lets the job in flight finish. A sync killed mid-run is
   // safe by design, but finishing the page it is on avoids re-fetching it.

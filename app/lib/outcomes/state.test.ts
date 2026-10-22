@@ -45,6 +45,15 @@ describe("following the saved orders", () => {
     ]);
     expect(followVerdict(checks, items.length)).toBe("improved");
   });
+  it("cash (D-93): with Books' bank statements, a paid order also says whether its payout reached the bank; paid either way", () => {
+    const parcels = new Map(items.map((it, i) => [it.orderId, [{ status: "delivered", settlement: i < 6 ? { settled: true, settledAt: day(5).toISOString(), settlementId: i < 4 ? "s-in-bank" : "s-not-yet" } : { settled: false } }]]));
+    const followed = cashFollowed(items, parcels, new Set(["s-in-bank"]));
+    expect(followed.map((f) => [!!f.resolvedAt, f.inBank])).toEqual([...Array(4).fill([true, true]), ...Array(2).fill([true, false]), ...Array(4).fill([false, false])]);
+    const [c7] = followChecks(followed, ACTED, day(30), "PKR");
+    expect(c7).toMatchObject({ day: 7, resolved: 6, amount: "6000.00", inBankAmount: "4000.00" });
+    // Without Books nothing about the bank is said, and the measurement is as before.
+    expect(followChecks(cashFollowed(items, parcels), ACTED, day(30), "PKR")[0]).not.toHaveProperty("inBankAmount");
+  });
   it("cash: an order is paid only when every delivered parcel on it is settled", () => {
     const parcels = new Map([["c0", [...settled(day(2)), ...settled(null)]]]);
     expect(cashFollowed([items[0]!], parcels)[0]!.resolvedAt).toBeNull();

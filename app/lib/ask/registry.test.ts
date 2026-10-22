@@ -38,6 +38,8 @@ vi.mock("../db.server", () => ({
     },
   },
 }));
+// Books (B7): an organization whose book isn't set up; the DB test (bank-receipts.db.test.ts) runs the tools on a real book.
+vi.mock("../books/books.server", () => ({ getBook: async () => null }));
 // Plan's forecasts and the simulator (G-GZR11-7), as /plan would show them.
 const RANGE = (x: number) => ({ low: x * 0.8, likely: x, high: x * 1.2 });
 const MONTH = (month: string) => ({
@@ -221,11 +223,11 @@ const STORES = [
 ];
 
 function ctx(o: { finance?: boolean; sections?: Section[]; stores?: typeof STORES } = {}): AskContext {
-  const allowed = new Set<Section>(o.sections ?? ["home", "orders", "shipping", "finance", "plan", "customers", "inventory", "marketing", "inbox", "settings"]);
+  const allowed = new Set<Section>(o.sections ?? ["home", "orders", "shipping", "finance", "plan", "customers", "inventory", "marketing", "inbox", "settings", "books"]);
   if (o.finance === false) allowed.delete("finance");
   // An earlier table of the answer, for calculate.
   const tables: ToolResult[] = [{ tool: "summary", status: "ok", title: "t", columns: [{ key: "label", label: "Store", kind: "text" }, { key: "orders", label: "Orders", kind: "count" }], rows: [{ label: "Lahore Lawn", orders: 68 }, { label: "Dubai Abayas", orders: 68 }], meta: { stores: [], rules: [], gaps: [], notes: [] }, link: null }];
-  return { organizationId: "org", userId: "u", baseCurrency: "PKR", stores: o.stores ?? STORES, can: (s) => allowed.has(s), now: new Date("2026-10-19T12:00:00Z"), memo: new Map(), tables, planTools: true, riskTools: true };
+  return { organizationId: "org", userId: "u", baseCurrency: "PKR", stores: o.stores ?? STORES, can: (s) => allowed.has(s), now: new Date("2026-10-19T12:00:00Z"), memo: new Map(), tables, planTools: true, riskTools: true, booksTools: true };
 }
 
 const run = (name: string, args: Record<string, unknown>, c = ctx()) => runTool(name, args, c);
@@ -263,6 +265,8 @@ const CALLS: Array<[string, Record<string, unknown>]> = [
   ["month_end", { store: "s1" }],
   ["order_risk_summary", { store: "s1" }],
   ["plan_budget", { store: "s1", budget: 100000, days: null, include: null, exclude_platforms: null, payout_lags: null }],
+  ["books_balances", { date: null }],
+  ["books_report", { report: "profit_and_loss", from: null, to: null, basis: null }],
 ];
 
 /** Every key and string anywhere in a result. */
@@ -294,7 +298,7 @@ describe("every tool", () => {
     // Byte-stable between requests, so the provider's prompt cache holds.
     expect(JSON.stringify(toolSpecs(ctx()))).toBe(JSON.stringify(specs));
     // A viewer without Plan gets exactly the tools they had before Phase 11, byte for byte.
-    const before = toolSpecs({ ...ctx(), planTools: false, riskTools: false });
+    const before = toolSpecs({ ...ctx(), planTools: false, riskTools: false, booksTools: false });
     expect(before.map((s) => s.name)).toEqual(TOOLS.filter((t) => !t.gate).map((t) => t.name));
     expect(JSON.stringify(specs).startsWith(JSON.stringify(before).slice(0, -1))).toBe(true);
   });
