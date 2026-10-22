@@ -1331,6 +1331,8 @@ model BkBook {
   bankRules        BkBankRule[]
   reconciliations  BkReconciliation[]
   statementMatches BkStatementMatch[]
+  parcels          BkParcel[]
+  courierSheets    BkCourierSheet[]
   taxRates         BkTaxRate[]
 
   @@map("bk_books")
@@ -1735,4 +1737,119 @@ model BkStatementMatch {
 
   @@index([bookId, groupId])
   @@map("bk_statement_matches")
+}
+
+// The parcel register and courier sheets (B5b), ported from Financify's books_parcel_register and books_courier_sheets.
+
+model BkParcel {
+  id             String    @id @default(cuid())
+  bookId         String
+  orderId        String
+  orderName      String
+  /// The store the order belongs to (D-65).
+  storeId        String?
+  placedDay      DateTime  @db.Date
+  /// The account it's owed through (cash on delivery).
+  accountId      String
+  /// Owed when the order came in, and owed now by Books' own rules (after
+  /// returns, cancellations, edits and parcels back; before payouts and write-offs).
+  saleOwed       BigInt    @default(0)
+  owed           BigInt    @default(0)
+  shipped        Boolean?
+  courier        String?
+  trackingNumber String?
+  trackingStatus String?
+  trackingAt     DateTime?
+  deliveredAt    DateTime?
+  /// Courierify's booking: its charges and the amount to collect.
+  bookedFees     BigInt?
+  codAmount      BigInt?
+  /// Courierify's payout for it, when the courier has paid it out.
+  settlementRef  String?
+  settledAt      DateTime?
+  settledNet     BigInt?
+  settledFees    BigInt?
+  /// What Books did: the payout entry that cleared it (gross), write-offs, damage.
+  payoutDocId    String?
+  paid           BigInt    @default(0)
+  writeoffDocId  String?
+  writtenOff     BigInt    @default(0)
+  damagedDocId   String?
+  damaged        BigInt    @default(0)
+  checkedAt      DateTime?
+  /// What a courier's settlement file said: delivered | returned (it outranks tracking for returns).
+  settledStatus  String?
+  /// The loadsheet the parcel was dispatched on, and when.
+  loadsheetId    String?
+  dispatchedOn   DateTime? @db.Date
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  book BkBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([bookId, orderId])
+  @@index([bookId, courier])
+  @@index([bookId, placedDay])
+  @@index([bookId, settlementRef])
+  @@map("bk_parcels")
+}
+
+model BkCourierSheet {
+  id         String   @id @default(cuid())
+  bookId     String
+  /// settlement | loadsheet
+  kind       String
+  courier    String
+  /// The courier's own number for it (payment or loadsheet number); "" when none.
+  ref        String   @default("")
+  /// Payment date (settlement) or dispatch date (loadsheet).
+  date       DateTime @db.Date
+  /// file | api
+  source     String   @default("file")
+  fileName   String?
+  /// draft | recorded | discarded
+  status     String   @default("draft")
+  /// Totals as read, and what Books did with them.
+  totals     Json     @default("{}")
+  documentId String?
+  createdBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  book  BkBook               @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  lines BkCourierSheetLine[]
+
+  @@index([bookId, kind, status])
+  @@index([bookId, courier, ref])
+  @@map("bk_courier_sheets")
+}
+
+model BkCourierSheetLine {
+  id        BigInt  @id @default(autoincrement())
+  sheetId   String
+  bookId    String
+  row       Int
+  tracking  String?
+  orderRef  String?
+  /// The parcel it matched in the register, if any.
+  parcelId  String?
+  /// delivered | returned | other
+  status    String
+  rawStatus String?
+  cod       BigInt  @default(0)
+  collected BigInt  @default(0)
+  delivery  BigInt  @default(0)
+  returnFee BigInt  @default(0)
+  salesTax  BigInt  @default(0)
+  withheld  BigInt  @default(0)
+  otherFees BigInt  @default(0)
+  net       BigInt  @default(0)
+  note      String?
+
+  sheet BkCourierSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+
+  @@index([sheetId])
+  @@index([bookId, tracking])
+  @@index([bookId, parcelId])
+  @@map("bk_courier_sheet_lines")
 }

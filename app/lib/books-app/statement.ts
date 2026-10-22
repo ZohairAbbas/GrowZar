@@ -8,7 +8,9 @@
  * server reads what it receives with the same code and masks again as a
  * backstop.
  */
-import { maskSensitive, type StatementMapping } from "../books/statement-csv";
+import { maskSensitive, parseCsv, type StatementMapping } from "../books/statement-csv";
+import { LOADSHEET_SPECS, SETTLEMENT_SPECS } from "../books/courier-sheet";
+import { findColumns } from "../books/sheet";
 
 const csvCell = (v: string) => (/[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
 
@@ -28,3 +30,23 @@ export function minimiseStatement(rows: string[][], m: StatementMapping): { text
     mapping: { ...m, dateCol: at(m.dateCol)!, descCols: m.descCols.map((c) => at(c)!), amountCol: at(m.amountCol), outCol: at(m.outCol), inCol: at(m.inCol), balanceCol: at(m.balanceCol) },
   };
 }
+
+/**
+ * A courier's settlement file or loadsheet, as it leaves the browser: the
+ * header row and the columns Books reads (tracking, order number, status,
+ * amounts, date, reference), nothing else. Couriers' files often carry the
+ * buyer's name, phone and address; those columns never leave this page.
+ * Null when the columns can't be found (the server says why).
+ */
+export function minimiseSheet(text: string, kind: "settlement" | "loadsheet"): string | null {
+  const rows = parseCsv(text);
+  const found = findColumns(rows, kind === "settlement" ? SETTLEMENT_SPECS : LOADSHEET_SPECS);
+  // Without a tracking or order number the rows can't be matched: nothing is sent, and the page says so.
+  if (!found || (found.cols.tracking === undefined && found.cols.orderRef === undefined)) return null;
+  const keep = [...new Set(Object.values(found.cols))].sort((a, b) => a - b);
+  // Rows above the header (a title, the merchant's own address) go as "-", so row numbers still match the file.
+  return rows
+    .map((r, i) => (i < found.headerRow ? "-" : keep.map((c) => csvCell(r[c] ?? "")).join(",")))
+    .join("\n");
+}
+

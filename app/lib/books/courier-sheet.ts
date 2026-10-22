@@ -110,6 +110,9 @@ function sharedValue(values: string[]): string | null {
   return filled.length === 1 ? filled[0]! : null;
 }
 
+/** Growzar: the columns each kind of file is read by, so the browser sends only those (D-72's rule, for courier files too). */
+export { LOADSHEET_SPECS, SETTLEMENT_SPECS };
+
 /** Read a settlement (payment report). */
 export function readSettlementFile(text: string, decimals: number): SheetRead {
   const all = parseCsv(text);
