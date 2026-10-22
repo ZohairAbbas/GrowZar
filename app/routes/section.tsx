@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { Link, redirect } from "react-router";
 import { Check, Clock, Lock } from "lucide-react";
 
 import type { Route } from "./+types/section";
@@ -6,7 +6,8 @@ import { prisma } from "~/lib/db.server";
 import { askEnabled } from "~/lib/ask/loop.server";
 import { sectionPreview } from "~/lib/metrics/section-preview.server";
 import { SUITE_APPS, type LinkedApp } from "~/lib/apps/app-links";
-import { hasPermission, listVisibleStores, requireSection } from "~/lib/authorize.server";
+import { getViewer, hasPermission, listVisibleStores, requireSection } from "~/lib/authorize.server";
+import { booksVisible } from "~/lib/books-app/access.server";
 import { inboxView } from "~/lib/insights/inbox.server";
 import { resultCounts } from "~/lib/outcomes/line";
 import { outcomeLinesOf } from "~/lib/outcomes/results.server";
@@ -99,6 +100,15 @@ export async function loader({ request, url }: Route.LoaderArgs) {
   // normalises `url` for exactly this; `request.url` is the raw wire request.
   const section = sectionFromPath(url.pathname);
   const definition = SECTION_DEFINITIONS[section];
+
+  // Sign-in lands on Home; an accountant (D-70) has no Home, so lands on Books, else Finance.
+  if (section === "home") {
+    const who = await getViewer(request);
+    if (!(await hasPermission(request, who.organizationId, "home", "view"))) {
+      if (await booksVisible(request, who)) throw redirect("/books");
+      if (await hasPermission(request, who.organizationId, "finance", "view")) throw redirect("/finance");
+    }
+  }
 
   const viewer = await requireSection(request, section, "view");
 

@@ -3,6 +3,7 @@ import { ArrowLeft, LogOut } from "lucide-react";
 
 import type { Route } from "./+types/settings";
 import { requireOrganization } from "~/lib/session.server";
+import { viewerIsInternal } from "~/lib/outcomes/results.server";
 import { SettingsNav } from "~/components/settings/SettingsNav";
 import { Logo } from "./shell";
 
@@ -15,6 +16,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { session } = await requireOrganization(request);
   return {
     user: { name: session.user.name, email: session.user.email },
+    // Pilot settings (Books) show to internal accounts only.
+    internal: await viewerIsInternal(session.user.id),
   };
 }
 
@@ -54,7 +57,7 @@ export default function SettingsLayout({ loaderData }: Route.ComponentProps) {
 
       <div className="mx-auto max-w-6xl gap-5 py-5 md:flex">
         <aside className="mb-5 self-start rounded-2xl bg-white p-3 md:mb-0 md:w-64 md:flex-shrink-0">
-          <SettingsNav />
+          <SettingsNav internal={loaderData.internal} />
         </aside>
         <div className="min-w-0 flex-1">
           <Outlet />

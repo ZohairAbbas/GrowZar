@@ -19,6 +19,7 @@ import {
   Lightbulb,
   Activity,
   MessageCircleQuestionMark,
+  BookOpen,
 } from "lucide-react";
 
 import type { Route } from "./+types/shell";
@@ -28,6 +29,7 @@ import { readStoreCookie } from "~/lib/store-cookie.server";
 import { prisma } from "~/lib/db.server";
 import { askEnabled } from "~/lib/ask/loop.server";
 import { planVisible } from "~/lib/forecast/plan-access.server";
+import { booksVisible } from "~/lib/books-app/access.server";
 import { getViewer, listVisibleStores, visibleSections } from "~/lib/authorize.server";
 import { SECTIONS, type Section } from "~/lib/permissions";
 import {
@@ -59,6 +61,7 @@ const SECTION_ICONS: Record<Section, typeof Home> = {
   inventory: Boxes,
   marketing: Megaphone,
   inbox: Inbox,
+  books: BookOpen,
   settings: Settings,
 };
 
@@ -89,6 +92,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   const ask = askEnabled() && Boolean((await prisma.askSettings.findUnique({ where: { organizationId: viewer.organizationId }, select: { enabled: true } }))?.enabled);
   // Plan shows only behind its switch, to internal accounts until approved (pack §10, P11-14).
   const plan = allowed.has("plan") && (await planVisible(viewer.userId));
+  // Books shows behind its switches, to members whose role and store scope allow it (D-80, D-81, D-91).
+  const books = allowed.has("books") && (await booksVisible(request, viewer));
 
   return {
     user: { name: viewer.userId, role: viewer.role },
@@ -105,7 +110,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     activeStoreId: active?.id ?? null,
     ask: ask && allowed.has("home"),
     sections: ORDERED_SECTIONS.filter((definition) =>
-      allowed.has(definition.section) && (definition.section !== "plan" || plan),
+      allowed.has(definition.section) && (definition.section !== "plan" || plan) && (definition.section !== "books" || books),
     ).map((definition) => ({
       section: definition.section,
       label: definition.label,

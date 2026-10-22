@@ -83,6 +83,14 @@ export default [
     route("plan", "routes/plan.tsx"),
     // Ask about your stores (Phase 10, G-GZR10-3).
     route("ask", "routes/ask.tsx"),
+    // The organization's books (D-62), behind BOOKS_ENABLED and its own switch (D-91).
+    route("books", "routes/books.tsx", [
+      index("routes/books._index.tsx"),
+      route("setup", "routes/books.setup.tsx"),
+      route("accounts", "routes/books.accounts.tsx"),
+      route("opening", "routes/books.opening.tsx"),
+      route("sources", "routes/books.sources.tsx"),
+    ]),
   ]),
 
   layout("routes/settings.tsx", [
@@ -96,6 +104,7 @@ export default [
       route("coverage", "routes/settings.coverage.tsx"),
       route("digest", "routes/settings.digest.tsx"),
       route("ask", "routes/settings.ask.tsx"),
+      route("books", "routes/settings.books.tsx"),
     ]),
   ]),
 

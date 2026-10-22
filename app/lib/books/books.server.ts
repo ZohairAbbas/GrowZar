@@ -91,6 +91,12 @@ export interface BookSettings {
   gettingStartedHidden?: Record<string, boolean>;
   /** How tax a courier keeps from a settlement is booked: a cost (default) or claimable. */
   courierTax?: { withheld?: "expense" | "claimable"; salesTax?: "expense" | "claimable" };
+  /** Growzar (D-75): the day the books start; connectors bring things in from it. */
+  startDate?: string;
+  /** Growzar (D-65, D-89): the organization's stores these books cover. */
+  storeIds?: string[];
+  /** Growzar (D-69, D-83): when a cash-on-delivery sale counts. */
+  codBasis?: "delivery" | "money" | "order" | "dispatch";
 }
 
 function view(b: BkBook): BookView {
@@ -117,6 +123,8 @@ export interface SetupInput {
   /** The day opening balances are as of (usually today). */
   startDate: string;
   moneyAccounts: Array<{ subtype: string; name: string; opening: bigint }>;
+  /** Growzar: settings saved with the book in the same transaction (start date, stores, COD basis). */
+  settings?: Pick<BookSettings, "startDate" | "storeIds" | "codBasis">;
 }
 
 /**
@@ -162,7 +170,7 @@ async function setupInTx(organizationId: string, input: SetupInput, currency: st
         currency,
         currencyDecimals: currencyDecimals(currency),
         fiscalYearStartMonth: input.fiscalYearStartMonth,
-        settings: (input.timeZone ? { timeZone: input.timeZone } : {}) as Prisma.InputJsonValue,
+        settings: { ...(input.timeZone ? { timeZone: input.timeZone } : {}), ...(input.settings ?? {}) } as Prisma.InputJsonValue,
       },
     });
     await tx.bkAccount.createMany({

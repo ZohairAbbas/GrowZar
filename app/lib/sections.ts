@@ -122,6 +122,15 @@ export const SECTION_DEFINITIONS: Record<Section, SectionDefinition> = {
       "Who on your team replied, and when",
     ],
   },
+  books: {
+    section: "books",
+    label: SECTION_LABELS.books,
+    // Open to any store (D-66): it posts what the connected apps provide and
+    // takes the rest by hand.
+    requires: [],
+    blurb: "Your books: every sale, payout, cost and expense, kept by double entry.",
+    preview: [],
+  },
   settings: {
     section: "settings",
     label: SECTION_LABELS.settings,

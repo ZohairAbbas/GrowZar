@@ -15,7 +15,9 @@ export async function loader({ request, params, url }: Route.LoaderArgs) {
   const app = params.app as LinkedApp;
   const entry = Object.hasOwn(SUITE_APPS, app) ? SUITE_APPS[app] : null;
   if (!entry) throw data("No such app.", { status: 404 });
-  const { viewer } = await requireStore(request, params.storeId, "home", "view");
+  // Books' install nudges (D-66) come from members who may hold Books but not Home (an accountant).
+  const from = url.searchParams.get("from");
+  const { viewer } = await requireStore(request, params.storeId, from === "books" ? "books" : "home", "view");
   const store = await prisma.store.findUniqueOrThrow({
     where: { id: params.storeId },
     select: { shopDomain: true, connections: { where: { app, status: "CONNECTED" }, select: { id: true } } },
@@ -27,7 +29,7 @@ export async function loader({ request, params, url }: Route.LoaderArgs) {
       : entry.listing;
   if (!href) throw data("That app has no App Store page.", { status: 404 });
   await prisma.appPromptEvent.create({
-    data: { storeId: params.storeId, app, kind: "clicked", userId: viewer.userId, detail: { lead: url.searchParams.get("lead") === "1", from: /^[a-z]{1,20}$/.test(url.searchParams.get("from") ?? "") ? url.searchParams.get("from") : "home" } },
+    data: { storeId: params.storeId, app, kind: "clicked", userId: viewer.userId, detail: { lead: url.searchParams.get("lead") === "1", from: /^[a-z]{1,20}$/.test(from ?? "") ? from : "home" } },
   });
   throw redirect(href);
 }
