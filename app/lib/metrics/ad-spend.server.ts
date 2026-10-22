@@ -5,17 +5,24 @@ import { appRequest } from "../apps/client.server";
 import { getAppCredentials } from "../apps/registry.server";
 import { isQuietHours } from "../sync/sync.server";
 import { localDayOf } from "./order-grain";
-import { parseAdSpendDay } from "./ad-spend";
+import { adSpendDaysDue, parseAdSpendDay } from "./ad-spend";
 
 /**
  * Keep a store's ad spend current (G-GZR2-3).
  *
  * Ad spend is not an incremental feed: Financify answers a date range, and
- * ad platforms restate the last few days. So:
+ * rewrites the last 30 days from the ad platforms every day (its V5 check,
+ * 2026-10-21). So:
  *  - the **trailing 3 shop-local days** are refreshed at most once an hour;
- *  - **older days, back to 90**, are fetched once each, outside Pakistan
- *    business hours, a few per cycle. Product allocation costs Financify
- *    ≈0.6 s a day, so this is a courtesy to the box, not a necessity.
+ *  - **days 4–30** are read again once a day, outside Pakistan business
+ *    hours, so a platform's correction reaches Finance (D-85);
+ *  - **older days, back to 90**, are fetched once each, outside business
+ *    hours, a few per cycle. Product allocation costs Financify ≈0.6 s a
+ *    day, so this is a courtesy to the box, not a necessity.
+ *
+ * A re-read replaces the day with Financify's current values; it never
+ * relies on Financify's `syncedAt`, which moves daily whether or not a
+ * value changed.
  *
  * One call per day, because product allocation over a wide range takes
  * ≈10 s for a month — the edge of the contract's read timeout — and a day
@@ -23,9 +30,9 @@ import { parseAdSpendDay } from "./ad-spend";
  */
 
 const TRAILING_DAYS = 3;
+const CORRECTION_WINDOW_DAYS = 30;
 const BACKFILL_DAYS = 90;
 const BACKFILL_DAYS_PER_CYCLE = 15;
-const REFRESH_EVERY_MS = 60 * 60 * 1000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -91,18 +98,16 @@ export async function refreshAdSpend(storeId: string, now = new Date()): Promise
   });
   const fetchedAt = new Map(fetchedRows.map((r) => [r.day, r.fetchedAt]));
 
-  const due: string[] = [];
-  for (let back = 0; back < TRAILING_DAYS; back += 1) {
-    const day = days(back);
-    const at = fetchedAt.get(day);
-    if (!at || now.getTime() - at.getTime() > REFRESH_EVERY_MS) due.push(day);
-  }
-  if (isQuietHours(now) === false) {
-    for (let back = TRAILING_DAYS; back < BACKFILL_DAYS && due.length < TRAILING_DAYS + BACKFILL_DAYS_PER_CYCLE; back += 1) {
-      const day = days(back);
-      if (!fetchedAt.has(day)) due.push(day);
-    }
-  }
+  const due = adSpendDaysDue({
+    days: Array.from({ length: BACKFILL_DAYS }, (_, back) => days(back)),
+    fetchedAt,
+    now,
+    quiet: isQuietHours(now) !== false,
+    trailing: TRAILING_DAYS,
+    correctionWindow: CORRECTION_WINDOW_DAYS,
+    backfill: BACKFILL_DAYS,
+    perCycle: BACKFILL_DAYS_PER_CYCLE,
+  });
 
   const problems: string[] = [];
   const fetched: string[] = [];

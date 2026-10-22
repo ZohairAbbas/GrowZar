@@ -168,3 +168,50 @@ export function parseAdSpendDay(day: string, body: unknown, shopCurrency: string
 
   return { rows, problems };
 }
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * Which ad-spend days to fetch this cycle (G-GZR2-3; D-85). `days[i]` is the
+ * shop-local day `i` days back, today first.
+ *
+ *  - The trailing `trailing` days: whenever their copy is over an hour old.
+ *  - Days back to `correctionWindow`: once their copy is a day old, and only
+ *    outside quiet hours. Financify re-reads the last 30 days from the ad
+ *    platforms every day and rewrites them, so a correction to day 20 only
+ *    reaches us if we read day 20 again.
+ *  - Older days, back to `backfill`: once, if never fetched, outside quiet hours.
+ *
+ * Re-reads and first fetches share one per-cycle cap; re-reads go first,
+ * newest first, because a never-fetched old day is already missing anyway.
+ */
+export function adSpendDaysDue(opts: {
+  days: readonly string[];
+  fetchedAt: ReadonlyMap<string, Date>;
+  now: Date;
+  quiet: boolean;
+  trailing: number;
+  correctionWindow: number;
+  backfill: number;
+  perCycle: number;
+}): string[] {
+  const { days, fetchedAt, now, quiet, trailing, correctionWindow, backfill, perCycle } = opts;
+  const age = (day: string) => {
+    const at = fetchedAt.get(day);
+    return at ? now.getTime() - at.getTime() : Infinity;
+  };
+  const due: string[] = [];
+  for (let back = 0; back < Math.min(trailing, days.length); back += 1) {
+    if (age(days[back]!) > HOUR_MS) due.push(days[back]!);
+  }
+  if (quiet) return due;
+  const cap = due.length + perCycle;
+  for (let back = trailing; back < Math.min(correctionWindow, days.length) && due.length < cap; back += 1) {
+    if (age(days[back]!) > DAY_MS) due.push(days[back]!);
+  }
+  for (let back = correctionWindow; back < Math.min(backfill, days.length) && due.length < cap; back += 1) {
+    if (!fetchedAt.has(days[back]!)) due.push(days[back]!);
+  }
+  return due;
+}
