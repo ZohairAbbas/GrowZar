@@ -1,5 +1,5 @@
 import { NavLink } from "react-router";
-import { Building2, CreditCard, Gauge, Mail, MessageCircleQuestionMark, Scale, Shield, User, Users } from "lucide-react";
+import { BookOpen, Building2, CreditCard, Gauge, Mail, MessageCircleQuestionMark, Scale, Shield, User, Users } from "lucide-react";
 
 import { cn } from "~/lib/utils";
 
@@ -16,6 +16,8 @@ type NavItem = {
   description: string;
   end?: boolean;
   disabled?: boolean;
+  /** Shown to internal accounts only (a feature in pilot). */
+  internal?: boolean;
 };
 
 const navigation: NavItem[] = [
@@ -63,6 +65,13 @@ const navigation: NavItem[] = [
     description: "Questions about your data: switch, usage, privacy",
   },
   {
+    name: "Books",
+    to: "/settings/books",
+    icon: BookOpen,
+    description: "The organization's switch (pilot)",
+    internal: true,
+  },
+  {
     name: "Billing",
     to: "/settings/billing",
     icon: CreditCard,
@@ -71,14 +80,14 @@ const navigation: NavItem[] = [
   },
 ];
 
-export function SettingsNav() {
+export function SettingsNav({ internal = false }: { internal?: boolean }) {
   return (
     <nav className="space-y-1">
       <h2 className="mb-2 px-3 pt-2 font-display text-lg font-bold text-gray-900">
         Settings
       </h2>
 
-      {navigation.map((item) => {
+      {navigation.filter((item) => internal || !item.internal).map((item) => {
         if (item.disabled) {
           return (
             <span

@@ -49,6 +49,7 @@ model Organization {
   askSettings      AskSettings?
   askConversations AskConversation[]
   askUsage         AskUsageMonthly[]
+  booksSettings    BooksSettings?
 
   @@map("organizations")
 }
@@ -1284,6 +1285,19 @@ model Plan {
 
   @@index([storeId, createdAt])
   @@map("plans")
+}
+
+/// Books for an organization (D-91): off until turned on, behind BOOKS_ENABLED
+/// on the server too. During the pilot only internal accounts turn it on.
+model BooksSettings {
+  organizationId  String    @id
+  enabled         Boolean   @default(false)
+  changedByUserId String?
+  changedAt       DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("books_settings")
 }
 
 // ── Books (B1, D-62..D-91) ──────────────────────────────────────────────────

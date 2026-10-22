@@ -26,6 +26,9 @@ export const SECTIONS = [
   "inventory",
   "marketing",
   "inbox",
+  // Double-entry books for the organization (D-62). One book covers every
+  // store, so only members scoped to all stores may open it (D-81).
+  "books",
   "settings",
 ] as const;
 
@@ -94,6 +97,8 @@ export const manager = ac.newRole({
   invitation: ["create"],
   ...allSections,
   settings: ["view"],
+  // Reads and exports the books, but posting is the owner's or the accountant's (D-80).
+  books: ["view", "export"],
 });
 
 /**
@@ -105,7 +110,17 @@ export const staff = ac.newRole({
   ...viewAndExport(["orders", "shipping"]),
 });
 
-export const roles = { owner, admin, manager, staff };
+/**
+ * The merchant's bookkeeper (D-70, D-80): Books and Finance only. Posts
+ * entries and prepares a close; closing and reopening a period stay with
+ * owners and admins, which Books checks by role.
+ */
+export const accountant = ac.newRole({
+  books: [...ACTIONS],
+  ...viewAndExport(["finance"]),
+});
+
+export const roles = { owner, admin, manager, staff, accountant };
 
 export type RoleName = keyof typeof roles;
 
@@ -131,6 +146,10 @@ export const ROLE_LABELS: Record<RoleName, { label: string; description: string 
     label: "Staff",
     description: "Orders and Shipping for their stores. No finance or customer data.",
   },
+  accountant: {
+    label: "Accountant",
+    description: "Books and Finance only. Records entries and prepares a month's close for an owner or admin.",
+  },
 };
 
 export const SECTION_LABELS: Record<Section, string> = {
@@ -143,5 +162,6 @@ export const SECTION_LABELS: Record<Section, string> = {
   inventory: "Inventory",
   marketing: "Marketing",
   inbox: "Inbox",
+  books: "Books",
   settings: "Settings",
 };

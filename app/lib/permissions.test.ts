@@ -58,4 +58,25 @@ describe("section × action roles", () => {
       true,
     );
   });
+
+  it("gives Books to owners and admins, read-only to managers, none to staff (D-80)", () => {
+    expect(can("owner", "books", "manage")).toBe(true);
+    expect(can("admin", "books", "manage")).toBe(true);
+    expect(can("manager", "books", "view")).toBe(true);
+    expect(can("manager", "books", "export")).toBe(true);
+    expect(can("manager", "books", "manage")).toBe(false);
+    expect(can("staff", "books", "view")).toBe(false);
+  });
+
+  it("keeps the accountant to Books and Finance (D-70)", () => {
+    expect(can("accountant", "books", "manage")).toBe(true);
+    expect(can("accountant", "finance", "view")).toBe(true);
+    expect(can("accountant", "finance", "export")).toBe(true);
+    expect(can("accountant", "finance", "manage")).toBe(false);
+    for (const section of ["home", "orders", "shipping", "plan", "customers", "inventory", "marketing", "inbox", "settings"]) {
+      expect(can("accountant", section, "view"), section).toBe(false);
+    }
+    expect(roles.accountant.authorize({ member: ["create"] }).success).toBe(false);
+    expect(roles.accountant.authorize({ invitation: ["create"] }).success).toBe(false);
+  });
 });
