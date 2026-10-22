@@ -29,10 +29,13 @@ export async function buildReport(book: BookView, today: string, report: string,
     const tag = tagParam === null || tagParam === "" ? undefined : tagParam === "__none" ? "" : tagParam;
     // Accrual (when it happens) or cash (when money moves): the same views on either.
     const basis = params.get("basis") === "cash" ? "cash" : "accrual";
-    const sums = basis === "cash" ? cashSums : ledgerSums;
+    // Growzar: one store's lines only (D-65), or the whole organization.
+    const storeParam = params.get("store") ?? "";
+    const storeId = (book.settings.storeIds ?? []).includes(storeParam) ? storeParam : undefined;
+    const sums = (id: string, o: { from: string; to: string; tag?: string }) => (basis === "cash" ? cashSums : ledgerSums)(id, { ...o, storeId });
     const [bookAccounts, tags] = await Promise.all([reportAccounts(book), listTags(book)]);
     const accounts = basis === "cash" ? [...bookAccounts, ...CASH_ACCOUNTS] : bookAccounts;
-    const base = { report, range, basis, compare: compare === "tags" && tags.length === 0 ? "" : compare, tag: tagParam ?? "", tags: tags.map((t) => t.tag), bs: null, tb: null, asOf: null as string | null, tooMany: false, bsCols: null as BalanceSheetColumns | null, bsDates: null as string[] | null };
+    const base = { report, range, basis, store: storeId ?? "", compare: compare === "tags" && tags.length === 0 ? "" : compare, tag: tagParam ?? "", tags: tags.map((t) => t.tag), bs: null, tb: null, asOf: null as string | null, tooMany: false, bsCols: null as BalanceSheetColumns | null, bsDates: null as string[] | null };
     // "By tag" needs tags; without any it's the plain report.
     if (compare === "tags" && tags.length > 0) {
       const top = tags.slice(0, 8).map((t) => t.tag);
@@ -57,7 +60,7 @@ export async function buildReport(book: BookView, today: string, report: string,
   }
   const asOfParam = params.get("date");
   const asOf = isIsoDate(asOfParam) ? asOfParam : today;
-  const none = { range: null, basis: "accrual", compare: "", columns: null, cols: null, pl: null, tooMany: false, tag: "", tags: [] as string[], bsCols: null as BalanceSheetColumns | null, bsDates: null as string[] | null };
+  const none = { range: null, basis: "accrual", store: "", compare: "", columns: null, cols: null, pl: null, tooMany: false, tag: "", tags: [] as string[], bsCols: null as BalanceSheetColumns | null, bsDates: null as string[] | null };
   if (report === "balance-sheet") {
     const inputs = await balanceSheetInputs(book, asOf);
     const bs = balanceSheet(inputs.accounts, inputs.balances, inputs.pnlBeforeYear);

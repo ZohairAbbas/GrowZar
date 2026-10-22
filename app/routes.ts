@@ -110,8 +110,20 @@ export default [
       // The parcel register and couriers' own files (B5b).
       route("couriers", "routes/books.couriers._index.tsx"),
       route("couriers/files", "routes/books.couriers.files.tsx"),
+      // Reports and exports (B6).
+      route("reports", "routes/books.reports._index.tsx"),
+      route("reports/cash-flow", "routes/books.reports.cash-flow.tsx"),
+      route("reports/general-ledger", "routes/books.reports.general-ledger.tsx"),
+      route("reports/journal", "routes/books.reports.journal.tsx"),
+      route("reports/:report", "routes/books.reports.$report.tsx"),
     ]),
   ]),
+
+  // Books' downloads (B6): resource routes, and the statements to print, outside the shell.
+  route("books/export/workbook", "routes/books.export.workbook.ts"),
+  route("books/export/pack", "routes/books.export.pack.ts"),
+  route("books/export/:report", "routes/books.export.$report.ts"),
+  route("books/statements", "routes/books.statements.tsx"),
 
   layout("routes/settings.tsx", [
     ...prefix("settings", [

@@ -12,7 +12,7 @@ import type { ReportAccount } from "./reports";
 
 const MONEY = ["bank", "cash", "mobile_wallet", "ad_wallet", "card"];
 
-export async function cashSums(bookId: string, opts: { from?: string; to?: string; tag?: string | null } = {}): Promise<Map<string, bigint>> {
+export async function cashSums(bookId: string, opts: { from?: string; to?: string; tag?: string | null; storeId?: string } = {}): Promise<Map<string, bigint>> {
   const rows = await prisma.$queryRaw<Array<{ entryId: string; documentId: string; type: string; accountId: string; amount: bigint }>>`
     SELECT l."entryId", e."documentId", d.type, l."accountId", l.amount
       FROM bk_entry_lines l
@@ -21,6 +21,7 @@ export async function cashSums(bookId: string, opts: { from?: string; to?: strin
      WHERE l."bookId" = ${bookId}
        ${opts.from ? Prisma.sql`AND l.date >= ${toDbDate(opts.from)}` : Prisma.empty}
        ${opts.to ? Prisma.sql`AND l.date <= ${toDbDate(opts.to)}` : Prisma.empty}
+       ${opts.storeId === undefined ? Prisma.empty : Prisma.sql`AND l."storeId" = ${opts.storeId}`}
        ${opts.tag === undefined || opts.tag === null ? Prisma.empty : opts.tag === "" ? Prisma.sql`AND cardinality(d.tags) = 0` : Prisma.sql`AND d.tags @> ARRAY[${opts.tag}]::text[]`}
        AND EXISTS (
          SELECT 1 FROM bk_entry_lines m JOIN bk_accounts a ON a.id = m."accountId"
