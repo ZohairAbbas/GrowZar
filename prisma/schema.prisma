@@ -1326,6 +1326,11 @@ model BkBook {
   documents        BkDocument[]
   connectors       BkConnector[]
   parcelEvents     BkParcelEvent[]
+  statementImports BkStatementImport[]
+  statementLines   BkStatementLine[]
+  bankRules        BkBankRule[]
+  reconciliations  BkReconciliation[]
+  statementMatches BkStatementMatch[]
   taxRates         BkTaxRate[]
 
   @@map("bk_books")
@@ -1600,3 +1605,134 @@ model BkParcelEvent {
   @@map("bk_parcel_events")
 }
 
+// Banking (B5a), ported from Financify's books_bank and books_bank_matching.
+
+model BkStatementImport {
+  id          String    @id @default(cuid())
+  bookId      String
+  accountId   String
+  fileName    String?
+  added       Int
+  duplicates  Int
+  firstDate   DateTime? @db.Date
+  lastDate    DateTime? @db.Date
+  /// What the running balance showed: breaks inside the file, or a gap/overlap with the import before it.
+  balanceNote String?
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+
+  book  BkBook            @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  lines BkStatementLine[]
+
+  @@index([bookId, accountId])
+  @@map("bk_statement_imports")
+}
+
+model BkStatementLine {
+  id          BigInt    @id @default(autoincrement())
+  bookId      String
+  accountId   String
+  importId    String
+  date        DateTime  @db.Date
+  description String
+  /// Minor units: + money into the account, − money out.
+  amount      BigInt
+  balance     BigInt?
+  /// Same line in another import has the same key (see statement-csv lineKeys).
+  key         String
+  /// open | matched | ignored
+  status      String    @default("open")
+  /// The ledger line (on this account) it was matched to. Not a foreign key:
+  /// ledger lines are insert-only and purged first.
+  entryLineId BigInt?   @unique
+  documentId  String?
+  /// Matched as part of a group (several lines and/or several entries whose
+  /// totals agree — a deposit of two payouts, a payment split across lines, a
+  /// fee difference, a reversal pair). The group's entry lines are in
+  /// bk_statement_matches. A line is matched either by entryLineId or by group.
+  matchGroup  String?
+  /// Looks like a line already imported from another file (same date and amount).
+  dupOfId     BigInt?
+  matchedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  book   BkBook            @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  import BkStatementImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@unique([bookId, accountId, key])
+  @@index([bookId, matchGroup])
+  @@index([bookId, accountId, status, date])
+  @@map("bk_statement_lines")
+}
+
+model BkBankRule {
+  id        String   @id @default(cuid())
+  bookId    String
+  contains  String
+  /// out | in
+  direction String
+  accountId String
+  contactId String?
+  /// Only lines between these amounts (minor units, positive); null = any.
+  minAmount BigInt?
+  maxAmount BigInt?
+  /// account: an expense or money in; transfer: money moved to/from another of your accounts (accountId).
+  kind      String   @default("account")
+  /// A split: [{accountId, percent}] summing to 100 (kind "account" only); null = all to accountId.
+  split     Json?
+  createdAt DateTime @default(now())
+
+  book BkBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([bookId, direction, contains])
+  @@map("bk_bank_rules")
+}
+
+model BkReconciliation {
+  id               String    @id @default(cuid())
+  bookId           String
+  accountId        String
+  statementDate    DateTime  @db.Date
+  /// Ledger sign (+ debit), converted from what the statement shows.
+  statementBalance BigInt
+  /// open | done
+  status           String    @default("open")
+  createdBy        String?
+  createdAt        DateTime  @default(now())
+  finishedAt       DateTime?
+
+  book    BkBook          @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  cleared BkClearedLine[]
+
+  @@index([bookId, accountId, status])
+  @@map("bk_reconciliations")
+}
+
+model BkClearedLine {
+  entryLineId      BigInt   @id
+  bookId           String
+  accountId        String
+  reconciliationId String
+  amount           BigInt
+  createdAt        DateTime @default(now())
+
+  reconciliation BkReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+
+  @@index([reconciliationId])
+  @@index([bookId, accountId])
+  @@map("bk_cleared_lines")
+}
+
+model BkStatementMatch {
+  id          String   @id @default(cuid())
+  bookId      String
+  groupId     String
+  /// A ledger line belongs to at most one match.
+  entryLineId BigInt   @unique
+  createdAt   DateTime @default(now())
+
+  book BkBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@index([bookId, groupId])
+  @@map("bk_statement_matches")
+}

@@ -17,7 +17,8 @@ import pg from "pg";
 export const TEST_DATABASE_URL = process.env.BOOKS_TEST_DATABASE_URL;
 
 const MIGRATIONS = fileURLToPath(new URL("../../../../prisma/migrations/", import.meta.url));
-const BOOKS_MIGRATION = "20261022120000_books_engine";
+/** Books' own tables: every `*_books_*` migration except the switch, which references organizations. */
+const booksOnly = (n: string) => /^\d{14}_books_/.test(n) && n !== "20261022150000_books_settings";
 
 /** The URL without its query string (Prisma-only parameters such as connection_limit upset pg). */
 function baseUrl(url: string): string {
@@ -50,7 +51,7 @@ export async function openTestSchema(opts: { all?: boolean } = {}): Promise<() =
     if (!/shadow|scratch|test/.test(db)) throw new Error(`Refusing to run against database "${db}"`);
     await c.query(`CREATE SCHEMA "${schema}"`);
     await c.query(`SET search_path TO "${schema}"`);
-    const names = opts.all ? readdirSync(MIGRATIONS).filter((n) => /^\d{14}_/.test(n)).sort() : [BOOKS_MIGRATION];
+    const names = readdirSync(MIGRATIONS).filter((n) => (opts.all ? /^\d{14}_/.test(n) : booksOnly(n))).sort();
     for (const n of names) await c.query(readFileSync(`${MIGRATIONS}${n}/migration.sql`, "utf8"));
   });
   // Prisma's generated queries name the schema; the raw SQL in the services

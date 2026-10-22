@@ -147,15 +147,15 @@ export function activityText(e: ActivityEvent, names: ActivityNames): ActivityLi
     case "tax_rate.restored":
       return { text: `Brought back the tax rate ${s(d.name)}`, link: null };
     case "statement.imported":
-      return { text: `Imported ${s(d.added)} statement line${d.added === 1 ? "" : "s"} into ${s(d.name) || "an account"}${Number(d.duplicates) > 0 ? ` (${s(d.duplicates)} already there)` : ""}`, link: typeof d.accountId === "string" ? null : null };
+      return { text: `Imported ${s(d.added)} statement line${d.added === 1 ? "" : "s"} into ${s(d.name) || "an account"}${Number(d.duplicates) > 0 ? ` (${s(d.duplicates)} already there)` : ""}`, link: typeof d.accountId === "string" ? `/books/bank/${d.accountId}` : null };
     case "statement.import_undone":
-      return { text: `Took back a statement import${d.fileName ? ` (${s(d.fileName)})` : ""}`, link: typeof d.accountId === "string" ? null : null };
+      return { text: `Took back a statement import${d.fileName ? ` (${s(d.fileName)})` : ""}`, link: typeof d.accountId === "string" ? `/books/bank/${d.accountId}` : null };
     case "reconciliation.started":
-      return { text: `Started reconciling ${s(d.name) || "an account"} to ${s(d.statementDate)}`, link: typeof d.accountId === "string" ? null : null };
+      return { text: `Started reconciling ${s(d.name) || "an account"} to ${s(d.statementDate)}`, link: typeof d.accountId === "string" ? `/books/bank/${d.accountId}` : null };
     case "reconciliation.finished":
       return { text: `Reconciled ${s(d.name) || "an account"} through ${s(d.statementDate)}`, link: null };
     case "reconciliation.undone":
-      return { text: `Undid the reconciliation through ${s(d.statementDate)}${d.reason ? ` — “${s(d.reason)}”` : ""}`, link: typeof d.accountId === "string" ? null : null };
+      return { text: `Undid the reconciliation through ${s(d.statementDate)}${d.reason ? ` — “${s(d.reason)}”` : ""}`, link: typeof d.accountId === "string" ? `/books/bank/${d.accountId}` : null };
     case "connector.courierify_key_saved":
       return { text: "Saved the Courierify key", link: "/books/connectors/courier-payouts" };
     case "stock.costs_set_in_shopify":
@@ -163,9 +163,9 @@ export function activityText(e: ActivityEvent, names: ActivityNames): ActivityLi
     case "batch.started":
       return { text: `Started production batch ${String(d.number ?? "")} — ${String(d.name ?? "")}`, link: null };
     case "bank_rule.added":
-      return { text: `Added a bank rule for "${String(d.contains ?? "")}"`, link: null };
+      return { text: `Added a bank rule for "${String(d.contains ?? "")}"`, link: "/books/bank/rules" };
     case "bank_rule.changed":
-      return { text: `Changed the bank rule for "${String(d.contains ?? "")}"`, link: null };
+      return { text: `Changed the bank rule for "${String(d.contains ?? "")}"`, link: "/books/bank/rules" };
     case "settings.parcel_rules":
       return { text: `Parcels now count as stuck after ${Number(d.stuckAfterDays ?? 0)} days on the way, or ${Number(d.unshippedAfterDays ?? 0)} days unshipped`, link: null };
     default:

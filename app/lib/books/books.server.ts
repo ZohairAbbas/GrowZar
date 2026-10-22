@@ -97,6 +97,8 @@ export interface BookSettings {
   storeIds?: string[];
   /** Growzar (D-69, D-83): when a cash-on-delivery sale counts. */
   codBasis?: "delivery" | "money" | "order" | "dispatch";
+  /** Growzar (B5): each bank account's statement columns, as last chosen, offered for its next file. */
+  statementMappings?: Record<string, import("./statement-csv").StatementMapping>;
 }
 
 function view(b: BkBook): BookView {
