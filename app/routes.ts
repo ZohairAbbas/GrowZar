@@ -115,7 +115,10 @@ export default [
       route("reports/cash-flow", "routes/books.reports.cash-flow.tsx"),
       route("reports/general-ledger", "routes/books.reports.general-ledger.tsx"),
       route("reports/journal", "routes/books.reports.journal.tsx"),
+      route("reports/compare-finance", "routes/books.reports.compare-finance.tsx"),
       route("reports/:report", "routes/books.reports.$report.tsx"),
+      // Closing the books (B6, D-70).
+      route("close", "routes/books.close.tsx"),
     ]),
   ]),
 

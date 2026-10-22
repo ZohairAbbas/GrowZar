@@ -97,6 +97,8 @@ export interface BookSettings {
   storeIds?: string[];
   /** Growzar (D-69, D-83): when a cash-on-delivery sale counts. */
   codBasis?: "delivery" | "money" | "order" | "dispatch";
+  /** Growzar (D-70): a close an accountant prepared, waiting for an owner or admin to confirm. */
+  preparedClose?: { through: string; by: string | null; at: string; note?: string };
   /** Growzar (B5): each bank account's statement columns, as last chosen, offered for its next file. */
   statementMappings?: Record<string, import("./statement-csv").StatementMapping>;
 }
@@ -237,7 +239,7 @@ export async function closeCheck(book: BookView, through: string): Promise<Close
   if (!isIsoDate(through)) throw new BooksError("Choose a date", "through");
   const [drafts, connectors] = await Promise.all([
     prisma.bkDocument.count({ where: { bookId: book.id, status: "draft", date: { lte: toDbDate(through) } } }),
-    prisma.bkConnector.findMany({ where: { bookId: book.id, enabled: true, key: { in: ["shopify_sales", "courierify_payouts", "ad_spend"] } }, select: { key: true, syncedThrough: true, startDate: true } }),
+    prisma.bkConnector.findMany({ where: { bookId: book.id, enabled: true, key: { in: ["shopify_sales", "courierify_payouts", "ad_spend", "inventorify"] } }, select: { key: true, syncedThrough: true, startDate: true } }),
   ]);
   const behind = connectors
     // A connector that starts after the date has nothing to bring in for it.
@@ -264,9 +266,36 @@ export async function setClosedThrough(book: BookView, through: string | null, t
     if (through === current) throw new BooksError(through ? `The books are already closed through ${through}.` : "The books are already open.", "through");
     const reopening = current !== null && (through === null || through < current);
     if (reopening && !why) throw new BooksError("Say briefly why you're reopening — it's kept in the activity log.", "reason");
-    await tx.bkBook.update({ where: { id: book.id }, data: { lockedThrough: through ? toDbDate(through) : null } });
+    // Growzar (D-70): a close prepared for these days is done once they're closed.
+    const settings = ((await tx.bkBook.findUniqueOrThrow({ where: { id: book.id }, select: { settings: true } })).settings ?? {}) as BookSettings;
+    const { preparedClose: done, ...rest } = settings;
+    const prepared = done && through && done.through <= through ? { settings: rest as Prisma.InputJsonValue } : {};
+    await tx.bkBook.update({ where: { id: book.id }, data: { lockedThrough: through ? toDbDate(through) : null, ...prepared } });
     await audit(tx, book.id, actor, reopening ? "book.reopened" : "book.closed", null, { from: current, to: through, ...(why ? { reason: why } : {}) });
     return through;
+  });
+}
+
+/**
+ * Growzar (D-70): an accountant prepares a close; an owner or admin confirms
+ * it (setClosedThrough). Preparing changes nothing in the books: it leaves
+ * the date, who prepared it and a note for the owner, and the activity log
+ * keeps it. `through` null withdraws a prepared close.
+ */
+export async function prepareClose(book: BookView, through: string | null, today: string, actor: string | null, note?: string | null): Promise<void> {
+  if (through !== null) {
+    if (!isIsoDate(through)) throw new BooksError("Choose a date", "through");
+    if (through > today) throw new BooksError("You can only close days that have already happened.", "through");
+    if (book.lockedThrough && through <= book.lockedThrough) throw new BooksError(`The books are already closed through ${book.lockedThrough}.`, "through");
+  }
+  const memo = (note ?? "").trim().slice(0, 500);
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM bk_books WHERE id = ${book.id} FOR UPDATE`;
+    const cur = ((await tx.bkBook.findUniqueOrThrow({ where: { id: book.id }, select: { settings: true } })).settings ?? {}) as BookSettings;
+    const { preparedClose: _old, ...rest } = cur;
+    const next: BookSettings = through ? { ...rest, preparedClose: { through, by: actor, at: new Date().toISOString(), ...(memo ? { note: memo } : {}) } } : rest;
+    await tx.bkBook.update({ where: { id: book.id }, data: { settings: next as Prisma.InputJsonValue } });
+    await audit(tx, book.id, actor, through ? "book.close_prepared" : "book.close_withdrawn", null, { to: through, from: cur.preparedClose?.through ?? null, ...(memo ? { note: memo } : {}) });
   });
 }
 

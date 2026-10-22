@@ -24,6 +24,7 @@ const GROUPS = [
       { path: "profit-and-loss", title: "Profit and loss", owner: "Did you make money? Sales, costs and profit, month by month, against another period, or one store at a time." },
       { path: "balance-sheet", title: "Balance sheet", owner: "What you have, what you owe, and what's left for you, on any date." },
       { path: "cash-flow", title: "Cash flow", owner: "Why the money in your accounts went up or down, starting from profit." },
+      { path: "compare-finance", title: "Books and Finance", owner: "Finance's profit next to Books', line by line, and why the two differ." },
     ],
   },
   {
