@@ -10,7 +10,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const ALLOWED = new Set(["@prisma/client", "~/lib/db.server", "zod", "vitest", "pg"]);
+// exceljs writes the workbook (B6, D-91).
+const ALLOWED = new Set(["@prisma/client", "~/lib/db.server", "zod", "vitest", "pg", "exceljs"]);
 
 function files(dir: string): string[] {
   return readdirSync(dir).flatMap((n) => {

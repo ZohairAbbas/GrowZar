@@ -6,9 +6,9 @@
  * accountant pack built, and the book purged.
  *
  * Runs only with BOOKS_TEST_DATABASE_URL, in a private schema (test-db.ts).
- * Ported from Financify's Books (0cc8732). Left for later items: the workbook
- * (B6), the USD revaluation
- * (later, D-89); recurring entries are out of v1 (D-88).
+ * Ported from Financify's Books (0cc8732), with the profit and loss by store
+ * and the Excel workbook read back (B6). Left for later: the USD revaluation
+ * (D-89); recurring entries are out of v1 (D-88).
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -48,6 +48,7 @@ run("A month in the books, end to end", () => {
           { subtype: "bank", name: "Meezan", opening: 100_000_000n },
           { subtype: "cash", name: "Cash", opening: 2_000_000n },
         ],
+        settings: { startDate: "2026-10-01", storeIds: ["store-a", "store-b"] },
       },
       "owner",
     );
@@ -260,6 +261,51 @@ run("A month in the books, end to end", () => {
     expect(pack.body.length).toBeGreaterThan(1000);
     const tbCsv = (await R.reportFile(book, TODAY, "trial-balance", new URLSearchParams({ date: "2026-10-31" }))).body.trim().split("\r\n").at(-1)!.split(",");
     expect(tbCsv[2]).toBe(tbCsv[3]);
+
+    // One store at a time (D-65): each store's own sales, payout charges on store A; a store not in the book is ignored.
+    const pl = (extra: Record<string, string> = {}) => R.buildReport(book, TODAY, "profit-and-loss", new URLSearchParams({ range: "custom", from: "2026-10-01", to: "2026-10-31", ...extra }));
+    const [whole, storeA, storeB, stranger] = await Promise.all([pl(), pl({ store: "store-a" }), pl({ store: "store-b" }), pl({ store: "someone-else" })]);
+    expect(storeA.store).toBe("store-a");
+    expect(storeA.pl!.sales.total).toBe(8_000_000n + 400_000n);
+    expect(storeB.pl!.sales.total).toBe(7_000_000n + 200_000n);
+    expect(row(storeA.pl!.costOfSales, "Delivery charges")).toBe(800_000n);
+    expect(row(storeB.pl!.costOfSales, "Delivery charges")).toBeUndefined();
+    expect(stranger.store).toBe("");
+    expect(stranger.pl!.netProfit).toBe(whole.pl!.netProfit);
+    const byStoreCash = await pl({ store: "store-a", basis: "cash" });
+    expect(row(byStoreCash.pl!.sales, "Collected from couriers and gateways")).toBe(12_000_000n + 800_000n);
+
+    // The Excel workbook (D-91): every sheet, and its figures are the reports'.
+    const W = await import("../workbook.server");
+    const wb = await W.buildWorkbook(book, TODAY, params, "Journey Traders");
+    expect(wb.filename).toBe("journey-traders-books-2026-10-01-2026-10-31");
+    const ExcelJS = (await import("exceljs")).default;
+    const x = new ExcelJS.Workbook();
+    await x.xlsx.load(Buffer.from(wb.body) as never);
+    expect(x.worksheets.map((w) => w.name)).toEqual(["Summary", "Profit and loss", "P&L cash basis", "Balance sheet", "Cash flow", "Trial balance", "Chart of accounts", "General ledger", "Journal", "Tax summary", "Owed by customers", "Owed to suppliers"]);
+    const cellAfter = (sheet: string, label: string) => {
+      let v: unknown;
+      x.getWorksheet(sheet)!.eachRow((r) => {
+        if (r.getCell(1).value === label) v = r.getCell(2).value;
+      });
+      return v;
+    };
+    const profit = whole.pl!.netProfit;
+    expect(cellAfter("Profit and loss", profit < 0n ? "Loss" : "Profit")).toBe(Number(profit) / 100);
+    expect(cellAfter("P&L cash basis", cash.pl!.netProfit < 0n ? "Loss" : "Profit")).toBe(Number(cash.pl!.netProfit) / 100);
+    expect(x.getWorksheet("Summary")!.getCell("A2").value).toBe("Journey Traders · 1 Oct 2026 – 31 Oct 2026 · PKR");
+    // One month: no month-by-month sheet, and no note claiming the period is too long.
+    let summary = "";
+    x.getWorksheet("Summary")!.eachRow((r) => (summary += ` ${String(r.getCell(1).value)}`));
+    expect(summary).not.toMatch(/24 months/);
+    const two = new ExcelJS.Workbook();
+    await two.xlsx.load(Buffer.from((await W.buildWorkbook(book, TODAY, new URLSearchParams({ range: "custom", from: "2026-10-01", to: "2026-11-05" }), "Journey Traders")).body) as never);
+    expect(two.getWorksheet("P&L by month")).toBeDefined();
+    let profitFormat = "";
+    x.getWorksheet("Profit and loss")!.eachRow((r) => {
+      if (r.getCell(1).value === (profit < 0n ? "Loss" : "Profit")) profitFormat = r.getCell(2).numFmt;
+    });
+    expect(profitFormat).toBe("#,##0.00;[Red]-#,##0.00");
 
     // The activity log tells the story.
     const log = await V.activityLog(book, { pageSize: 200 });
