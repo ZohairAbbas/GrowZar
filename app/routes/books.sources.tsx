@@ -26,7 +26,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     orderBy: { shopDomain: "asc" },
     select: { id: true, shopDomain: true, displayName: true, connections: { select: { app: true, status: true, capabilities: true } } },
   });
-  const [sales, adSpend, payouts] = await Promise.all([getConnector(book, "shopify_sales"), getConnector(book, "ad_spend"), getConnector(book, "courierify_payouts")]);
+  const [sales, adSpend, payouts, inventorify] = await Promise.all([getConnector(book, "shopify_sales"), getConnector(book, "ad_spend"), getConnector(book, "courierify_payouts"), getConnector(book, "inventorify")]);
   const state = (c: typeof adSpend) => (!c.exists ? "Not set up" : !c.enabled ? "Off" : `On${c.mode === "auto" ? ", saving automatically" : ", as drafts"}${c.syncedThrough ? `, through ${formatDate(c.syncedThrough)}` : ""}`);
   return {
     // The connectors built so far (B3); the rest join this list as they land.
@@ -39,6 +39,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         state: state(adSpend),
       },
       { key: "courierify_payouts", name: "Courier payouts", to: "/books/connectors/courier-payouts", state: state(payouts) },
+      { key: "inventorify", name: "Goods received (Inventorify)", to: "/books/connectors/inventorify", state: state(inventorify) },
     ],
     stores: stores.map((s) => ({
       id: s.id,
@@ -98,7 +99,6 @@ export default function BooksSources({ loaderData: d }: Route.ComponentProps) {
             </li>
           ))}
         </ul>
-        <p className="text-xs text-gray-500">Goods received from Inventorify are on their way.</p>
       </Card>
       {d.stores.map((s) => (
         <Card key={s.id} title={s.name}>
