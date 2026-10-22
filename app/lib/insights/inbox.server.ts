@@ -34,6 +34,7 @@ import { closesWatch, opensPlacebo, PLACEBO, type FindingSnapshot, type Trigger 
 import { closeWatches, openPlacebo, openWatch } from "../outcomes/watch.server";
 import type { OutcomeLine } from "../outcomes/line";
 import { latestLineByInsight } from "../outcomes/results.server";
+import { lastInBankByPayer } from "../books-app/bank-receipts.server";
 
 /**
  * The insight inbox (G-GZR3-3): evaluation in the worker, and Home's view.
@@ -79,6 +80,8 @@ export async function detectorInput(
     loadStatements(s.store.id),
   ]);
   const connected = new Set(connections.map((c) => c.app as App));
+  // D-93: when the store's books have bank statements matched, when each payer's payout last reached the bank.
+  const bank = await lastInBankByPayer(s.store.id, payers.map((p) => p.payer));
   // I3 judges today's stock, whatever the period: "now" in the store's own days.
   const inventory = connected.has("INVENTORIFY")
     ? await inventorySection(s.store.id, { from: s.period.from, to: s.period.to, today: localDayOf(now, s.store.timezone ?? "UTC") }, s.store.currency, Infinity)
@@ -104,7 +107,7 @@ export async function detectorInput(
       // when every day of the period is fetched.
       adSpend: complete ? sumByCurrency([...ads.spend, ...ads.fees]) : null,
       courierify: { connected: connected.has("COURIERIFY"), lastParcelDay: lastParcel?.localDay ?? null },
-      cash: { asOf: now, payers, awaiting: awaiting.map(toRollupOrder) },
+      cash: { asOf: now, payers, awaiting: awaiting.map(toRollupOrder), ...(bank ? { lastInBank: bank } : {}) },
       asOf: now,
       // I2: per-product allocation, only when the period is fully fetched.
       adByVariant: complete ? Object.fromEntries(perProduct.byVariant) : undefined,

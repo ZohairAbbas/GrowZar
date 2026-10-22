@@ -55,6 +55,10 @@ describe("an outcome as a sentence", () => {
     expect(outcomeLine(cash, opts)).toMatchObject({ text: "Watching since 20 Oct · 120 of 561 owed orders paid so far", money: "PKR 412,000 paid" });
     expect(outcomeLine(cash, { ...opts, canSeeMoney: false })!.money).toBeNull();
   });
+  it("cash held (D-93): how much of what was paid the bank shows, where Books can tell", () => {
+    const cash = w({ detector: "cash_held", effect: { items: 10, resolvedNow: 6, inBankNow: 4 }, checkpoints: [{ day: 7, resolved: 6, total: 10, share: 0.6, amount: "6000.00", inBankAmount: "4000.00" }] });
+    expect(outcomeLine(cash, opts)!.money).toBe("PKR 6,000 paid, PKR 4,000 of it seen in the bank");
+  });
   it("no money for detectors not approved", () => {
     const r = w({ detector: "returns_not_received", effect: { items: 10, resolvedNow: 4 }, checkpoints: [{ day: 7, resolved: 4, total: 10, amount: "5000.00" }] });
     expect(outcomeLine(r, opts)!.money).toBeNull();

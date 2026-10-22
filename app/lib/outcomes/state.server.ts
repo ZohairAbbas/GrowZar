@@ -21,6 +21,7 @@ import {
 } from "./state";
 import { addDays, type Windows } from "./groups";
 import type { Baseline } from "./watch";
+import { payoutsInBank } from "../books-app/bank-receipts.server";
 
 /**
  * Loading and measuring a state-based watch (G-GZR9-3). What a store's
@@ -36,7 +37,7 @@ export type StateEnv = {
   ordersById: ReadonlyMap<string, RollupOrder>;
   today: string;
   now: Date;
-  cache: { parcels?: Map<string, Parcel[]>; statements?: Statement[] };
+  cache: { parcels?: Map<string, Parcel[]>; statements?: Statement[]; inBank?: Set<string> | null };
 };
 
 export type StateResult = {
@@ -62,6 +63,15 @@ async function parcelsByOrder(env: StateEnv): Promise<Map<string, Parcel[]>> {
   return env.cache.parcels;
 }
 
+/** D-93: Courierify settlement ids whose payout Books' matched bank statements show; null when Books can't tell. */
+async function settlementsInBank(env: StateEnv): Promise<Set<string> | null> {
+  if (env.cache.inBank === undefined) {
+    const r = await payoutsInBank(env.storeId);
+    env.cache.inBank = r ? new Set(r.payouts.filter((p) => p.inBankOn && p.settlementId).map((p) => p.settlementId!)) : null;
+  }
+  return env.cache.inBank;
+}
+
 const none = { decided: 0, orders: 0 };
 
 export async function measureStateWatch(
@@ -85,7 +95,7 @@ export async function measureStateWatch(
       const parcels = w.detector === "stuck_parcels" ? null : await parcelsByOrder(env);
       const followed: Followed[] =
         w.detector === "cash_held"
-          ? cashFollowed(items, parcels!)
+          ? cashFollowed(items, parcels!, await settlementsInBank(env))
           : w.detector === "returns_not_received"
             ? receivedFollowed(items, parcels!, env.ordersById, env.currency, env.now)
             : stuckFollowed(items, env.ordersById);
@@ -96,10 +106,17 @@ export async function measureStateWatch(
       // Measured, not estimated: what was paid, or the cost of what came back. Stuck parcels carry none in v1.
       const money =
         last && last.amount !== null && w.detector !== "stuck_parcels"
-          ? { measured: true, amount: last.amount, currency: env.currency, asOfDay: last.day, what: w.detector === "cash_held" ? "cod_paid" : "product_cost_received" }
+          ? { measured: true, amount: last.amount, currency: env.currency, asOfDay: last.day, what: w.detector === "cash_held" ? "cod_paid" : "product_cost_received", ...(last.inBankAmount != null ? { inBankAmount: last.inBankAmount } : {}) }
           : null;
       return {
-        effect: { metric: w.detector === "cash_held" ? "share_paid" : w.detector === "returns_not_received" ? "share_received" : "share_moved", items: items.length, resolvedNow, calibrated: false },
+        effect: {
+          metric: w.detector === "cash_held" ? "share_paid" : w.detector === "returns_not_received" ? "share_received" : "share_moved",
+          items: items.length,
+          resolvedNow,
+          calibrated: false,
+          // D-93: paid orders whose payout the bank also shows, where Books can tell.
+          ...(followed.some((f) => f.inBank !== undefined) ? { inBankNow: followed.filter((f) => f.inBank).length } : {}),
+        },
         verdict,
         money: verdict === "too_early" ? null : money,
         checkpoints: checks,

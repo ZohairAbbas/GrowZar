@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useFetcher } from "react-router";
-import { Activity, ExternalLink, ArrowRight, Database, Lightbulb, Mail, Package, Target, Truck, Undo2, Wallet, X } from "lucide-react";
+import { Activity, BookOpen, ExternalLink, ArrowRight, Database, Lightbulb, Mail, Package, Target, Truck, Undo2, Wallet, X } from "lucide-react";
 
 import type {
   CashHeldFinding,
@@ -752,6 +752,13 @@ function CashHeldCard({ f, period, id, canManage }: { f: CashHeldFinding } & Car
         This is what Courierify has recorded. A payout made outside it, straight to your bank or on {who}'s own
         statement, would not show here: check that statement before chasing.
       </p>
+      {f.lastInBankOn !== undefined ? (
+        <p className="text-xs text-gray-600">
+          {f.lastInBankOn
+            ? `Your bank statements in Books last show a ${who} payout arriving on ${f.lastInBankOn}.`
+            : `Your bank statements in Books show no ${who} payout yet.`}
+        </p>
+      ) : null}
       <Leaves
         items={[
           `As of ${f.asOf}, whatever the order date: only orders delivered more than ${f.dueAfterDays} days ago count.`,
@@ -921,7 +928,7 @@ export const parseInsightsTab = (v: string | null): InsightsTab =>
  * (rankInsights), as slim rows. The headline opens the full card in
  * Details; everything else lives on the Insights page.
  */
-export function AttentionList(props: { inbox: InboxView; period: string }) {
+export function AttentionList(props: { inbox: InboxView; period: string; booksDrafts?: number | null }) {
   return (
     <Connected.Provider value={new Set(props.inbox.connected)}>
       <Outcomes.Provider value={props.inbox.outcomes ?? {}}>
@@ -931,7 +938,7 @@ export function AttentionList(props: { inbox: InboxView; period: string }) {
   );
 }
 
-function AttentionListInner({ inbox, period }: { inbox: InboxView; period: string }) {
+function AttentionListInner({ inbox, period, booksDrafts = null }: { inbox: InboxView; period: string; booksDrafts?: number | null }) {
   const action = needsAction(inbox.items);
   const shown = action.slice(0, ATTENTION_ROWS);
   const total = inbox.items.length + inbox.overflow;
@@ -950,6 +957,21 @@ function AttentionListInner({ inbox, period }: { inbox: InboxView; period: strin
           </Link>
         ) : null}
       </div>
+      {booksDrafts ? (
+        // Books' drafts waiting (B7): entries the connectors or the team made, not yet in the books.
+        <Link to="/books/drafts" className="flex items-center gap-4 rounded-2xl bg-white px-5 py-4 hover:bg-gray-50">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent-100 text-accent-700">
+            <BookOpen className="h-[18px] w-[18px]" aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-semibold text-gray-900">
+              {n(booksDrafts)} {booksDrafts === 1 ? "entry is" : "entries are"} waiting for approval in Books
+            </span>
+            <span className="block text-sm text-gray-500">Drafts aren't in your books until someone approves them.</span>
+          </span>
+          <ArrowRight className="h-4 w-4 text-gray-400" aria-hidden="true" />
+        </Link>
+      ) : null}
       {shown.length ? (
         <ul className="divide-y divide-gray-100 rounded-2xl bg-white px-2">
           {shown.map((item) => {

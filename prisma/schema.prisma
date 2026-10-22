@@ -93,6 +93,7 @@ model Store {
   orderNetwork   OrderNetwork[]
   appPrompts     AppPromptEvent[]
   plans          Plan[]
+  cashForecasts  CashForecastSnapshot[]
 
   @@index([organizationId])
   @@map("stores")
@@ -1285,6 +1286,26 @@ model Plan {
 
   @@index([storeId, createdAt])
   @@map("plans")
+}
+
+/// A store's cash forecast as made at the start of a week (D-94), kept so Plan
+/// can show it, once the week has passed, against what happened: paid by
+/// courier (Courierify) and received in bank (Books). One per store and week.
+model CashForecastSnapshot {
+  id        String   @id @default(uuid())
+  storeId   String
+  /// The Monday (UTC) of the week the forecast was made in.
+  week      DateTime @db.Date
+  /// The data the forecast was made from stood at this moment.
+  asOf      DateTime
+  /// The CashForecast as Plan showed it.
+  forecast  Json
+  createdAt DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, week])
+  @@map("cash_forecast_snapshots")
 }
 
 /// Books for an organization (D-91): off until turned on, behind BOOKS_ENABLED

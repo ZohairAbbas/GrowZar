@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 
 import { Notice } from "~/components/metrics/Metrics";
 import type { CashForecast } from "~/lib/forecast/cash";
+import type { HistoryRow } from "~/lib/forecast/cash-history";
 import type { MonthEnd } from "~/lib/forecast/month-end";
 import type { FormOptions } from "~/lib/forecast/plan.server";
 import type { Plan, PlanLine } from "~/lib/forecast/simulator/types";
@@ -100,6 +101,59 @@ export function CashForecastCard({ cash, status, internal }: { cash: CashForecas
           {cash.notTracked.orders} open orders have no Courierify parcel to time: about {rangeText(cash.notTracked.expected, (x) => money(x, c))} of COD, week unknown.
         </p>
       ) : null}
+    </Card>
+  );
+}
+
+// ── Earlier forecasts against what happened (D-94) ───────────────────────────
+
+const inside = (r: Range, x: number) => x >= r.low - 0.5 && x <= r.high + 0.5;
+
+export function CashHistoryCard({ rows, currency }: { rows: HistoryRow[]; currency: string }) {
+  const c = currency;
+  const anyBank = rows.some((r) => r.bank);
+  return (
+    <Card title="Earlier forecasts against what happened" aside={<span className="text-xs text-gray-500">Each week as forecast at its start</span>}>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="text-left text-xs font-semibold text-gray-500">
+            <tr>
+              <th className="py-2 pr-4">Week</th>
+              <th className="py-2 pr-4">COD due: forecast</th>
+              <th className="py-2 pr-4">Delivered</th>
+              <th className="py-2 pr-4">Paid out: forecast</th>
+              <th className="py-2 pr-4">Paid by courier</th>
+              {anyBank ? <th className="py-2">Received in bank</th> : null}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {rows.map((r) => (
+              <tr key={r.from}>
+                <td className="whitespace-nowrap py-2 pr-4 text-gray-700">{date(r.from)} – {date(r.to)}</td>
+                <td className="whitespace-nowrap py-2 pr-4 tabular-nums text-gray-700">{rangeText(r.due, (x) => money(x, c))}</td>
+                <td className={`whitespace-nowrap py-2 pr-4 tabular-nums ${inside(r.due, r.dueActual) ? "text-gray-900" : "text-coral-700"}`}>{money(r.dueActual, c)}</td>
+                <td className="whitespace-nowrap py-2 pr-4 tabular-nums text-gray-700">{r.paid ? rangeText(r.paid, (x) => money(x, c)) : "—"}</td>
+                <td className={`whitespace-nowrap py-2 pr-4 tabular-nums ${r.paid && r.paidActual !== null && !inside(r.paid, r.paidActual) ? "text-coral-700" : "text-gray-900"}`}>{r.paidActual !== null ? money(r.paidActual, c) : "—"}</td>
+                {anyBank ? (
+                  <td className="whitespace-nowrap py-2 tabular-nums text-gray-900">
+                    {r.bank ? (
+                      <>
+                        {money(r.bank.received, c)} <span className="text-xs text-gray-500">({r.bank.inBank} of {r.bank.payouts} payouts)</span>
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                ) : null}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-gray-500">
+        Delivered and paid by courier count only the orders each forecast was made from, read from today's data; red is outside the forecast's range. Paid out is forecast only for couriers whose payout cycle was measured then.
+        {anyBank ? " Received in bank is the courier payouts dated that week that your bank statements in Books show, after the couriers' charges." : ""}
+      </p>
     </Card>
   );
 }

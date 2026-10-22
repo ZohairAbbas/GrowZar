@@ -1,5 +1,5 @@
 import { Forbidden, getViewer, hasPermission, type Viewer } from "../authorize.server";
-import { getBook, type BookView } from "../books/books.server";
+import { countDrafts, getBook, type BookView } from "../books/books.server";
 import type { Action } from "../permissions";
 import { canClosePeriod, scopeAllowsBooks } from "./access";
 import { booksOn } from "./switch.server";
@@ -54,4 +54,11 @@ export async function requireBook(request: Request, action: Action = "view"): Pr
   const ctx = await requireBooks(request, action);
   if (!ctx.book) throw new Response(null, { status: 302, headers: { Location: "/books/setup" } });
   return ctx as BooksContext & { book: BookView };
+}
+
+/** Books' drafts waiting for approval, for Home's "Needs your attention" (B7); null when this viewer can't open Books. */
+export async function draftsWaiting(request: Request, viewer: Viewer): Promise<number | null> {
+  if (!(await booksVisible(request, viewer))) return null;
+  const book = await getBook(viewer.organizationId);
+  return book ? countDrafts(book) : null;
 }

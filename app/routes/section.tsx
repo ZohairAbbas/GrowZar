@@ -71,6 +71,8 @@ import { storeCoverage } from "~/lib/metrics/coverage.server";
 import { coverageLine } from "~/lib/metrics/coverage";
 import { orderFilterQuery, parseOrderFilter } from "~/lib/metrics/findings";
 import { riskActions, riskVisible, storeRisk } from "~/lib/forecast/return-risk.server";
+import { receivedInBank } from "~/lib/books-app/bank-receipts.server";
+import { draftsWaiting } from "~/lib/books-app/access.server";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   return [{ title: loaderData ? `${loaderData.label} · Growzar` : "Growzar" }];
@@ -157,9 +159,12 @@ export async function loader({ request, url }: Route.LoaderArgs) {
 
   // Home's Ask box, where Ask is on for the server and the organization (G-GZR10-3).
   const ask = section === "home" && askEnabled() && Boolean((await prisma.askSettings.findUnique({ where: { organizationId: viewer.organizationId }, select: { enabled: true } }))?.enabled);
+  // Books' drafts waiting (B7): on Home for a viewer who can open Books.
+  const booksDrafts = section === "home" ? await draftsWaiting(request, viewer) : null;
 
   return {
     ask,
+    booksDrafts,
     section,
     label: definition.label,
     blurb: definition.blurb,
@@ -272,6 +277,8 @@ async function buildMetrics(
         view: compared(financeView(summary, prev!)),
         ageing: await storePayoutAgeing(storeId, summary.store.currency, scope),
         depth: await financeDepth(storeId, summary),
+        // Rule #17's second stage, from Books where statements are matched (B7); null elsewhere.
+        bank: !scope.courier && !scope.city ? await receivedInBank(storeId, period.from, period.to) : null,
       };
     case "orders": {
       const risk = riskOn ? await storeRisk(storeId) : null;
@@ -406,7 +413,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             <DataHealth gaps={metrics.coverage.gaps} fx={metrics.view.fx} period={metrics.period.query} />
           </div>
         </header>
-        <HomePanel view={metrics.view} inbox={metrics.inbox} cards={metrics.cards} period={metrics.period} nextApp={metrics.nextApp} results={metrics.results} ask={loaderData.ask} />
+        <HomePanel view={metrics.view} inbox={metrics.inbox} cards={metrics.cards} period={metrics.period} nextApp={metrics.nextApp} results={metrics.results} ask={loaderData.ask} booksDrafts={loaderData.booksDrafts} />
       </div>
     );
   }
@@ -439,7 +446,7 @@ export default function SectionPage({ loaderData }: Route.ComponentProps) {
             keep={metrics.keepForScope}
           />
           <CoverageLine gaps={metrics.coverage.gaps} period={metrics.period.query} />
-          {metrics.kind === "finance" ? <FinancePanel view={metrics.view} ageing={metrics.ageing} depth={metrics.depth} period={metrics.period.query} scope={scopeQuery(metrics.scope)} /> : null}
+          {metrics.kind === "finance" ? <FinancePanel view={metrics.view} ageing={metrics.ageing} depth={metrics.depth} bank={metrics.bank} period={metrics.period.query} scope={scopeQuery(metrics.scope)} /> : null}
           {metrics.kind === "marketing" ? <MarketingPanel view={metrics.view} period={metrics.period.query} scope={scopeQuery(metrics.scope)} /> : null}
           {metrics.kind === "marketing" && metrics.checkouts ? <CheckoutsPanel view={metrics.checkouts} canSeeMoney={metrics.canSeeMoney} /> : null}
           {metrics.kind === "marketing" && metrics.formAbandonments ? (

@@ -61,6 +61,8 @@ function ctxFor(role: string): AskContext {
     // Plan's tools (G-GZR11-7) are internal-only; the eval asks as an internal viewer would.
     planTools: can(role, "plan", "view"),
     riskTools: true,
+    // Books' tools (B7) follow the role, as the screens do.
+    booksTools: can(role, "books", "view"),
   };
 }
 

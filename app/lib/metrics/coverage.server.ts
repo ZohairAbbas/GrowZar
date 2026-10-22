@@ -18,6 +18,7 @@ function notAttributableBy(payloads: ReadonlyArray<Record<string, unknown>>) {
 import type { StoreSummary } from "./summaries.server";
 import { loadAttribution } from "./campaigns.server";
 import { feedsFor } from "../sync/entities";
+import { receivedInBank } from "../books-app/bank-receipts.server";
 
 /**
  * Load what `coverageReport` counts over, for one store's period (D1). The
@@ -27,7 +28,7 @@ import { feedsFor } from "../sync/entities";
 export async function storeCoverage(s: StoreSummary): Promise<CoverageReport> {
   const storeId = s.store.id;
   const buyerIds = [...new Set(s.rows.map((r) => r.customerId).filter((c): c is string => !!c))];
-  const [connections, settlementRows, named, owing, attribution, syncRows, adFetched] = await Promise.all([
+  const [connections, settlementRows, named, owing, attribution, syncRows, adFetched, bank] = await Promise.all([
     prisma.appConnection.findMany({ where: { storeId, status: "CONNECTED" }, select: { app: true } }),
     prisma.rawRecord.findMany({
       where: { storeId, app: "COURIERIFY", entity: "SETTLEMENT", deletedAt: null },
@@ -46,6 +47,7 @@ export async function storeCoverage(s: StoreSummary): Promise<CoverageReport> {
       select: { app: true, entity: true, lastSuccessAt: true, consecutiveFailures: true, lastError: true },
     }),
     prisma.adSpend.aggregate({ where: { storeId }, _max: { fetchedAt: true } }),
+    receivedInBank(storeId, s.period.from, s.period.to),
   ]);
   // Only feeds that exist today: a dropped feed's old failure is not a gap.
   const current = new Set(connections.flatMap((c) => feedsFor(c.app).map((f) => `${c.app}:${f.entity}`)));
@@ -67,6 +69,7 @@ export async function storeCoverage(s: StoreSummary): Promise<CoverageReport> {
       .filter((r) => current.has(`${r.app}:${r.entity}`))
       .map((r) => ({ app: r.app, entity: r.entity, lastSuccessAt: r.lastSuccessAt, failures: r.consecutiveFailures, error: r.lastError })),
     adSpendFetchedAt: adFetched._max.fetchedAt ?? null,
+    bankReceipts: bank ? { inBank: bank.inBank, payouts: bank.payouts } : null,
     asOf: new Date(),
     otherCosts: s.rows.length ? { have: s.rows.filter((r) => r.otherCosts).length, of: s.rows.length } : undefined,
     attribution: tied.length

@@ -234,6 +234,11 @@ export type CashHeldFinding = {
   /** Payers with delivered, unpaid orders but too few payouts to judge. */
   notJudged: Array<{ payer: string; orders: number }>;
   filter: OrderFilter;
+  /**
+   * The day the store's bank statements in Books last show a payout from this
+   * payer (D-93); null when none is matched yet. Absent when Books can't tell.
+   */
+  lastInBankOn?: string | null;
 };
 
 export type ProductLossFinding = {
@@ -374,6 +379,8 @@ export type CashInput = {
   payers: PayerHistory[];
   /** Delivered orders through Courierify whose COD no settlement covers (any date). */
   awaiting: RollupOrder[];
+  /** Per payer, the latest day Books' matched bank statements show its payout (D-93); absent without Books' statements. */
+  lastInBank?: ReadonlyMap<string, string>;
 };
 
 export type FindingsInput = {
@@ -985,6 +992,7 @@ export function cashHeldFindings(input: FindingsInput): CashHeldFinding[] | Skip
       byUpload: UPLOAD_ONLY_PAYERS.has(payer),
       notJudged,
       filter: { kind: "awaiting_payout", payer },
+      ...(cash.lastInBank ? { lastInBankOn: cash.lastInBank.get(payer) ?? null } : {}),
     });
   }
   if (!out.length) {

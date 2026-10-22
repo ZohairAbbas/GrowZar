@@ -37,6 +37,7 @@ import type { ConfirmationFunnel, PayoutAgeing } from "~/lib/metrics/matrices";
 import { MIN_DECIDED_TO_RATE } from "~/lib/metrics/compare";
 import { MIN_COHORT_BUYERS, MIN_ELIGIBLE_BUYERS } from "~/lib/metrics/cohorts";
 import type { InboxView } from "~/lib/insights/inbox.server";
+import type { BankSummary } from "~/lib/books-app/bank-receipts";
 
 /**
  * The open state of each section (G-GZR2-5): read-only, from the metric
@@ -54,6 +55,7 @@ export function HomePanel({
   nextApp,
   results,
   ask = false,
+  booksDrafts = null,
 }: {
   view: HomeView;
   inbox: InboxView;
@@ -63,11 +65,13 @@ export function HomePanel({
   results?: { watched: number; measured: number; watching: number; changed: number } | null;
   /** Ask is on for this organization: show its box (G-GZR10-3). */
   ask?: boolean;
+  /** Books' drafts waiting for approval (B7); null when the viewer can't open Books. */
+  booksDrafts?: number | null;
 }) {
   return (
     <section className="space-y-6">
       {ask ? <AskBox /> : null}
-      <AttentionList inbox={inbox} period={period.query} />
+      <AttentionList inbox={inbox} period={period.query} booksDrafts={booksDrafts} />
       {results?.measured ? <ResultsRow results={results} /> : null}
       {nextApp ? <NextAppCard storeId={nextApp.storeId} prompts={nextApp.prompts} /> : null}
       <HomeTiles view={view} period={period.query} />
@@ -247,10 +251,13 @@ export function FinancePanel({
   depth,
   period,
   scope,
+  bank = null,
 }: {
   view: FinanceView;
   ageing: PayoutAgeing | null;
   depth: FinanceDepth | null;
+  /** "Received in bank" from Books (rule #17, B7); null when no statement is matched. */
+  bank?: BankSummary | null;
   period: string;
   scope: string;
 }) {
@@ -264,7 +271,19 @@ export function FinancePanel({
         <Stat label="Delivered revenue" note="Orders the courier delivered" change={<Change h={view.compare.deliveredRevenue} kind="money" />} trend={<Sparkline trend={view.compare.deliveredRevenue.trend} />}>
           <MoneyList values={baseFirst(view.deliveredRevenue, view.base)} />
         </Stat>
-        <Stat label="Paid by courier" note="COD in courier settlements (Courierify)" change={<Change h={view.compare.paidByCourier} kind="money" />} trend={<Sparkline trend={view.compare.paidByCourier.trend} />}>
+        <Stat
+          label="Paid by courier"
+          note={
+            bank && bank.payouts ? (
+              <>
+                COD in courier settlements (Courierify). Received in bank: {bank.received.currency} {formatAmount(bank.received.amount)}, {bank.inBank} of {bank.payouts} payout{bank.payouts === 1 ? "" : "s"} dated in these days
+                {bank.inBank < bank.payouts ? ` (${bank.notYet.currency} ${formatAmount(bank.notYet.amount)} not on a statement yet)` : ""}, from your bank statements in Books.
+              </>
+            ) : (
+              "COD in courier settlements (Courierify)"
+            )
+          }
+          change={<Change h={view.compare.paidByCourier} kind="money" />} trend={<Sparkline trend={view.compare.paidByCourier.trend} />}>
           <MoneyList values={baseFirst(view.paidByCourier, view.base)} />
         </Stat>
       </div>

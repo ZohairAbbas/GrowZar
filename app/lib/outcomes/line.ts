@@ -137,6 +137,8 @@ export function outcomeLine(w: WatchRow, opts: { timezone: string; canSeeMoney: 
   // Money: measured and approved only, and only for a viewer who may see Finance.
   if (followed && OUTCOME_MONEY_APPROVED.has(w.detector) && opts.canSeeMoney && last?.amount && Number(last.amount) > 0 && opts.currency) {
     base.money = `${opts.currency} ${n(Math.round(Number(last.amount)))} ${followed.done}`;
+    // D-93: how much of it the bank shows, from Books' matched statements.
+    if (typeof last.inBankAmount === "string") base.money += `, ${opts.currency} ${n(Math.round(Number(last.inBankAmount)))} of it seen in the bank`;
     base.moneyValue = { amount: Number(last.amount), currency: opts.currency };
   }
 

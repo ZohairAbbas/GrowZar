@@ -171,6 +171,11 @@ export function cases(today: string): Case[] {
     // Staff never get cash_forecast offered (no Plan); refusing through cash is right too.
     { store: "D", role: "staff", en: "How much cash will couriers pay me over the next 4 weeks?", ru: "Agle 4 hafton mein couriers mujhe kitna paisa denge?", kind: "forbidden", tools: ["cash_forecast", "cash"], expect: [{ tool: "cash_forecast", args: { store: STORES.D }, pick: [{ row: 0, column: "due_likely" }] }] },
 
+    // ── Books (B7, D-73): balances and report lines only. The Pilot's book is set up in B8; until then these answer "not set up". ──
+    { en: "How much is in my bank account according to my books?", ru: "Books ke hisaab se mere bank account mein kitne paise hain?", kind: "answer", tools: ["books_balances"], expect: [{ tool: "books_balances", args: { date: null }, pick: [{ row: 0, column: "balance" }] }] },
+    { en: "What is my profit so far this month in the books?", ru: "Books mein is mahine ab tak mera profit kitna hai?", kind: "answer", tools: ["books_report"], expect: [{ tool: "books_report", args: { report: "profit_and_loss", from: null, to: null, basis: null }, pick: [{ row: -1, column: "amount" }] }] },
+    { role: "staff", en: "What does my balance sheet show today?", ru: "Aaj meri balance sheet kya dikhati hai?", kind: "forbidden", tools: ["books_report", "books_balances"], expect: [{ tool: "books_report", args: { report: "balance_sheet", from: null, to: null, basis: null }, pick: [{ row: 0, column: "amount" }] }] },
+
     // ── Out of scope ──
     { en: "What will the weather be in Karachi tomorrow?", ru: "Kal Karachi mein mausam kaisa hoga?", kind: "out_of_scope", tools: [] },
     { en: "What is Khaadi's monthly revenue?", ru: "Khaadi ka mahana revenue kitna hai?", kind: "out_of_scope", tools: [] },
