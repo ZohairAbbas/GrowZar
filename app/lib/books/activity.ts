@@ -121,6 +121,10 @@ export function activityText(e: ActivityEvent, names: ActivityNames): ActivityLi
       return { text: `Changed the financial year's first month (${s(d.from)} → ${s(d.to)})`, link: null };
     case "book.closed":
       return { text: `Closed the books through ${s(d.to)}`, link: "/books" };
+    case "book.close_prepared":
+      return { text: `Prepared closing the books through ${s(d.to)}, for an owner or admin to confirm${d.note ? ` — “${s(d.note)}”` : ""}`, link: "/books/close" };
+    case "book.close_withdrawn":
+      return { text: `Withdrew the prepared close through ${s(d.from)}`, link: "/books/close" };
     case "book.reopened":
       return { text: `${d.to ? `Reopened the books after ${s(d.to)}` : "Reopened every date"}${d.reason ? ` — “${s(d.reason)}”` : ""}`, link: "/books" };
     case "connector.saved":

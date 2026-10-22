@@ -109,6 +109,11 @@ export default function Report({ loaderData: d }: Route.ComponentProps) {
           <p className="text-sm text-gray-600">{d.subtitle}</p>
         </div>
         <span className="flex flex-wrap gap-4">
+          {pl && d.range ? (
+            <Link to={`/books/reports/compare-finance?${new URLSearchParams({ range: "custom", from: d.range.from, to: d.range.to, ...(d.store ? { store: d.store } : {}) }).toString()}`} className="text-sm font-semibold text-accent-600">
+              Compare with Finance
+            </Link>
+          ) : null}
           {d.canExport ? <DownloadLink href={d.csv}>Download CSV</DownloadLink> : null}
         </span>
       </div>

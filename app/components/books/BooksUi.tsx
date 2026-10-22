@@ -50,6 +50,7 @@ const TABS = [
   { to: "/books/bank", label: "Bank" },
   { to: "/books/couriers", label: "Couriers" },
   { to: "/books/reports", label: "Reports" },
+  { to: "/books/close", label: "Close" },
   { to: "/books/accounts", label: "Accounts" },
   { to: "/books/opening", label: "Opening balances" },
   { to: "/books/sources", label: "Where entries come from" },
