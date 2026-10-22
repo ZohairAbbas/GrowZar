@@ -90,6 +90,7 @@ export default [
       route("accounts", "routes/books.accounts.tsx"),
       route("opening", "routes/books.opening.tsx"),
       route("sources", "routes/books.sources.tsx"),
+      route("connectors/ad-spend", "routes/books.connectors.ad-spend.tsx"),
     ]),
   ]),
 

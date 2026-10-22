@@ -1,21 +1,14 @@
-import { prisma } from "../db.server";
 import { Forbidden, getViewer, hasPermission, type Viewer } from "../authorize.server";
 import { getBook, type BookView } from "../books/books.server";
 import type { Action } from "../permissions";
-import { booksServerOn, canClosePeriod, scopeAllowsBooks } from "./access";
+import { canClosePeriod, scopeAllowsBooks } from "./access";
+import { booksOn } from "./switch.server";
 
 /**
  * Books' gate (B2, D-80, D-81, D-91). Every Books loader and action calls
  * `requireBooks`; hiding the navigation is presentation only.
  */
-export const booksEnabled = () => booksServerOn(process.env.BOOKS_ENABLED);
-
-/** Is Books on for this organization (server switch and the organization's own)? */
-export async function booksOn(organizationId: string): Promise<boolean> {
-  if (!booksEnabled()) return false;
-  const s = await prisma.booksSettings.findUnique({ where: { organizationId }, select: { enabled: true } });
-  return Boolean(s?.enabled);
-}
+export { booksEnabled, booksOn } from "./switch.server";
 
 /** Should the navigation show Books to this viewer? Same rules as `requireBooks`, without throwing. */
 export async function booksVisible(request: Request, viewer: Viewer): Promise<boolean> {

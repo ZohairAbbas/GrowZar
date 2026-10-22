@@ -24,6 +24,7 @@ import { refreshProfitSettings } from "~/lib/metrics/summaries.server";
 import { refreshBuyerNetwork, refreshOrderNetwork } from "~/lib/metrics/buyer-network.server";
 import { runDueDigests } from "~/lib/digest/digest.server";
 import { redactOldMessages } from "~/lib/ask/loop.server";
+import { runDueConnectors } from "~/lib/books-app/connectors/schedule.server";
 
 /**
  * The sync worker.
@@ -356,12 +357,35 @@ const askRetentionTimer = setInterval(() => {
     .catch((error) => console.error("[ask] retention failed", error));
 }, ASK_RETENTION_INTERVAL_MS);
 
+/**
+ * Books' connectors (B3): every 30 minutes, the switched-on ones whose last
+ * run is six hours old, one after another. One tick at a time.
+ */
+const BOOKS_INTERVAL_MS = 30 * 60 * 1000;
+let booksRunning = false;
+
+async function books() {
+  if (booksRunning) return;
+  booksRunning = true;
+  try {
+    const runs = await runDueConnectors();
+    if (runs.length) console.log(`[books] ${runs.map((r) => `${r.key}=${r.status}`).join(" ")}`);
+  } finally {
+    booksRunning = false;
+  }
+}
+
+const booksTimer = setInterval(() => {
+  void books().catch((error) => console.error("[books] run failed", error));
+}, BOOKS_INTERVAL_MS);
+
 async function shutdown(signal: string) {
   console.log(`[sync] ${signal}: draining`);
   clearInterval(sweepTimer);
   clearInterval(reconcileTimer);
   clearInterval(digestTimer);
   clearInterval(askRetentionTimer);
+  clearInterval(booksTimer);
   await eventsWorker.close();
   // Closing the worker lets the job in flight finish. A sync killed mid-run is
   // safe by design, but finishing the page it is on avoids re-fetching it.
