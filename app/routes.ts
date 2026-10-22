@@ -101,6 +101,12 @@ export default [
       route("entries/:id", "routes/books.entries.$id.tsx"),
       route("drafts", "routes/books.drafts.tsx"),
       route("activity", "routes/books.activity.tsx"),
+      // Banking (B5): statements read in the browser, matching, rules, reconciling.
+      route("bank", "routes/books.bank._index.tsx"),
+      route("bank/import", "routes/books.bank.import.tsx"),
+      route("bank/rules", "routes/books.bank.rules.tsx"),
+      route("bank/:accountId", "routes/books.bank.$accountId._index.tsx"),
+      route("bank/:accountId/reconcile", "routes/books.bank.$accountId.reconcile.tsx"),
     ]),
   ]),
 

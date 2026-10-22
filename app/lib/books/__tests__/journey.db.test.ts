@@ -2,12 +2,12 @@
  * A merchant's whole month in one book, with every report checked against the
  * ledger and against each other after each stage: sales and payouts in two
  * stores, stock, bills with tax and withholding, invoices and credits, a USD
- * card, tax paid, month end closed, the accountant pack built, and the book
- * purged.
+ * card, tax paid, a bank statement reconciled (B5a), month end closed, the
+ * accountant pack built, and the book purged.
  *
  * Runs only with BOOKS_TEST_DATABASE_URL, in a private schema (test-db.ts).
- * Ported from Financify's Books (0cc8732). Left for later items: the bank
- * statement and reconciliation (B5), the workbook (B6), the USD revaluation
+ * Ported from Financify's Books (0cc8732). Left for later items: the workbook
+ * (B6), the USD revaluation
  * (later, D-89); recurring entries are out of v1 (D-88).
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -21,6 +21,7 @@ run("A month in the books, end to end", () => {
   let R: typeof import("../report-data.server");
   let V: typeof import("../ledger-views.server");
   let T: typeof import("../taxes.server");
+  let K: typeof import("../bank.server");
   let prisma: import("@prisma/client").PrismaClient;
   const org = `books-journey-${Date.now()}`;
   let dropSchema: (() => Promise<void>) | undefined;
@@ -35,6 +36,7 @@ run("A month in the books, end to end", () => {
     R = await import("../report-data.server");
     V = await import("../ledger-views.server");
     T = await import("../taxes.server");
+    K = await import("../bank.server");
     book = await B.setupBook(
       org,
       {
@@ -127,9 +129,9 @@ run("A month in the books, end to end", () => {
 
     // Stock bought on a bill with claimable GST, paid with withholding.
     const supplier = await contact("Packaging Co", "supplier");
-    const bill = await post({ type: "bill", date: "2026-10-02", contactId: supplier, data: { payable: acc["Owed to suppliers"], dueDate: "2026-10-30", lines: [{ accountId: acc["Stock"], amount: "20000000", tax: { rateId: gstIn.id, name: gstIn.name, rateBp: 1800, accountId: acc["Tax you can claim back"], amount: "3600000" } }] } });
+    const bill = await post({ type: "bill", date: "2026-10-02", contactId: supplier, data: { payable: acc["Owed to suppliers"]!, dueDate: "2026-10-30", lines: [{ accountId: acc["Stock"]!, amount: "20000000", tax: { rateId: gstIn.id, name: gstIn.name, rateBp: 1800, accountId: acc["Tax you can claim back"]!, amount: "3600000" } }] } });
     expect(bill.total).toBe(23_600_000n);
-    await post({ type: "bill_payment", date: "2026-10-05", contactId: supplier, data: { payable: acc["Owed to suppliers"], paidFrom: acc["Meezan"], allocations: [{ billId: bill.id, amount: "20000000" }], withheld: { accountId: acc["Withholding tax to pay"], amount: "900000", rateId: wht.id, name: wht.name, rateBp: 450 } } });
+    await post({ type: "bill_payment", date: "2026-10-05", contactId: supplier, data: { payable: acc["Owed to suppliers"]!, paidFrom: acc["Meezan"]!, allocations: [{ billId: bill.id, amount: "20000000" }], withheld: { accountId: acc["Withholding tax to pay"]!, amount: "900000", rateId: wht.id, name: wht.name, rateBp: 450 } } });
     await checkEverything("2026-10-05", "after stock and the supplier");
 
     // Daily sales per store (as the sales connector makes them): COD owed by couriers, cost of goods out of stock.
@@ -140,43 +142,43 @@ run("A month in the books, end to end", () => {
         date: day,
         storeId,
         data: {
-          debits: [{ accountId: acc["Owed by couriers"], amount: String(sales + ship + tax) }, { accountId: acc["Cost of what you sold"], amount: String(cogs) }],
-          credits: [{ accountId: acc["Sales"], amount: String(sales) }, { accountId: acc["Shipping charged"], amount: String(ship) }, { accountId: acc["Sales tax to pay"], amount: String(tax) }, { accountId: acc["Stock"], amount: String(cogs) }],
+          debits: [{ accountId: acc["Owed by couriers"]!, amount: String(sales + ship + tax) }, { accountId: acc["Cost of what you sold"]!, amount: String(cogs) }],
+          credits: [{ accountId: acc["Sales"]!, amount: String(sales) }, { accountId: acc["Shipping charged"]!, amount: String(ship) }, { accountId: acc["Sales tax to pay"]!, amount: String(tax) }, { accountId: acc["Stock"]!, amount: String(cogs) }],
         },
       });
     }
     // A courier pays out, keeping its charges.
     const tcs = await contact("TCS", "courier");
-    await post({ type: "courier_payout", date: "2026-10-12", storeId: "store-a", contactId: tcs, data: { receivable: acc["Owed by couriers"], receivedIn: acc["Meezan"], received: "12000000", deductions: [{ accountId: acc["Delivery charges"], amount: "800000" }] } });
+    await post({ type: "courier_payout", date: "2026-10-12", storeId: "store-a", contactId: tcs, data: { receivable: acc["Owed by couriers"]!, receivedIn: acc["Meezan"]!, received: "12000000", deductions: [{ accountId: acc["Delivery charges"]!, amount: "800000" }] } });
     await checkEverything("2026-10-12", "after sales and a payout");
 
     // Selling on credit: invoice with GST, part payment with tax withheld, a credit note.
     const buyer = await contact("Wholesale Buyer", "customer");
-    const inv = await post({ type: "invoice", date: "2026-10-13", contactId: buyer, data: { receivable: acc["Owed by customers"], dueDate: "2026-10-28", lines: [{ accountId: acc["Sales"], amount: "10000000", quantity: "100", unitPrice: "100000", tax: { name: "GST 18%", rateBp: 1800, accountId: acc["Sales tax to pay"], amount: "1800000" } }] } });
-    await post({ type: "customer_payment", date: "2026-10-20", contactId: buyer, data: { receivable: acc["Owed by customers"], receivedIn: acc["Meezan"], allocations: [{ billId: inv.id, amount: "6000000" }], withheld: { accountId: acc["Tax you can claim back"], amount: "240000" } } });
-    await post({ type: "credit_note", date: "2026-10-21", contactId: buyer, data: { receivable: acc["Owed by customers"], lines: [{ accountId: acc["Returns"], amount: "1000000" }], allocations: [{ billId: inv.id, amount: "1000000" }] } });
+    const inv = await post({ type: "invoice", date: "2026-10-13", contactId: buyer, data: { receivable: acc["Owed by customers"]!, dueDate: "2026-10-28", lines: [{ accountId: acc["Sales"]!, amount: "10000000", quantity: "100", unitPrice: "100000", tax: { name: "GST 18%", rateBp: 1800, accountId: acc["Sales tax to pay"]!, amount: "1800000" } }] } });
+    await post({ type: "customer_payment", date: "2026-10-20", contactId: buyer, data: { receivable: acc["Owed by customers"]!, receivedIn: acc["Meezan"]!, allocations: [{ billId: inv.id, amount: "6000000" }], withheld: { accountId: acc["Tax you can claim back"]!, amount: "240000" } } });
+    await post({ type: "credit_note", date: "2026-10-21", contactId: buyer, data: { receivable: acc["Owed by customers"]!, lines: [{ accountId: acc["Returns"]!, amount: "1000000" }], allocations: [{ billId: inv.id, amount: "1000000" }] } });
     expect((await B.listBills(book, { ids: [inv.id], type: "invoice" }))[0]!.open).toBe(11_800_000n - 6_000_000n - 1_000_000n);
     await checkEverything("2026-10-21", "after invoicing");
 
     // A USD card for ads: added with a balance and spent on. (Revaluing it comes later, D-89.)
     const card = (await B.createMoneyAccount(book, { subtype: "card", name: "USD card", opening: 0n, date: "2026-10-01", currency: "USD" }, null)).account.id;
     const meta = await contact("Meta", "ad_platform");
-    await post({ type: "expense", date: "2026-10-15", contactId: meta, data: { paidFrom: card, lines: [{ accountId: acc["Advertising"], amount: "2800000" }], fx: { [card]: { amount: "10000" } } } });
+    await post({ type: "expense", date: "2026-10-15", contactId: meta, data: { paidFrom: card, lines: [{ accountId: acc["Advertising"]!, amount: "2800000" }], fx: { [card]: { amount: "10000" } } } });
     // Paying the card off from PKR.
-    await post({ type: "transfer", date: "2026-10-25", data: { from: acc["Meezan"], to: card, amount: "1420000", fx: { [card]: { amount: "5000" } } } });
+    await post({ type: "transfer", date: "2026-10-25", data: { from: acc["Meezan"]!, to: card, amount: "1420000", fx: { [card]: { amount: "5000" } } } });
     expect((await B.foreignBalances(book.id, [card])).get(card)).toBe(-5000n); // USD 50 still owed
     await checkEverything("2026-10-31", "after the USD card");
 
     // Rent repeats monthly; this month's is made and saved.
     const landlord = await contact("Landlord", "supplier");
-    const rent = await post({ type: "expense", date: "2026-10-01", contactId: landlord, data: { paidFrom: acc["Meezan"], lines: [{ accountId: acc["Rent"], amount: "15000000" }], withheld: { accountId: acc["Withholding tax to pay"], amount: "1500000", name: "WHT on rent" } } });
+    const rent = await post({ type: "expense", date: "2026-10-01", contactId: landlord, data: { paidFrom: acc["Meezan"]!, lines: [{ accountId: acc["Rent"]!, amount: "15000000" }], withheld: { accountId: acc["Withholding tax to pay"]!, amount: "1500000", name: "WHT on rent" } } });
 
     // Stock counted at month end: a shortage goes to losses.
-    await post({ type: "stock_adjustment", date: "2026-10-31", data: { stock: acc["Stock"], counter: acc["Stock lost or damaged"], amount: "-250000", method: "count" } });
+    await post({ type: "stock_adjustment", date: "2026-10-31", data: { stock: acc["Stock"]!, counter: acc["Stock lost or damaged"]!, amount: "-250000", method: "count" } });
 
     // Transfers and owner's money.
-    await post({ type: "transfer", date: "2026-10-26", data: { from: acc["Meezan"], to: acc["Cash"], amount: "500000" } });
-    await post({ type: "owner_out", date: "2026-10-27", data: { from: acc["Cash"], amount: "300000" } });
+    await post({ type: "transfer", date: "2026-10-26", data: { from: acc["Meezan"]!, to: acc["Cash"]!, amount: "500000" } });
+    await post({ type: "owner_out", date: "2026-10-27", data: { from: acc["Cash"]!, amount: "300000" } });
     await checkEverything("2026-10-31", "before tax and the bank");
 
     // Tax paid for October: owed less claimable.
@@ -185,15 +187,36 @@ run("A month in the books, end to end", () => {
     const taxPaid = await post({
       type: "tax_payment",
       date: "2026-10-31",
-      data: { paidFrom: acc["Meezan"], lines: [{ accountId: acc["Sales tax to pay"], amount: amt("Sales tax to pay") }, { accountId: acc["Withholding tax to pay"], amount: amt("Withholding tax to pay") }, { accountId: acc["Tax you can claim back"], amount: amt("Tax you can claim back") }] },
+      data: { paidFrom: acc["Meezan"]!, lines: [{ accountId: acc["Sales tax to pay"]!, amount: amt("Sales tax to pay") }, { accountId: acc["Withholding tax to pay"]!, amount: amt("Withholding tax to pay") }, { accountId: acc["Tax you can claim back"]!, amount: amt("Tax you can claim back") }] },
     });
     expect(taxPaid.number).toMatch(/^TAX-/);
     for (const b of await T.taxBalances(book, "2026-10-31")) expect(b.balance).toBe(0n);
     await checkEverything("2026-10-31", "after tax paid");
 
+    // The bank statement for October: import, match everything, reconcile to its closing balance.
+    const lines = await prisma.$queryRaw<Array<{ date: Date; amount: bigint }>>`
+      SELECT l.date, l.amount FROM bk_entry_lines l JOIN bk_entries e ON e.id = l."entryId"
+       WHERE l."bookId" = ${book.id} AND l."accountId" = ${acc["Meezan"]!} AND e.kind = 'post' AND l.date >= '2026-10-02' AND l.date <= '2026-10-31' ORDER BY l.date, l.id`;
+    const fmt = (v: bigint) => `${v < 0n ? "-" : ""}${(v < 0n ? -v : v) / 100n}.${String((v < 0n ? -v : v) % 100n).padStart(2, "0")}`;
+    const csv = ["Date,Description,Amount", ...lines.map((l, i) => `${l.date.toISOString().slice(0, 10)},Line ${i + 1},${fmt(l.amount)}`)].join("\n");
+    const imp = await K.importStatement(book, { accountId: acc["Meezan"]!, fileName: "oct.csv", text: csv, mapping: { headerRow: 0, dateCol: 0, dateFormat: "YMD", descCols: [1], amountCol: 2, outCol: null, inCol: null, balanceCol: null, flip: false } }, null);
+    expect(imp.added).toBe(lines.length);
+    const review = await K.statementReview(book, acc["Meezan"]!, {});
+    const res = await K.applySuggestions(book, review.lines.filter((l) => l.suggestion).map((l) => ({ lineId: l.id, kind: "match" as const, entryLineId: l.suggestion!.entryLineId })), null);
+    expect(res.every((r) => r.ok)).toBe(true);
+    expect((await K.statementReview(book, acc["Meezan"]!, {})).counts.open).toBe(0);
+    const endBank = (await B.ledgerSums(book.id, { to: "2026-10-31" })).get(acc["Meezan"]!)!;
+    const recId = await K.startReconciliation(book, acc["Meezan"]!, "2026-10-31", endBank, null);
+    let view = await K.reconciliationView(book, recId);
+    // The opening balance isn't on the statement: tick it, then everything agrees.
+    await K.setCleared(book, recId, view.lines.filter((l) => !l.ticked).map((l) => l.id), true);
+    view = await K.reconciliationView(book, recId);
+    expect(view.difference).toBe(0n);
+    await K.finishReconciliation(book, recId, "owner");
+
     // Close October. Nothing can be added in it; corrections land on 1 November.
     await B.setClosedThrough(book, "2026-10-31", TODAY, "owner");
-    const late = await B.saveAndPost(book, { type: "expense", date: "2026-10-30", data: { paidFrom: acc["Cash"], lines: [{ accountId: acc["Office and supplies"], amount: "100" }] } }, null);
+    const late = await B.saveAndPost(book, { type: "expense", date: "2026-10-30", data: { paidFrom: acc["Cash"]!, lines: [{ accountId: acc["Office and supplies"]!, amount: "100" }] } }, null);
     expect(late.error?.message).toMatch(/closed through 2026-10-31/);
     await B.discardDraft(book, late.doc.id, null);
     const cancelled = await B.cancelDocument(book, (await prisma.bkDocument.findFirstOrThrow({ where: { bookId: book.id, type: "owner_out" } })).id, "was a loan, not drawings", "owner");
@@ -240,7 +263,7 @@ run("A month in the books, end to end", () => {
 
     // The activity log tells the story.
     const log = await V.activityLog(book, { pageSize: 200 });
-    for (const words of ["Set up the books", "Closed the books through 2026-10-31"]) {
+    for (const words of ["Set up the books", "Closed the books through 2026-10-31", "Reconciled Meezan through 2026-10-31", "Imported"]) {
       expect(log.events.some((e) => e.text.startsWith(words)), words).toBe(true);
     }
   }, 30_000);
@@ -253,6 +276,8 @@ run("A month in the books, end to end", () => {
     for (const r of left) expect(r.n, r.t).toBe(0n);
     const orphans = await prisma.$queryRaw<Array<{ n: bigint }>>`
       SELECT (SELECT COUNT(*) FROM bk_entry_lines WHERE "bookId" = ${book.id})
+           + (SELECT COUNT(*) FROM bk_statement_lines WHERE "bookId" = ${book.id})
+           + (SELECT COUNT(*) FROM bk_cleared_lines WHERE "bookId" = ${book.id})
            + (SELECT COUNT(*) FROM bk_audit_events WHERE "bookId" = ${book.id})
            + (SELECT COUNT(*) FROM bk_allocations WHERE "bookId" = ${book.id}) AS n`;
     expect(orphans[0]!.n).toBe(0n);
