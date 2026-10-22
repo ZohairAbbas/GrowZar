@@ -94,6 +94,13 @@ export default [
       route("connectors/courier-payouts", "routes/books.connectors.courier-payouts.tsx"),
       route("connectors/sales", "routes/books.connectors.sales.tsx"),
       route("connectors/inventorify", "routes/books.connectors.inventorify.tsx"),
+      // Recording by hand, entries, drafts and the activity log (B4).
+      route("new", "routes/books.new._index.tsx"),
+      route("new/:type", "routes/books.new.$type.tsx"),
+      route("entries", "routes/books.entries._index.tsx"),
+      route("entries/:id", "routes/books.entries.$id.tsx"),
+      route("drafts", "routes/books.drafts.tsx"),
+      route("activity", "routes/books.activity.tsx"),
     ]),
   ]),
 

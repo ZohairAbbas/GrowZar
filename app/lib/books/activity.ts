@@ -52,6 +52,9 @@ export interface ActivityLine {
   link: string | null;
 }
 
+/** Growzar's page for each connector's settings. */
+const CONNECTOR_PATHS: Record<string, string> = { shopify_sales: "sales", ad_spend: "ad-spend", courierify_payouts: "courier-payouts", inventorify: "inventorify" };
+
 const s = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
 const connectorName = (key: unknown) => CONNECTORS.find((c) => c.key === key)?.name ?? (key === "stock_check" ? "Stock check" : key === "recurring" ? "a recurring entry" : s(key) || "A connector");
 
@@ -59,11 +62,12 @@ export function activityText(e: ActivityEvent, names: ActivityNames): ActivityLi
   const d = e.detail ?? {};
   const docId = e.documentId ?? (typeof d.documentId === "string" ? d.documentId : null);
   const doc = names.document(docId) || "an entry";
-  const docLink = e.documentId ? `/app/books/documents/${e.documentId}` : null;
+  const docLink = e.documentId ? `/books/entries/${e.documentId}` : null;
   const acc = names.account(d.accountId) || s(d.name) || "an account";
-  const accLink = typeof d.accountId === "string" ? `/app/books/accounts/${d.accountId}` : null;
+  const accLink = typeof d.accountId === "string" ? "/books/accounts" : null;
   const con = names.contact(d.contactId) || s(d.name) || "a contact";
-  const conLink = typeof d.contactId === "string" ? `/app/books/contacts/${d.contactId}` : null;
+  // Growzar has no contact page yet.
+  const conLink: string | null = null;
 
   switch (e.action) {
     case "document.draft_created":
@@ -116,44 +120,44 @@ export function activityText(e: ActivityEvent, names: ActivityNames): ActivityLi
     case "book.fiscal_year_changed":
       return { text: `Changed the financial year's first month (${s(d.from)} → ${s(d.to)})`, link: null };
     case "book.closed":
-      return { text: `Closed the books through ${s(d.to)}`, link: "/app/books/settings/close" };
+      return { text: `Closed the books through ${s(d.to)}`, link: "/books" };
     case "book.reopened":
-      return { text: `${d.to ? `Reopened the books after ${s(d.to)}` : "Reopened every date"}${d.reason ? ` — “${s(d.reason)}”` : ""}`, link: "/app/books/settings/close" };
+      return { text: `${d.to ? `Reopened the books after ${s(d.to)}` : "Reopened every date"}${d.reason ? ` — “${s(d.reason)}”` : ""}`, link: "/books" };
     case "connector.saved":
       return {
         text: `${d.enabled === false ? "Switched off" : "Saved the settings of"} ${connectorName(d.key)}${d.restart ? " and started it again from its start date" : ""}`,
-        link: typeof d.key === "string" ? `/app/books/settings/connectors/${d.key}` : null,
+        link: typeof d.key === "string" && CONNECTOR_PATHS[d.key] ? `/books/connectors/${CONNECTOR_PATHS[d.key]}` : null,
       };
     case "recurring.created":
-      return { text: `Made “${s(d.name)}” repeat (${s(d.schedule)})`, link: "/app/books/settings/recurring" };
+      return { text: `Made “${s(d.name)}” repeat (${s(d.schedule)})`, link: null };
     case "recurring.updated":
-      return { text: `Changed the recurring entry “${s(d.name)}” (${s(d.schedule)})`, link: "/app/books/settings/recurring" };
+      return { text: `Changed the recurring entry “${s(d.name)}” (${s(d.schedule)})`, link: null };
     case "recurring.paused":
-      return { text: `Paused “${s(d.name)}”`, link: "/app/books/settings/recurring" };
+      return { text: `Paused “${s(d.name)}”`, link: null };
     case "recurring.resumed":
-      return { text: `Resumed “${s(d.name)}”`, link: "/app/books/settings/recurring" };
+      return { text: `Resumed “${s(d.name)}”`, link: null };
     case "recurring.deleted":
-      return { text: `Stopped the recurring entry “${s(d.name)}”`, link: "/app/books/settings/recurring" };
+      return { text: `Stopped the recurring entry “${s(d.name)}”`, link: null };
     case "tax_rate.created":
-      return { text: `Added the tax rate ${s(d.name)}`, link: "/app/books/settings/taxes" };
+      return { text: `Added the tax rate ${s(d.name)}`, link: null };
     case "tax_rate.updated":
-      return { text: `Changed the tax rate ${s(d.name)}`, link: "/app/books/settings/taxes" };
+      return { text: `Changed the tax rate ${s(d.name)}`, link: null };
     case "tax_rate.archived":
-      return { text: `Archived the tax rate ${s(d.name)}`, link: "/app/books/settings/taxes" };
+      return { text: `Archived the tax rate ${s(d.name)}`, link: null };
     case "tax_rate.restored":
-      return { text: `Brought back the tax rate ${s(d.name)}`, link: "/app/books/settings/taxes" };
+      return { text: `Brought back the tax rate ${s(d.name)}`, link: null };
     case "statement.imported":
-      return { text: `Imported ${s(d.added)} statement line${d.added === 1 ? "" : "s"} into ${s(d.name) || "an account"}${Number(d.duplicates) > 0 ? ` (${s(d.duplicates)} already there)` : ""}`, link: typeof d.accountId === "string" ? `/app/books/bank/${d.accountId}` : null };
+      return { text: `Imported ${s(d.added)} statement line${d.added === 1 ? "" : "s"} into ${s(d.name) || "an account"}${Number(d.duplicates) > 0 ? ` (${s(d.duplicates)} already there)` : ""}`, link: typeof d.accountId === "string" ? null : null };
     case "statement.import_undone":
-      return { text: `Took back a statement import${d.fileName ? ` (${s(d.fileName)})` : ""}`, link: typeof d.accountId === "string" ? `/app/books/bank/${d.accountId}` : null };
+      return { text: `Took back a statement import${d.fileName ? ` (${s(d.fileName)})` : ""}`, link: typeof d.accountId === "string" ? null : null };
     case "reconciliation.started":
-      return { text: `Started reconciling ${s(d.name) || "an account"} to ${s(d.statementDate)}`, link: typeof d.accountId === "string" ? `/app/books/bank/${d.accountId}/reconcile` : null };
+      return { text: `Started reconciling ${s(d.name) || "an account"} to ${s(d.statementDate)}`, link: typeof d.accountId === "string" ? null : null };
     case "reconciliation.finished":
-      return { text: `Reconciled ${s(d.name) || "an account"} through ${s(d.statementDate)}`, link: "/app/books/bank" };
+      return { text: `Reconciled ${s(d.name) || "an account"} through ${s(d.statementDate)}`, link: null };
     case "reconciliation.undone":
-      return { text: `Undid the reconciliation through ${s(d.statementDate)}${d.reason ? ` — “${s(d.reason)}”` : ""}`, link: typeof d.accountId === "string" ? `/app/books/bank/${d.accountId}/reconcile` : null };
+      return { text: `Undid the reconciliation through ${s(d.statementDate)}${d.reason ? ` — “${s(d.reason)}”` : ""}`, link: typeof d.accountId === "string" ? null : null };
     case "connector.courierify_key_saved":
-      return { text: "Saved the Courierify key", link: "/app/books/settings/connectors/courierify_payouts" };
+      return { text: "Saved the Courierify key", link: "/books/connectors/courier-payouts" };
     case "stock.costs_set_in_shopify":
       return { text: `Set the cost per item in Shopify for ${Number(d.items ?? 0)} item${Number(d.items) === 1 ? "" : "s"}`, link: null };
     case "batch.started":

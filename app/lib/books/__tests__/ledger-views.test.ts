@@ -148,11 +148,11 @@ describe("activity", () => {
     document: (id: unknown) => (id === "d1" ? "EXP-0004 · Expense" : null),
   };
   it("describes events in plain words with a link", () => {
-    expect(activityText({ action: "document.posted", detail: { number: "EXP-0004" }, documentId: "d1" }, names)).toEqual({ text: "Saved to the books: EXP-0004 · Expense", link: "/app/books/documents/d1" });
+    expect(activityText({ action: "document.posted", detail: { number: "EXP-0004" }, documentId: "d1" }, names)).toEqual({ text: "Saved to the books: EXP-0004 · Expense", link: "/books/entries/d1" });
     expect(activityText({ action: "document.cancelled", detail: { reason: "dup", date: "2026-08-01" }, documentId: "d1" }, names).text).toBe("Cancelled EXP-0004 · Expense — “dup”, reversed on 2026-08-01");
     expect(activityText({ action: "document.draft_created", detail: { type: "sales_summary", source: "shopify_sales" }, documentId: "d1" }, names).text).toBe("Started a draft: EXP-0004 · Expense (from Shopify sales)");
     expect(activityText({ action: "document.draft_discarded", detail: { documentId: "gone", type: "bill_payment" }, documentId: null }, names)).toEqual({ text: "Discarded a draft (bill payment)", link: null });
-    expect(activityText({ action: "account.renamed", detail: { accountId: "acc1", from: "Boxes", to: "Packaging" }, documentId: null }, names)).toEqual({ text: "Renamed the account “Boxes” to “Packaging”", link: "/app/books/accounts/acc1" });
+    expect(activityText({ action: "account.renamed", detail: { accountId: "acc1", from: "Boxes", to: "Packaging" }, documentId: null }, names)).toEqual({ text: "Renamed the account “Boxes” to “Packaging”", link: "/books/accounts" });
     expect(activityText({ action: "account.created", detail: { accountId: "zz", name: "Fuel" }, documentId: null }, names).text).toBe("Added the account Fuel");
     expect(activityText({ action: "contact.updated", detail: { contactId: "c1", before: { name: "T.C.S" }, after: { name: "TCS" } }, documentId: null }, names).text).toBe("Renamed the contact “T.C.S” to “TCS”");
     expect(activityText({ action: "book.reopened", detail: { from: "2026-08-31", to: null, reason: "late bill" }, documentId: null }, names).text).toBe("Reopened every date — “late bill”");

@@ -45,15 +45,19 @@ export function Card({ title, aside, children }: { title?: ReactNode; aside?: Re
 
 const TABS = [
   { to: "/books", label: "Overview", end: true },
+  { to: "/books/entries", label: "Entries" },
+  { to: "/books/drafts", label: "To approve" },
   { to: "/books/accounts", label: "Accounts" },
   { to: "/books/opening", label: "Opening balances" },
   { to: "/books/sources", label: "Where entries come from" },
+  { to: "/books/activity", label: "Activity" },
 ];
 
-export function BooksTabs() {
+/** The Books tabs; "To approve" shows how many drafts wait. */
+export function BooksTabs({ drafts = 0 }: { drafts?: number }) {
   return (
     <nav className="flex flex-wrap gap-1.5">
-      {TABS.map((t) => (
+      {TABS.map((t) => (t.to === "/books/drafts" && drafts ? { ...t, label: `To approve · ${drafts}` } : t)).map((t) => (
         <NavLink
           key={t.to}
           to={t.to}
