@@ -167,7 +167,7 @@ export function activityText(e: ActivityEvent, names: ActivityNames): ActivityLi
     case "connector.courierify_key_saved":
       return { text: "Saved the Courierify key", link: "/books/connectors/courier-payouts" };
     case "stock.costs_set_in_shopify":
-      return { text: `Set the cost per item in Shopify for ${Number(d.items ?? 0)} item${Number(d.items) === 1 ? "" : "s"}`, link: null };
+      return { text: `Set the cost per item in Shopify for ${Number(d.items ?? 0)} item${Number(d.items) === 1 ? "" : "s"}${Number(d.failed) > 0 ? ` (${Number(d.failed)} not changed)` : ""}`, link: "/books/stock" };
     case "batch.started":
       return { text: `Started production batch ${String(d.number ?? "")} — ${String(d.name ?? "")}`, link: null };
     case "bank_rule.added":
