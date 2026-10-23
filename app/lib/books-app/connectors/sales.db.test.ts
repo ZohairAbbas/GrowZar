@@ -81,7 +81,8 @@ run("Sales connector against Postgres", () => {
 
     // A: COD, delivered yesterday. B: paid by card. C: COD, came back. D: COD, cancelled before it shipped.
     await putOrder(order("A", day.d1!));
-    await putOrder(order("B", day.d1!, { cod: false }));
+    // B carries a free gift with no cost on record: one note for the run, not one per day.
+    await putOrder(order("B", day.d1!, { cod: false, lineItems: [{ lineId: "B-1", variantId: "v1", quantity: 1, unitPrice: $(2000), totalDiscount: $(0), unitCost: $(400), isGiftCard: false }, { lineId: "B-2", variantId: "gift", quantity: 1, unitPrice: $(0), totalDiscount: $(0), unitCost: null, isGiftCard: false }] } as Partial<FeedOrder>));
     await putOrder(order("C", day.d2!));
     await putOrder(order("D", day.d2!, { cancelledAt: at(day.d2!, "15"), everShipped: false }));
     // G: a cross-border order in USD (D-95): left out of a PKR book, and said.
@@ -107,6 +108,7 @@ run("Sales connector against Postgres", () => {
     const all = await docs();
     expect(r?.status).toBe("ok");
     expect(r?.notes.join(" ")).toMatch(/1 order in USD \(25\.00\) left out.*your books are in PKR/);
+    expect(r?.notes.filter((n) => /with no cost/.test(n))).toEqual([expect.stringMatching(/^Store One: 1 item with no cost in Shopify on 1 day \(.+\), left out of cost of sales/)]);
     expect(all.every((d) => d.status === "posted" && d.storeId === store && d.type === "sales_summary")).toBe(true);
     expect(all.map((d) => d.sourceRef)).toEqual(expect.arrayContaining([`${store}:${day.d1}`, `${store}:${day.d2}`, `${store}:${day.y}`]));
     expect(all.find((d) => d.sourceRef === `${store}:${day.y}`)?.memo).toMatch(/1 delivered/);
