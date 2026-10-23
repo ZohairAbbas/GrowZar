@@ -1308,6 +1308,68 @@ model CashForecastSnapshot {
   @@map("cash_forecast_snapshots")
 }
 
+/// A recurring entry (Books v1.1 V6, ported from Financify): an entry's
+/// contents and a schedule; each due date becomes a draft (D-101: drafts by
+/// default) or is saved straight to the books.
+model BkRecurring {
+  id          String    @id @default(cuid())
+  bookId      String
+  name        String
+  /// The kind of entry it makes, and its contents (as a document's data).
+  type        String
+  contactId   String?
+  memo        String?
+  data        Json
+  /// The store the entries carry (D-65), copied from the entry it was made from.
+  storeId     String?
+  /// Bills and invoices: days from the entry's date to its due date.
+  dueDays     Int?
+  /// weekly | monthly | yearly
+  frequency   String
+  interval    Int       @default(1)
+  /// Monthly and yearly: the day of the month (29–31 fall back to the month's last day).
+  dayOfMonth  Int?
+  startDate   DateTime  @db.Date
+  endDate     DateTime? @db.Date
+  /// The next date to make; null once it has ended.
+  nextDate    DateTime? @db.Date
+  /// draft | auto
+  mode        String    @default("draft")
+  paused      Boolean   @default(false)
+  lastRunAt   DateTime?
+  lastMessage String?
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  book BkBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@index([bookId])
+  @@index([nextDate])
+  @@map("bk_recurring")
+}
+
+/// A receipt or bill kept with an entry (Books v1.1 V6, ported from
+/// Financify): stored in the database, a photo shrunk in the browser or a
+/// PDF, at most 900 KB. Never leaves Books; deleted with its entry.
+model BkAttachment {
+  id          String   @id @default(cuid())
+  bookId      String
+  documentId  String
+  fileName    String
+  contentType String
+  size        Int
+  data        Bytes
+  createdBy   String?
+  createdAt   DateTime @default(now())
+
+  document BkDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([bookId])
+  @@map("bk_attachments")
+}
+
 /// Books for an organization (D-91): off until turned on, behind BOOKS_ENABLED
 /// on the server too. During the pilot only internal accounts turn it on.
 model BooksSettings {
@@ -1345,6 +1407,7 @@ model BkBook {
   accounts         BkAccount[]
   contacts         BkContact[]
   documents        BkDocument[]
+  recurring        BkRecurring[]
   connectors       BkConnector[]
   parcelEvents     BkParcelEvent[]
   statementImports BkStatementImport[]
@@ -1439,6 +1502,7 @@ model BkDocument {
 
   book         BkBook          @relation(fields: [bookId], references: [id], onDelete: Cascade)
   entries      BkEntry[]
+  attachments  BkAttachment[]
   parcelEvents BkParcelEvent[]
 
   @@unique([bookId, source, sourceRef])

@@ -137,13 +137,13 @@ export function activityText(e: ActivityEvent, names: ActivityNames): ActivityLi
         link: typeof d.key === "string" && CONNECTOR_PATHS[d.key] ? `/books/connectors/${CONNECTOR_PATHS[d.key]}` : null,
       };
     case "recurring.created":
-      return { text: `Made “${s(d.name)}” repeat (${s(d.schedule)})`, link: null };
+      return { text: `Made “${s(d.name)}” repeat (${s(d.schedule)})`, link: "/books/recurring" };
     case "recurring.updated":
-      return { text: `Changed the recurring entry “${s(d.name)}” (${s(d.schedule)})`, link: null };
+      return { text: `Changed the recurring entry “${s(d.name)}” (${s(d.schedule)})`, link: "/books/recurring" };
     case "recurring.paused":
-      return { text: `Paused “${s(d.name)}”`, link: null };
+      return { text: `Paused “${s(d.name)}”`, link: "/books/recurring" };
     case "recurring.resumed":
-      return { text: `Resumed “${s(d.name)}”`, link: null };
+      return { text: `Resumed “${s(d.name)}”`, link: "/books/recurring" };
     case "recurring.deleted":
       return { text: `Stopped the recurring entry “${s(d.name)}”`, link: null };
     case "tax_rate.created":
