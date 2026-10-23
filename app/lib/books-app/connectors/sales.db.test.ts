@@ -84,6 +84,8 @@ run("Sales connector against Postgres", () => {
     await putOrder(order("B", day.d1!, { cod: false }));
     await putOrder(order("C", day.d2!));
     await putOrder(order("D", day.d2!, { cancelledAt: at(day.d2!, "15"), everShipped: false }));
+    // G: a cross-border order in USD (D-95): left out of a PKR book, and said.
+    await putOrder(order("G", day.d1!, { currency: { code: "USD" }, money: { placed: { amount: "25.00", currency: "USD" }, discounts: { amount: "0", currency: "USD" }, shipping: { amount: "0", currency: "USD" }, tax: { amount: "0", currency: "USD" } } } as Partial<FeedOrder>));
     await grain("A", "delivered", at(day.y!));
     await grain("B", "delivered", at(day.d2!));
     await grain("C", "returned", at(day.d4!));
@@ -104,6 +106,7 @@ run("Sales connector against Postgres", () => {
     const r = await runIt();
     const all = await docs();
     expect(r?.status).toBe("ok");
+    expect(r?.notes.join(" ")).toMatch(/1 order in USD \(25\.00\) left out.*your books are in PKR/);
     expect(all.every((d) => d.status === "posted" && d.storeId === store && d.type === "sales_summary")).toBe(true);
     expect(all.map((d) => d.sourceRef)).toEqual(expect.arrayContaining([`${store}:${day.d1}`, `${store}:${day.d2}`, `${store}:${day.y}`]));
     expect(all.find((d) => d.sourceRef === `${store}:${day.y}`)?.memo).toMatch(/1 delivered/);

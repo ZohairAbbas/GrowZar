@@ -193,21 +193,48 @@ type StoreCtx = {
   grain: Array<{ orderId: string; outcome: string; day: string | null }>;
 };
 
-function prepare(ctx: StoreCtx, rows: FeedOrder[]): { orders: ShopOrder[]; waiting: FeedOrder[] } {
+/**
+ * Orders ready to sum, orders still waiting for Financify's details, and
+ * orders in another currency than the book's: left out with their cost and
+ * said in the run's notes (D-95), as Finance leaves out what it can't convert.
+ */
+function prepare(ctx: StoreCtx, rows: FeedOrder[]): { orders: ShopOrder[]; waiting: FeedOrder[]; foreign: FeedOrder[] } {
   const carried = new Set(ctx.parcels.map((p) => p.orderId));
   const orders: ShopOrder[] = [];
   const waiting: FeedOrder[] = [];
+  const foreign: FeedOrder[] = [];
   for (const r of rows) {
     if (!factsAvailable(r)) {
       waiting.push(r);
       continue;
     }
     let o = toShopOrder(r, ctx.costs);
-    if (o.currency && o.currency !== ctx.book.currency) throw new BooksError(`${ctx.storeName}: orders are in ${o.currency}, but your books are in ${ctx.book.currency}`);
+    if (o.currency && o.currency !== ctx.book.currency) {
+      foreign.push(r);
+      continue;
+    }
     if (ctx.mapping.manualPayments !== "as_mapped") o = routeManualPayment(o, manualEvidence(carried.has(o.id)));
     orders.push(o);
   }
-  return { orders, waiting };
+  return { orders, waiting, foreign };
+}
+
+/** D-95: "3 orders in AED (612.40) left out…", per currency, for orders placed in [from, to]. */
+export function foreignNotes(storeName: string, bookCurrency: string, foreign: readonly FeedOrder[], dayOf: (iso: string) => string, from: string, to: string): string[] {
+  const by = new Map<string, { n: number; total: number }>();
+  for (const o of foreign) {
+    const day = dayOf(o.createdAt);
+    if (day < from || day > to) continue;
+    const cur = o.currency?.code ?? "another currency";
+    const e = by.get(cur) ?? { n: 0, total: 0 };
+    e.n++;
+    e.total += Number(o.money?.placed?.amount ?? 0);
+    by.set(cur, e);
+  }
+  return [...by].map(
+    ([cur, e]) =>
+      `${storeName}: ${e.n} order${e.n === 1 ? "" : "s"} in ${cur} (${e.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) left out, from ${formatDate(from)} to ${formatDate(to)}: your books are in ${bookCurrency}. Enter ${e.n === 1 ? "it" : "them"} by hand in ${bookCurrency} if you know what ${e.n === 1 ? "it" : "they"} came to`,
+  );
 }
 
 /** Parcel events for days [from, to] of one store: returns, holds and releases (Financify's parcelEventsFor, on Growzar's data). */
@@ -330,7 +357,7 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
       const to = addDays(from, MAX_DAYS_PER_RUN - 1) < yesterday ? addDays(from, MAX_DAYS_PER_RUN - 1) : yesterday;
       for (let chunkFrom = from; chunkFrom <= to; chunkFrom = addDays(chunkFrom, DAYS_PER_CHUNK)) {
         let chunkTo = addDays(chunkFrom, DAYS_PER_CHUNK - 1) < to ? addDays(chunkFrom, DAYS_PER_CHUNK - 1) : to;
-        const { orders, waiting } = prepare(ctx, await loadOrders(store.id, chunkFrom, chunkTo));
+        const { orders, waiting, foreign } = prepare(ctx, await loadOrders(store.id, chunkFrom, chunkTo));
         // A day isn't summed while one of its orders still waits for Financify's details.
         const firstWaiting = waiting.map((w) => dayOf(w.createdAt)).filter((d) => d >= chunkFrom && d <= chunkTo).sort()[0];
         if (firstWaiting) {
@@ -339,6 +366,7 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
           r.notes.push(`${store.name}: ${waiting.length} order${waiting.length === 1 ? "" : "s"} from ${formatDate(firstWaiting)} still wait${waiting.length === 1 ? "s" : ""} for Financify's details; those days come in on a later run`);
           if (chunkTo < chunkFrom) break;
         }
+        r.notes.push(...foreignNotes(store.name, book.currency, foreign, ctx.dayOf, chunkFrom, chunkTo));
         const placed = orders.filter((o) => ctx.dayOf(o.createdAt) >= chunkFrom && ctx.dayOf(o.createdAt) <= chunkTo);
         const changed = orders;
         const parcelEvents = mapping.parcelReturns === false ? [] : await parcelEventsFor(ctx, chunkFrom, chunkTo, orders);
