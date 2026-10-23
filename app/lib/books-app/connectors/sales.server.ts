@@ -21,6 +21,8 @@ import { toSums } from "./ad-spend";
 import { updateRegister } from "../../books/connectors/parcels.server";
 import { linkLoadsheets } from "../../books/courier-sheets.server";
 import { refreshRegister } from "./parcels.server";
+import { convertMoneyTree } from "../fx";
+import { bookRates } from "../fx.server";
 import { postDifference } from "./corrections.server";
 import { factsAvailable, manualEvidence, releaseDays, statusFromOutcome, toShopOrder, type FeedOrder } from "./sales";
 import type { RunResult } from "./runs.server";
@@ -117,9 +119,9 @@ export async function checkSalesMapping(book: BookView, m: SalesMapping): Promis
 export async function salesStores(book: BookView) {
   const stores = await prisma.store.findMany({
     where: { id: { in: book.settings.storeIds ?? [] } },
-    select: { id: true, shopDomain: true, displayName: true, connections: { where: { app: "FINANCIFY" }, select: { status: true } } },
+    select: { id: true, shopDomain: true, displayName: true, currency: true, connections: { where: { app: "FINANCIFY" }, select: { status: true } } },
   });
-  return stores.map((s) => ({ id: s.id, name: s.displayName ?? s.shopDomain, financify: s.connections.some((c) => c.status === "CONNECTED") }));
+  return stores.map((s) => ({ id: s.id, name: s.displayName ?? s.shopDomain, currency: s.currency, financify: s.connections.some((c) => c.status === "CONNECTED") }));
 }
 
 /** Payment gateways seen on a store's orders in the last 120 days, for the mapping screen. */
@@ -195,31 +197,67 @@ type StoreCtx = {
 
 /**
  * Orders ready to sum, orders still waiting for Financify's details, and
- * orders in another currency than the book's: left out with their cost and
- * said in the run's notes (D-95), as Finance leaves out what it can't convert.
+ * orders in another currency than the book's. Those are converted at their
+ * own day's rate (v1.1 V1, D-98): every amount on the order, refunds
+ * included, so the order nets the same in the book's currency. With no rate
+ * within a week before their day, they're left out with their cost and said
+ * in the run's notes (D-95). Every caller converts the same way, so a
+ * re-check never mistakes a converted order for a missing one.
  */
-function prepare(ctx: StoreCtx, rows: FeedOrder[]): { orders: ShopOrder[]; waiting: FeedOrder[]; foreign: FeedOrder[] } {
+async function prepare(ctx: StoreCtx, rows: FeedOrder[]): Promise<{ orders: ShopOrder[]; waiting: FeedOrder[]; foreign: FeedOrder[]; converted: Converted[] }> {
   const carried = new Set(ctx.parcels.map((p) => p.orderId));
+  const book = ctx.book.currency;
+  const orderCurrency = (r: FeedOrder) => r.currency?.code ?? book;
+  const rateOf = await bookRates(ctx.book, rows.filter((r) => orderCurrency(r) !== book).map((r) => ({ currency: orderCurrency(r), day: ctx.dayOf(r.createdAt) })));
   const orders: ShopOrder[] = [];
   const waiting: FeedOrder[] = [];
   const foreign: FeedOrder[] = [];
-  for (const r of rows) {
-    if (!factsAvailable(r)) {
-      waiting.push(r);
+  const converted: Converted[] = [];
+  for (const raw of rows) {
+    if (!factsAvailable(raw)) {
+      waiting.push(raw);
       continue;
     }
+    let r = raw;
+    const cur = orderCurrency(raw);
+    if (cur !== book) {
+      const rate = rateOf(cur, ctx.dayOf(raw.createdAt));
+      const c = rate ? convertMoneyTree(raw, cur, book, rate.rate) : null;
+      if (!rate || !c) {
+        foreign.push(raw);
+        continue;
+      }
+      r = { ...c, currency: { ...(c.currency ?? {}), code: book } };
+      converted.push({ currency: cur, day: ctx.dayOf(raw.createdAt), source: rate.source, placed: raw.money?.placed?.amount ?? "0" });
+    }
     let o = toShopOrder(r, ctx.costs);
-    if (o.currency && o.currency !== ctx.book.currency) {
-      foreign.push(r);
+    if (o.currency && o.currency !== book) {
+      foreign.push(raw);
       continue;
     }
     if (ctx.mapping.manualPayments !== "as_mapped") o = routeManualPayment(o, manualEvidence(carried.has(o.id)));
     orders.push(o);
   }
-  return { orders, waiting, foreign };
+  return { orders, waiting, foreign, converted };
 }
 
-/** D-95: "3 orders in AED (612.40) left out…", per currency, for orders placed in [from, to]. */
+type Converted = { currency: string; day: string; source: string; placed: string };
+
+/** "12 orders in AED (2,140.50) converted into PKR at each day's rate (fawazahmed0 currency-api)", per currency. */
+export function convertedNotes(storeName: string, bookCurrency: string, converted: readonly Converted[], from: string, to: string): string[] {
+  const by = new Map<string, { n: number; total: number; sources: Set<string> }>();
+  for (const c of converted) {
+    if (c.day < from || c.day > to) continue;
+    const e = by.get(c.currency) ?? { n: 0, total: 0, sources: new Set<string>() };
+    e.n++;
+    e.total += Number(c.placed);
+    e.sources.add(c.source);
+    by.set(c.currency, e);
+  }
+  return [...by].map(([cur, e]) => `${storeName}: ${e.n} order${e.n === 1 ? "" : "s"} in ${cur} (${e.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) converted into ${bookCurrency} at each day's rate (${[...e.sources].join(", ")})`);
+}
+
+/** D-95: "3 orders in AED (612.40) left out…", per currency, for orders placed in [from, to] with no rate to convert them. */
 export function foreignNotes(storeName: string, bookCurrency: string, foreign: readonly FeedOrder[], dayOf: (iso: string) => string, from: string, to: string): string[] {
   const by = new Map<string, { n: number; total: number }>();
   for (const o of foreign) {
@@ -296,7 +334,7 @@ async function parcelEventsFor(ctx: StoreCtx, from: string, to: string, known: S
     if (k) orders.push(k);
     else missing.push(id);
   }
-  orders.push(...prepare(ctx, await loadOrdersById(ctx.storeId, missing)).orders);
+  orders.push(...(await prepare(ctx, await loadOrdersById(ctx.storeId, missing))).orders);
   for (const x of known) if (active.has(x.id)) orders.push(x);
   if (hold && !hold.allOut) for (const x of known) if (!active.has(x.id) && ctx.dayOf(x.createdAt) >= from) orders.push(x);
   return parcelChanges({ orders, statusOf, active, from, to, startDate: ctx.start, timeZone: book.settings.timeZone, decimals: book.decimals, mapping: m, hold });
@@ -343,7 +381,8 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
         parcelFacts(store.id, dayOf),
         prisma.orderGrain.findMany({ where: { storeId: store.id, localDay: { gte: addDays(start, -1) } }, select: { orderId: true, outcome: true, outcomeAt: true } }),
       ]);
-      const ctx: StoreCtx = { book, storeId: store.id, storeName: store.name, start, mapping, dayOf, costs, parcels, grain: grainRows.map((g) => ({ orderId: g.orderId, outcome: g.outcome, day: g.outcomeAt ? dayOf(g.outcomeAt.toISOString()) : null })) };
+      // Inventorify's costs are in the store's currency: of no use to a book in another (orders carry Financify's cost, converted).
+      const ctx: StoreCtx = { book, storeId: store.id, storeName: store.name, start, mapping, dayOf, costs: store.currency && store.currency !== book.currency ? new Map() : costs, parcels, grain: grainRows.map((g) => ({ orderId: g.orderId, outcome: g.outcome, day: g.outcomeAt ? dayOf(g.outcomeAt.toISOString()) : null })) };
       const done = progress[store.id] ?? null;
 
       // 1. The last days already brought in, re-checked for data that arrived late.
@@ -361,7 +400,7 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
       const to = addDays(from, MAX_DAYS_PER_RUN - 1) < yesterday ? addDays(from, MAX_DAYS_PER_RUN - 1) : yesterday;
       for (let chunkFrom = from; chunkFrom <= to; chunkFrom = addDays(chunkFrom, DAYS_PER_CHUNK)) {
         let chunkTo = addDays(chunkFrom, DAYS_PER_CHUNK - 1) < to ? addDays(chunkFrom, DAYS_PER_CHUNK - 1) : to;
-        const { orders, waiting, foreign } = prepare(ctx, await loadOrders(store.id, chunkFrom, chunkTo));
+        const { orders, waiting, foreign, converted } = await prepare(ctx, await loadOrders(store.id, chunkFrom, chunkTo));
         // A day isn't summed while one of its orders still waits for Financify's details.
         const firstWaiting = waiting.map((w) => dayOf(w.createdAt)).filter((d) => d >= chunkFrom && d <= chunkTo).sort()[0];
         if (firstWaiting) {
@@ -371,6 +410,7 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
           waited = true;
           if (chunkTo < chunkFrom) break;
         }
+        r.notes.push(...convertedNotes(store.name, book.currency, converted, chunkFrom, chunkTo));
         r.notes.push(...foreignNotes(store.name, book.currency, foreign, ctx.dayOf, chunkFrom, chunkTo));
         const placed = orders.filter((o) => ctx.dayOf(o.createdAt) >= chunkFrom && ctx.dayOf(o.createdAt) <= chunkTo);
         const changed = orders;
@@ -436,7 +476,7 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
  */
 async function recheck(ctx: StoreCtx, from: string, to: string, today: string, mode: string, r: RunResult) {
   const { book } = ctx;
-  const { orders, waiting } = prepare(ctx, await loadOrders(ctx.storeId, from, to));
+  const { orders, waiting } = await prepare(ctx, await loadOrders(ctx.storeId, from, to));
   const waitingDays = new Set(waiting.map((w) => ctx.dayOf(w.createdAt)));
   for (const day of days(from, to)) {
     if (waitingDays.has(day)) continue;

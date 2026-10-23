@@ -41,6 +41,16 @@ export async function refreshFxRates(now = new Date()): Promise<{ stored: number
   const { bases, shop } = await basesAndShop();
   const credentials = getAppCredentials("FINANCIFY");
   if (!shop || !credentials) return { stored: 0, bases, problems: [] };
+  return refreshFromFinancify(bases, shop, credentials, now);
+}
+
+/** The bases Growzar converts into (every Financify store's currency and organization base), and every Books book's (D-98). */
+export async function fxBases(): Promise<string[]> {
+  const [{ bases }, books] = await Promise.all([basesAndShop(), prisma.bkBook.findMany({ select: { currency: true } })]);
+  return [...new Set([...bases, ...books.map((b) => b.currency)])].filter((b) => /^[A-Z]{3}$/.test(b)).sort();
+}
+
+async function refreshFromFinancify(bases: string[], shop: string, credentials: NonNullable<ReturnType<typeof getAppCredentials>>, now: Date): Promise<{ stored: number; bases: string[]; problems: string[] }> {
   const problems: string[] = [];
   let stored = 0;
   const to = utcDay(now);
@@ -100,9 +110,10 @@ export async function loadFxSource(base: string, rows: readonly RollupOrder[]): 
     where: { base, currency: { in: [...currencies] }, day: { in: [...days] } },
   });
   return {
+    // Each rate keeps its own source (Financify's daily rate, or the past days filled in, D-98).
     source: tableSource(
       SOURCE,
-      stored.map((r) => ({ from: r.currency, to: r.base, day: r.day, rate: r.rate, source: SOURCE })),
+      stored.map((r) => ({ from: r.currency, to: r.base, day: r.day, rate: r.rate, source: r.source })),
     ),
     ratesFrom: first?.day ?? null,
   };

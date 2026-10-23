@@ -20,6 +20,8 @@ import {
   type Posting,
 } from "./ad-spend";
 import type { RunResult } from "./runs.server";
+import { convertAmount } from "../fx";
+import { bookRates } from "../fx.server";
 
 /** The platforms the book's stores have spend on, from Growzar's own ad data. */
 export async function adPlatforms(book: BookView): Promise<string[]> {
@@ -93,6 +95,9 @@ export async function runAdSpend(book: BookView, connector: BkConnector): Promis
   const byRef = new Map(docs.map((d) => [d.sourceRef, d]));
   const unmapped = new Set<string>();
   const money = (v: bigint) => formatAmount(v, book.decimals, { currency: book.currency });
+  // Spend in another currency converts at its day's rate (v1.1 V1, D-98); with no rate, it waits and says so.
+  const rateOf = await bookRates(book, rows.filter((x) => x.currency !== book.currency).map((x) => ({ currency: x.currency, day: x.day })));
+  const noRate = new Map<string, number>();
 
   const save = async (input: { sourceRef: string; date: string; data: Posting & { platform: string; correctionOf?: string | null }; memo: string; storeId: string }) => {
     const res = await upsertImported(book, { source: "ad_spend", type: "ad_spend", ...input });
@@ -116,19 +121,26 @@ export async function runAdSpend(book: BookView, connector: BkConnector): Promis
       unmapped.add(row.key);
       continue;
     }
-    // Version 1 keeps one currency (D-89); Financify converts to the store's currency, which setup checked.
+    let spendText = row.spendAmount.toString();
+    let feesText = row.feesAmount.toString();
     if (row.currency !== book.currency) {
-      r.status = "partial";
-      r.notes.push(`${label}: spend is in ${row.currency}, not ${book.currency}, so it's left out`);
-      continue;
+      const rate = rateOf(row.currency, row.day);
+      const sp = rate ? convertAmount(spendText, rate.rate) : null;
+      const fe = rate ? convertAmount(feesText, rate.rate) : null;
+      if (!rate || sp === null || fe === null) {
+        noRate.set(row.currency, (noRate.get(row.currency) ?? 0) + 1);
+        continue;
+      }
+      spendText = sp;
+      feesText = fe;
     }
     if (row.fxStatus && row.fxStatus !== "ok") {
       r.status = "partial";
       r.notes.push(`${label}: Financify couldn't convert this day's spend yet, so it waits`);
       continue;
     }
-    const spend = decimalToMinor(row.spendAmount.toString(), book.decimals);
-    const fees = decimalToMinor(row.feesAmount.toString(), book.decimals);
+    const spend = decimalToMinor(spendText, book.decimals);
+    const fees = decimalToMinor(feesText, book.decimals);
     const current = buildAdDay(spend, fees, m);
     const base = `${row.storeId}:${row.key}:${row.day}`;
     const original = byRef.get(base);
@@ -167,6 +179,10 @@ export async function runAdSpend(book: BookView, connector: BkConnector): Promis
     });
   }
 
+  for (const [cur, n] of noRate) {
+    r.status = "partial";
+    r.notes.push(`${n} platform-day${n === 1 ? "" : "s"} of spend in ${cur} have no ${cur} rate yet, so ${n === 1 ? "it waits" : "they wait"} for the next run`);
+  }
   for (const p of unmapped) {
     r.status = "partial";
     r.notes.push(`${platformName(p)} has spend but isn't set up in Books yet. Open Ad spend and save it`);

@@ -145,6 +145,7 @@ export default function BooksSetup({ loaderData: d, actionData }: Route.Componen
                 onChange={(e) => setStoreIds((ids) => (e.target.checked ? [...ids, s.id] : ids.filter((x) => x !== s.id)))}
               />
               {s.name}
+              {s.currency && s.currency !== d.currency ? <span className="text-xs text-gray-500">In {s.currency}: converted into {d.currency} at each day's rate</span> : null}
             </label>
           ))}
           {d.stores.excluded.map((s) => (

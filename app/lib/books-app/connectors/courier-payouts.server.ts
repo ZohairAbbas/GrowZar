@@ -10,6 +10,8 @@ import { courierName, minor, payoutDay, planPayout, planSums, type PayoutAccount
 import { postDifference } from "./corrections.server";
 import { stampPayout } from "./parcels.server";
 import type { RunResult } from "./runs.server";
+import { convertMoneyTree } from "../fx";
+import { bookRates } from "../fx.server";
 
 /**
  * Courier payouts (B3, D-86), read straight from Courierify for each store in
@@ -129,13 +131,17 @@ export async function runCourierPayouts(book: BookView, connector: BkConnector, 
     }
     let cursor: string | null = null;
     let first = true;
+    // A payout that waited for a rate keeps the store's cursor where it was, so the next run reads it again.
+    let waited = false;
     try {
       do {
         const q = new URLSearchParams({ include: "lines", limit: String(PAGE) });
         if (cursor) q.set("cursor", cursor);
         else if (cursors[store.id]) q.set("updatedSince", new Date(Date.parse(cursors[store.id]!) - OVERLAP_MS).toISOString());
         const page = await fetchPage(store.shopDomain, q);
-        if (page.shopCurrency && page.shopCurrency !== book.currency) throw new BooksError(`${store.name}: Courierify reports amounts in ${page.shopCurrency}, but your books are in ${book.currency}`);
+        // A store in another currency (v1.1 V1): each payout converts at its own day's rate (D-98).
+        const foreign = page.shopCurrency && page.shopCurrency !== book.currency ? page.shopCurrency : null;
+        const rateOf = foreign ? await bookRates(book, (page.data ?? []).map((x) => ({ currency: foreign, day: payoutDay(x) })).filter((x) => isIsoDate(x.day))) : null;
 
         // Removed in Courierify: a draft goes, a saved payout is flagged and never cancelled for you.
         if (first) {
@@ -150,10 +156,22 @@ export async function runCourierPayouts(book: BookView, connector: BkConnector, 
         }
         first = false;
 
-        for (const st of page.data ?? []) {
-          const day = payoutDay(st);
-          const ref = st.paymentReference ?? st.settlementRef ?? st.id;
+        for (const wire of page.data ?? []) {
+          const day = payoutDay(wire);
+          const ref = wire.paymentReference ?? wire.settlementRef ?? wire.id;
           if (!isIsoDate(day) || day < start) continue;
+          let st = wire;
+          if (foreign) {
+            const rate = rateOf!(foreign, day);
+            const c = rate ? convertMoneyTree(wire, foreign, book.currency, rate.rate) : null;
+            if (!c) {
+              waited = true;
+              r.status = "partial";
+              r.notes.push(`${store.name}: payout ${ref} (${formatDate(day)}) is in ${foreign} and there's no ${foreign} rate for that day yet; it comes in on a later run`);
+              continue;
+            }
+            st = c;
+          }
           acc ??= await payoutAccounts(book);
           const plan = planPayout(st, book.decimals, settings.mapping, acc);
           if (plan.kind === "skip") {
@@ -203,7 +221,7 @@ export async function runCourierPayouts(book: BookView, connector: BkConnector, 
         }
         cursor = page.pagination?.hasMore ? page.pagination.nextCursor ?? null : null;
       } while (cursor);
-      cursors[store.id] = startedAt.toISOString();
+      if (!waited) cursors[store.id] = startedAt.toISOString();
     } catch (e) {
       r.status = "partial";
       r.notes.push(e instanceof BooksError ? e.message : `${store.name}: ${e instanceof Error ? e.message : String(e)}`);

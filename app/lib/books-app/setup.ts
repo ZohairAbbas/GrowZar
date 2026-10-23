@@ -3,9 +3,10 @@
  * its action both use these, so what the form proposes is what the server
  * accepts.
  *
- * - One book per organization, in its base currency (D-65). Version 1 is
- *   single-currency: a store in another currency, or whose currency Growzar
- *   doesn't know yet, is left out with the reason (D-89).
+ * - One book per organization, in its base currency (D-65). A store in
+ *   another currency goes in too, its amounts converted at each day's rate
+ *   (v1.1 V1, D-98; D-89 lifted). Only a store whose currency Growzar doesn't
+ *   know yet is left out, with the reason.
  * - The time zone is the stores' shared one; when they differ, the person
  *   chooses (D-90).
  * - The book starts on a date the merchant picks, by default the first day of
@@ -35,13 +36,12 @@ export type StorePlan = {
   excluded: Array<SetupStore & { reason: string }>;
 };
 
-/** Which stores the book can hold (D-89). */
-export function planStores(stores: SetupStore[], currency: string): StorePlan {
+/** Which stores the book can hold: any whose currency is known (D-65, v1.1 V1). */
+export function planStores(stores: SetupStore[], _currency: string): StorePlan {
   const included: SetupStore[] = [];
   const excluded: StorePlan["excluded"] = [];
   for (const s of stores) {
     if (!s.currency) excluded.push({ ...s, reason: "Growzar doesn't know this store's currency yet." });
-    else if (s.currency.toUpperCase() !== currency.toUpperCase()) excluded.push({ ...s, reason: `Its sales are in ${s.currency}; Books keeps one currency (${currency}) for now.` });
     else included.push(s);
   }
   return { included, excluded };

@@ -45,13 +45,10 @@ describe("who may use Books (D-70, D-81, D-91)", () => {
 });
 
 describe("setup", () => {
-  it("one currency: other currencies and unknown ones are left out with the reason (D-89)", () => {
+  it("a store in another currency goes in, converted (v1.1 V1); one with no known currency is left out with the reason", () => {
     const plan = planStores(stores, "PKR");
-    expect(plan.included.map((s) => s.id)).toEqual(["a", "b"]);
-    expect(plan.excluded.map((s) => [s.id, s.reason])).toEqual([
-      ["c", "Its sales are in AED; Books keeps one currency (PKR) for now."],
-      ["d", "Growzar doesn't know this store's currency yet."],
-    ]);
+    expect(plan.included.map((s) => s.id)).toEqual(["a", "b", "c"]);
+    expect(plan.excluded.map((s) => [s.id, s.reason])).toEqual([["d", "Growzar doesn't know this store's currency yet."]]);
   });
 
   it("the stores' shared time zone, or none when they differ (D-90)", () => {
@@ -101,7 +98,7 @@ describe("setup", () => {
     expect(err({ timeZone: "Asia/Dubai" })).toBe("timeZone");
     expect(err({ codBasis: "whenever" })).toBe("codBasis");
     expect(err({ storeIds: [] })).toBe("storeIds");
-    expect(err({ storeIds: ["a", "c"] })).toBe("storeIds");
+    expect(err({ storeIds: ["a", "d"] })).toBe("storeIds"); // no known currency; a store in AED may go in (v1.1 V1)
     expect(err({ moneyAccounts: [] })).toBe("moneyAccounts");
     expect(err({ moneyAccounts: [{ subtype: "bank", name: "", opening: "10" }] })).toBe("moneyAccounts.0.name");
     expect(err({ moneyAccounts: [{ subtype: "bank", name: "X", opening: "ten" }] })).toBe("moneyAccounts.0.opening");
