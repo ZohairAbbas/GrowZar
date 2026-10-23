@@ -352,6 +352,10 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
         await recheck(ctx, lo, done, today, connector.mode, r);
       }
 
+      // Items with no cost, summed over the run: one note per store, not one per day (each day's entry names its own).
+      const noCost = { items: 0, days: 0, first: "", last: "", estimated: false };
+      let waited = false;
+
       // 2. New days.
       let from = done ? addDays(done, 1) : start;
       const to = addDays(from, MAX_DAYS_PER_RUN - 1) < yesterday ? addDays(from, MAX_DAYS_PER_RUN - 1) : yesterday;
@@ -364,6 +368,7 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
           chunkTo = addDays(firstWaiting, -1);
           r.status = "partial";
           r.notes.push(`${store.name}: ${waiting.length} order${waiting.length === 1 ? "" : "s"} from ${formatDate(firstWaiting)} still wait${waiting.length === 1 ? "s" : ""} for Financify's details; those days come in on a later run`);
+          waited = true;
           if (chunkTo < chunkFrom) break;
         }
         r.notes.push(...foreignNotes(store.name, book.currency, foreign, ctx.dayOf, chunkFrom, chunkTo));
@@ -386,7 +391,13 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
               r.notes.push(`${store.name}, ${formatDate(s.day)}: kept as a draft — ${e instanceof Error ? e.message : String(e)}`);
             }
           }
-          if (s.missingCost) r.notes.push(`${store.name}, ${formatDate(s.day)}: ${s.missingCost} item${s.missingCost === 1 ? "" : "s"} with no cost${s.estimatedCost ? " (estimated)" : " (left out)"}`);
+          if (s.missingCost) {
+            noCost.items += s.missingCost;
+            noCost.days++;
+            noCost.first ||= s.day;
+            noCost.last = s.day;
+            noCost.estimated ||= !!s.estimatedCost;
+          }
         }
         // The parcel register: what each cash-on-delivery order owes, by the same rules (B5b).
         await updateRegister(book, mapping, orders, ctx.start, chunkTo, store.id);
@@ -399,9 +410,14 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
         if (firstWaiting) break;
       }
       await refreshRegister(book, store.id);
-      if (to < yesterday && !r.notes.some((n) => n.startsWith(store.name))) {
+      if (to < yesterday && !waited) {
         r.status = "partial";
         r.notes.push(`${store.name}: brought in up to ${formatDate(progress[store.id] ?? to)}; the next run carries on`);
+      }
+      if (noCost.items) {
+        r.notes.push(
+          `${store.name}: ${noCost.items} item${noCost.items === 1 ? "" : "s"} with no cost in Shopify on ${noCost.days} day${noCost.days === 1 ? "" : "s"} (${formatDate(noCost.first)} – ${formatDate(noCost.last)}), ${noCost.estimated ? "estimated" : "left out of cost of sales; add their cost in Shopify, or set an estimate under sales"}`,
+        );
       }
     } catch (e) {
       r.status = "partial";
