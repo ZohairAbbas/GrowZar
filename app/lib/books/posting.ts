@@ -935,6 +935,51 @@ function applyForeignAmounts(type: DocType, rawData: unknown, lines: PostingLine
   }
 }
 
+/**
+ * Growzar (v1.1 V1b, D-99): a line that pays down part of a foreign balance
+ * (a USD card paid off, an AED receivable collected) leaves that account at
+ * its own carried value, the book's value per foreign unit before this
+ * entry; the difference from the entry's own figure is the realised exchange
+ * gain or loss, posted in the same entry. Lines that add to a foreign balance
+ * stay as they are: the month-end revaluation takes care of what's unrealised.
+ *
+ * `balances`: per foreign account, its book value and foreign balance up to
+ * the entry's date, before it. Amounts are ledger-signed (+ debit).
+ */
+export function realiseExchange(lines: PostingLine[], balances: ReadonlyMap<string, { book: bigint; foreign: bigint }>, gainsAccountId: string): PostingLine[] {
+  const out: PostingLine[] = [];
+  let realised = 0n;
+  for (const l of lines) {
+    const b = balances.get(l.accountId);
+    if (!l.fxAmount || !b || b.foreign === 0n || (l.fxAmount > 0n) === (b.foreign > 0n)) {
+      out.push(l);
+      continue;
+    }
+    // Only up to what was there is settled; anything beyond starts the other way, at the entry's rate.
+    const abs = (v: bigint) => (v < 0n ? -v : v);
+    const settled = abs(l.fxAmount) > abs(b.foreign) ? -b.foreign : l.fxAmount;
+    const carried = divRound(settled * b.book, b.foreign);
+    const atEntry = divRound(settled * l.amount, l.fxAmount);
+    const diff = atEntry - carried;
+    if (diff === 0n) {
+      out.push(l);
+      continue;
+    }
+    out.push({ ...l, amount: l.amount - diff });
+    realised += diff;
+  }
+  if (realised !== 0n) out.push({ accountId: gainsAccountId, amount: realised, contactId: null, description: "Exchange difference (realised)" });
+  return out;
+}
+
+/** a / b, rounded half away from zero. */
+function divRound(a: bigint, b: bigint): bigint {
+  const neg = (a < 0n) !== (b < 0n);
+  const [x, y] = [a < 0n ? -a : a, b < 0n ? -b : b];
+  const q = (2n * x + y) / (2n * y);
+  return neg ? -q : q;
+}
+
 // ── Dates (YYYY-MM-DD strings; the books have no time of day) ─────────────────
 
 export function isIsoDate(s: unknown): s is string {

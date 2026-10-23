@@ -188,7 +188,9 @@ export interface CourierRow {
 export async function courierOverview(book: BookView, today: string) {
   const [parcels, sales, courierify] = await Promise.all([loadParcels(book, today), connectorRow(book.id, "shopify_sales"), connectorRow(book.id, "courierify_payouts")]);
   const mapping = sales.settings.mapping ?? null;
-  const accounts = mapping ? [...courierAccounts(mapping)] : [];
+  const owedTo = mapping ? courierAccounts(mapping) : new Set<string>();
+  // Growzar (v1.1 V1b): with the sub-accounts a store in another currency is owed through.
+  const accounts = (await prisma.bkAccount.findMany({ where: { bookId: book.id }, select: { id: true, parentId: true } })).filter((a) => owedTo.has(a.id) || (a.parentId && owedTo.has(a.parentId))).map((a) => a.id);
   const balances = await ledgerSums(book.id);
   const ledger = accounts.reduce((s, id) => s + (balances.get(id) ?? 0n), 0n);
   const byCourier = new Map<string, CourierRow>();

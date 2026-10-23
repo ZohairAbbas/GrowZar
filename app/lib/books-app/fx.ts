@@ -67,3 +67,60 @@ export function pickRate(rates: ReadonlyArray<{ currency: string; day: string; r
   }
   return best;
 }
+
+/**
+ * A posting's sums (book currency, ledger sign) with what a store in another
+ * currency is owed kept in that currency (v1.1 V1b, D-99): each foreign
+ * "owed" account gets one line, carrying its foreign amount for the engine.
+ * Where the book amount and the foreign amount don't go the same way (a day
+ * whose only change is a rate, or a refund at an older order's rate), the
+ * foreign amount is valued at `rate` and the rest is an exchange difference,
+ * posted to `gains`.
+ *
+ * `toBook(foreignMinor, accountId)` values a foreign amount in the book's
+ * currency at the day's rate.
+ */
+export function foreignLines(
+  sums: ReadonlyMap<string, bigint>,
+  foreign: ReadonlyMap<string, bigint>,
+  toBook: (foreignMinor: bigint, accountId: string) => bigint,
+  gains: string,
+): { sums: Map<string, bigint>; fx: Record<string, { amount: string }> } {
+  const out = new Map(sums);
+  const fx: Record<string, { amount: string }> = {};
+  const add = (id: string, v: bigint) => {
+    const n = (out.get(id) ?? 0n) + v;
+    if (n === 0n) out.delete(id);
+    else out.set(id, n);
+  };
+  const ids = new Set([...foreign.keys()].filter((id) => (foreign.get(id) ?? 0n) !== 0n || (sums.get(id) ?? 0n) !== 0n));
+  for (const id of [...sums.keys()]) if (foreign.has(id)) ids.add(id);
+  for (const id of ids) {
+    const book = sums.get(id) ?? 0n;
+    const f = foreign.get(id) ?? 0n;
+    if (f !== 0n && book !== 0n && (f > 0n) === (book > 0n)) {
+      fx[id] = { amount: (f < 0n ? -f : f).toString() };
+      continue;
+    }
+    // Only a rate's worth, or the two disagree: value the foreign amount at the day's rate, the rest is exchange.
+    out.delete(id);
+    const valued = f === 0n ? 0n : toBook(f, id);
+    if (valued !== 0n) {
+      out.set(id, valued);
+      fx[id] = { amount: (f < 0n ? -f : f).toString() };
+    }
+    if (book - valued !== 0n) add(gains, book - valued);
+  }
+  return { sums: out, fx };
+}
+
+/** Every month end from a book's start to the last one already over: the month ends to revalue (D-99). */
+export function monthEndsDue(start: string, today: string): string[] {
+  const end = (iso: string) => {
+    const [y, m] = iso.split("-").map(Number) as [number, number];
+    return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  };
+  const out: string[] = [];
+  for (let d = end(start); d < today; d = end(new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10))) out.push(d);
+  return out;
+}

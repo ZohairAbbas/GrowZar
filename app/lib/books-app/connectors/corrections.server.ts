@@ -2,6 +2,7 @@ import { prisma } from "../../db.server";
 import { discardDraft, postDocument, upsertImported, type BookView } from "../../books/books.server";
 import { correctionDate, difference } from "./ad-spend";
 import type { RunResult } from "./runs.server";
+import { foreignLines } from "../fx";
 
 /**
  * A late change to something already saved (pack §1 rule 3): the saved entry
@@ -17,17 +18,41 @@ import type { RunResult } from "./runs.server";
  */
 export async function postDifference(
   book: BookView,
-  item: { source: string; base: string; day: string; today: string; current: Map<string, bigint>; memo: string; storeId: string | null; contactName?: string | null; mode: string },
+  item: {
+    source: string;
+    base: string;
+    day: string;
+    today: string;
+    current: Map<string, bigint>;
+    memo: string;
+    storeId: string | null;
+    contactName?: string | null;
+    mode: string;
+    /** v1.1 V1b: a store in another currency's "owed" accounts, kept in that currency: their foreign sums now, valued at the day's rate where needed. */
+    foreign?: { current: Map<string, bigint>; toBook: (foreignMinor: bigint, accountId: string) => bigint; gains: string };
+  },
   r: RunResult,
 ): Promise<void> {
   const docs = await prisma.bkDocument.findMany({
     where: { bookId: book.id, source: item.source, OR: [{ sourceRef: item.base }, { sourceRef: { startsWith: `${item.base}:c` } }], NOT: { sourceRef: { contains: "~" } } },
     select: { id: true, sourceRef: true, status: true },
   });
-  const lines = await prisma.bkEntryLine.findMany({ where: { entry: { documentId: { in: docs.map((d) => d.id) } } }, select: { accountId: true, amount: true, entry: { select: { documentId: true, kind: true } } } });
+  const lines = await prisma.bkEntryLine.findMany({ where: { entry: { documentId: { in: docs.map((d) => d.id) } } }, select: { accountId: true, amount: true, fxAmount: true, entry: { select: { documentId: true, kind: true } } } });
   const booked = new Map<string, bigint>();
-  for (const l of lines) booked.set(l.accountId, (booked.get(l.accountId) ?? 0n) + l.amount);
-  const delta = difference(item.current, [booked]);
+  const bookedFx = new Map<string, bigint>();
+  for (const l of lines) {
+    booked.set(l.accountId, (booked.get(l.accountId) ?? 0n) + l.amount);
+    if (l.fxAmount !== null) bookedFx.set(l.accountId, (bookedFx.get(l.accountId) ?? 0n) + l.fxAmount);
+  }
+  let delta = difference(item.current, [booked]);
+  let fx: Record<string, { amount: string }> | undefined;
+  if (item.foreign) {
+    const fxDelta = new Map<string, bigint>();
+    for (const id of new Set([...item.foreign.current.keys(), ...bookedFx.keys()])) fxDelta.set(id, (item.foreign.current.get(id) ?? 0n) - (bookedFx.get(id) ?? 0n));
+    const f = foreignLines(delta, fxDelta, item.foreign.toBook, item.foreign.gains);
+    delta = f.sums;
+    fx = f.fx;
+  }
   const corrections = docs.filter((d) => d.sourceRef !== item.base);
   const draft = corrections.find((d) => d.status === "draft");
   if (delta.size === 0) {
@@ -51,7 +76,7 @@ export async function postDifference(
     sourceRef: ref,
     type: "manual",
     date: correctionDate(item.day, book.lockedThrough, item.today),
-    data: { lines: [...delta].sort(([a], [b]) => a.localeCompare(b)).map(([accountId, v]) => (v > 0n ? { accountId, debit: v.toString() } : { accountId, credit: (-v).toString() })) },
+    data: { lines: [...delta].sort(([a], [b]) => a.localeCompare(b)).map(([accountId, v]) => (v > 0n ? { accountId, debit: v.toString() } : { accountId, credit: (-v).toString() })), ...(fx && Object.keys(fx).length ? { fx } : {}) },
     memo: item.memo,
     contactName: item.contactName ?? null,
     contactKind: "courier",

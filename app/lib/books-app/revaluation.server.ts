@@ -1,9 +1,8 @@
 import { prisma } from "../db.server";
-import { foreignBalances, getBook, ledgerSums, postDocument, upsertImported, type BookView } from "../books/books.server";
-import { nextCode } from "../books/chart";
-import { monthEnd, todayIn } from "../books/dates";
+import { foreignBalances, fxGainsAccount, getBook, ledgerSums, postDocument, upsertImported, type BookView } from "../books/books.server";
+import { todayIn } from "../books/dates";
 import { formatFxRate, parseFxRate, toBookAmount } from "../books/fx";
-import { addDays } from "../books/posting";
+import { monthEndsDue } from "./fx";
 import { bookRates } from "./fx.server";
 import { booksOn } from "./switch.server";
 
@@ -21,33 +20,11 @@ import { booksOn } from "./switch.server";
  */
 
 const SOURCE = "fx_revaluation";
-const GAINS_NAME = "Exchange gains and losses";
-
-/** The account exchange differences go to; made the first time it's needed (Financify's fxGainsAccount). */
-export async function fxGainsAccount(book: BookView): Promise<string> {
-  const found = await prisma.bkAccount.findFirst({ where: { bookId: book.id, archivedAt: null, name: { equals: GAINS_NAME, mode: "insensitive" } } });
-  if (found) return found.id;
-  const used = await prisma.bkAccount.findMany({ where: { bookId: book.id }, select: { code: true } });
-  try {
-    return (await prisma.bkAccount.create({ data: { bookId: book.id, code: nextCode(used.map((u) => u.code), 4910), name: GAINS_NAME, type: "income", subtype: "other" } })).id;
-  } catch {
-    // Made by a parallel run.
-    return (await prisma.bkAccount.findFirstOrThrow({ where: { bookId: book.id, archivedAt: null, name: { equals: GAINS_NAME, mode: "insensitive" } } })).id;
-  }
-}
-
 /** A stored rate (up to 12 decimals) as the engine takes it (8). */
 const engineRate = (rate: string) => {
   const [w, f = ""] = rate.split(".");
   return f ? `${w}.${f.slice(0, 8)}` : w!;
 };
-
-/** Every month end from the book's start to the last one already over. */
-export function monthEndsDue(start: string, today: string): string[] {
-  const out: string[] = [];
-  for (let d = monthEnd(start); d < today; d = monthEnd(addDays(d, 1))) out.push(d);
-  return out;
-}
 
 export async function revalueDue(book: BookView, now = new Date()): Promise<{ posted: number; notes: string[] }> {
   const accounts = await prisma.bkAccount.findMany({ where: { bookId: book.id, currency: { not: null }, archivedAt: null }, select: { id: true, name: true, currency: true } });

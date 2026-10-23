@@ -231,7 +231,9 @@ run("A month in the books, end to end", () => {
     expect(oct.pl.sales.total).toBe(15_000_000n + 600_000n + 10_000_000n - 1_000_000n);
     expect(oct.pl.costOfSales.total).toBe(6_750_000n + 800_000n);
     expect(oct.pl.expenses.total).toBe(2_800_000n + 15_000_000n + 250_000n);
-    expect(oct.pl.otherIncome.total).toBe(0n);
+    // Paying off half the USD card: USD 50 for PKR 14,200, carried at 280 (PKR 14,000), so a realised
+    // exchange loss of PKR 200 on the day it was paid (v1.1 V1b, D-99).
+    expect(oct.pl.otherIncome.total).toBe(-20_000n);
 
     // October on cash basis, by hand: money in = courier payout 12.8m gross (collected) + the invoice's
     // share of the 6m payment (10/11.8 of it, tax stays out); money out = the bill payment's share for
@@ -246,8 +248,9 @@ run("A month in the books, end to end", () => {
     expect(row(cash.pl!.costOfSales, "Delivery charges")).toBe(800_000n);
     expect(row(cash.pl!.costOfSales, "Cost of what you sold")).toBeUndefined();
     expect(cash.pl!.expenses.total).toBe(2_800_000n + 15_000_000n);
-    expect(cash.pl!.otherIncome.total).toBe(0n);
-    expect(cash.pl!.netProfit).toBe(12_800_000n + 5_084_746n - 16_949_153n - 800_000n - 17_800_000n);
+    // The card's realised exchange loss was paid in money, so cash basis counts it too.
+    expect(cash.pl!.otherIncome.total).toBe(-20_000n);
+    expect(cash.pl!.netProfit).toBe(12_800_000n + 5_084_746n - 16_949_153n - 800_000n - 17_800_000n - 20_000n);
     // Month by month and the CSV agree on cash basis too.
     const cashMonths = await R.buildReport(book, TODAY, "profit-and-loss", new URLSearchParams({ range: "custom", from: "2026-10-01", to: "2026-11-30", basis: "cash", compare: "months" }));
     expect(cashMonths.cols!.netProfit[0]).toBe(cash.pl!.netProfit);

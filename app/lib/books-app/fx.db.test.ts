@@ -59,7 +59,7 @@ run("Books in more than one currency", () => {
     const D = await import("../books/dates");
     const P = await import("../books/posting");
     const today = D.todayIn("Asia/Karachi");
-    for (const [k, n] of [["start", -6], ["d1", -5], ["d2", -4]] as const) day[k] = P.addDays(today, n);
+    for (const [k, n] of [["start", -6], ["d1", -5], ["d2", -4], ["d3", -2]] as const) day[k] = P.addDays(today, n);
     await prisma.organization.create({ data: { id: org, name: "FX Org", slug: org, baseCurrency: "PKR" } });
     for (const [id, currency] of [[pkrStore, "PKR"], [aedStore, "AED"]] as const) {
       await prisma.store.create({ data: { id, organizationId: org, shopDomain: `${id}.myshopify.com`, displayName: currency === "PKR" ? "Lahore Store" : "Dubai Store", currency, timezone: "Asia/Karachi" } });
@@ -115,7 +115,7 @@ run("Books in more than one currency", () => {
     await putOrder(order("A", pkrStore, day.d1!, "PKR", 1000, 180));
     await putOrder(order("B", pkrStore, day.d1!, "AED", 100, 0));
     await putOrder(order("C", pkrStore, day.d1!, "USD", 50, 0));
-    await putOrder(order("D", aedStore, day.d2!, "AED", 200, 0));
+    await putOrder(order("D", aedStore, day.d3!, "AED", 200, 0));
     const mapping = await S.checkSalesMapping(book, await S.salesDefaults(book));
     await R.saveConnector(book, "shopify_sales", { enabled: true, mode: "auto", startDate: day.start!, settings: { mapping } as never }, "owner");
     const r = await R.runConnector(book, "shopify_sales", "manual", S.runSales);
@@ -129,8 +129,47 @@ run("Books in more than one currency", () => {
     expect(await bal("Cost of what you sold")).toBe(40_000n + 302_000n + 604_000n);
     const docs = await prisma.bkDocument.findMany({ where: { bookId: book.id, source: "shopify_sales" }, select: { storeId: true } });
     expect(new Set(docs.map((d) => d.storeId))).toEqual(new Set([pkrStore, aedStore]));
+    // The AED store's "owed" is kept in AED (v1.1 V1b): a sub-account, AED 200 carried at PKR 15,100.
+    // Only the one a day used is made: no "Owed by couriers (AED)" with nothing in it.
+    const subs = await prisma.bkAccount.findMany({ where: { bookId: book.id, currency: "AED" } });
+    expect(subs).toHaveLength(1);
+    const sub = subs[0]!;
+    expect(sub).toMatchObject({ name: "Owed by payment gateways (AED)", parentId: acc["Owed by payment gateways"], subtype: "receivable" });
+    expect((await B.foreignBalances(book.id, [sub.id])).get(sub.id)).toBe(20_000n);
+    expect((await B.ledgerSums(book.id)).get(sub.id)).toBe(1_510_000n);
+    // The PKR store's owed stays in PKR, on the parent.
+    expect(await bal("Owed by payment gateways")).toBe(118_000n + 755_000n);
     // A re-run converts the same way: nothing new, nothing corrected.
     expect(await R.runConnector(book, "shopify_sales", "manual", S.runSales)).toMatchObject({ created: 0, updated: 0 });
+  });
+
+  it("a refund on an AED order after its day was saved: a correction carrying AED, at that order's rate", async () => {
+    const S = await import("./connectors/sales.server");
+    const sub = await prisma.bkAccount.findFirstOrThrow({ where: { bookId: book.id, currency: "AED" } });
+    const d = order("D", aedStore, day.d3!, "AED", 200, 0) as FeedOrder & { store?: string };
+    await prisma.rawRecord.updateMany({
+      where: { storeId: aedStore, externalId: "D" },
+      data: { payload: { ...d, refunds: [{ createdAt: `${day.d3}T18:00:00+05:00`, total: money(50, "AED"), tax: money(0, "AED"), gateways: [{ gateway: "card", amount: money(50, "AED") }], lines: [] }], localDay: day.d3 } as never },
+    });
+    const r = await R.runConnector(book, "shopify_sales", "manual", S.runSales);
+    expect(r).toMatchObject({ created: 1 });
+    const c1 = await prisma.bkDocument.findFirstOrThrow({ where: { bookId: book.id, sourceRef: `${aedStore}:${day.d3}:c1` } });
+    expect(c1.status).toBe("posted");
+    // AED 50 off what's owed, at D's own rate (75.5): PKR 3,775.
+    expect((await B.foreignBalances(book.id, [sub.id])).get(sub.id)).toBe(15_000n);
+    expect((await B.ledgerSums(book.id)).get(sub.id)).toBe(1_510_000n - 377_500n);
+  });
+
+  it("paid in AED at a better rate: what's owed clears exactly, the difference is a realised gain (v1.1 V1b)", async () => {
+    const sub = await prisma.bkAccount.findFirstOrThrow({ where: { bookId: book.id, currency: "AED" } });
+    // AED 150 paid out at 76 (PKR 11,400) against AED 150 carried at 75.5 (PKR 11,325).
+    const r = await B.saveAndPost(book, { type: "courier_payout", date: day.d3!, storeId: aedStore, data: { receivable: sub.id, receivedIn: acc["Meezan"]!, received: "1140000", deductions: [], fx: { [sub.id]: { amount: "15000" } } } }, "owner");
+    expect(r.error).toBeUndefined();
+    const sums = await B.ledgerSums(book.id);
+    const gains = (await B.listAccounts(book)).find((a) => a.name === "Exchange gains and losses")!.id;
+    expect(sums.get(sub.id) ?? 0n).toBe(0n);
+    expect((await B.foreignBalances(book.id, [sub.id])).get(sub.id) ?? 0n).toBe(0n);
+    expect(sums.get(gains)).toBe(-7_500n);
   });
 
   it("ad spend in another currency converts at its day's rate; with no rate it waits and says so", async () => {

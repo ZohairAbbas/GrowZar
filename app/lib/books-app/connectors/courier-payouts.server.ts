@@ -6,12 +6,14 @@ import { BooksError, createAccount, discardDraft, listAccounts, postDocument, up
 import { isMoneySubtype, type AccountType } from "../../books/chart";
 import { formatDate, todayIn } from "../../books/dates";
 import { isIsoDate } from "../../books/posting";
-import { courierName, minor, payoutDay, planPayout, planSums, type PayoutAccounts, type PayoutMapping, type SettlementWire } from "./courier-payouts";
+import { courierName, minor, payoutDay, planPayout, planSums, type PayoutAccounts, type PayoutMapping, type PayoutPlan, type SettlementWire } from "./courier-payouts";
 import { postDifference } from "./corrections.server";
 import { stampPayout } from "./parcels.server";
 import type { RunResult } from "./runs.server";
 import { convertMoneyTree } from "../fx";
 import { bookRates } from "../fx.server";
+import { foreignOwedAccount } from "./sales-foreign.server";
+import { currencyDecimals } from "../../books/money";
 
 /**
  * Courier payouts (B3, D-86), read straight from Courierify for each store in
@@ -36,6 +38,24 @@ type Page = {
   deletedSettlements?: Array<{ settlementId: string; settlementRef?: string | null }>;
   pagination?: { hasMore?: boolean; nextCursor?: string | null };
 };
+
+/**
+ * A foreign store's payout (v1.1 V1b): the same entry, taking what it's owed
+ * off the sub-account kept in the store's currency, with that currency's
+ * amount; a payout into an account kept in that currency carries its amount
+ * too. The engine posts the difference from the sales' rates as realised.
+ */
+async function inStoreOwed(book: BookView, data: Extract<PayoutPlan, { kind: "post" }>["data"], own: PayoutPlan, currency: string) {
+  if (own.kind !== "post") return data;
+  const owed = await foreignOwedAccount(book, data.receivable, currency);
+  const v = (x: string) => BigInt(x);
+  const gross = v(own.data.received) + own.data.deductions.reduce((t, d) => t + v(d.amount), 0n) - (own.data.others ? v(own.data.others.amount) : 0n);
+  const fx: Record<string, { amount: string }> = {};
+  if (gross !== 0n) fx[owed] = { amount: (gross < 0n ? -gross : gross).toString() };
+  const into = await prisma.bkAccount.findFirst({ where: { id: data.receivedIn, bookId: book.id }, select: { currency: true } });
+  if (into?.currency === currency && v(own.data.received) !== 0n) fx[data.receivedIn] = { amount: (v(own.data.received) < 0n ? -v(own.data.received) : v(own.data.received)).toString() };
+  return { ...data, receivable: owed, fx };
+}
 
 export async function payoutDefaults(book: BookView): Promise<PayoutMapping> {
   const accounts = (await listAccounts(book)).filter((a) => !a.archived && !a.currency);
@@ -187,7 +207,9 @@ export async function runCourierPayouts(book: BookView, connector: BkConnector, 
           const name = courierName(st.courier);
           const memo = `${st.direction === "invoice" ? `${name} invoice` : `${name} payout`} ${ref}${st.shipmentsCount ? ` · ${st.shipmentsCount} parcels` : ""}${plan.mixed ? " · shared with another business" : ""}${plan.flagged ? " · check: charges not explained" : ""}`;
           const base = st.settlementId ?? st.id;
-          const res = await upsertImported(book, { source: "courierify_payouts", sourceRef: base, type: "courier_payout", date: day, data: plan.data, memo, contactName: name, contactKind: "courier", storeId: store.id });
+          // A store in another currency (v1.1 V1b): what's owed is kept in its currency, so the payout takes it off there.
+          const data = foreign ? await inStoreOwed(book, plan.data, planPayout(wire, currencyDecimals(foreign), settings.mapping, acc), foreign) : plan.data;
+          const res = await upsertImported(book, { source: "courierify_payouts", sourceRef: base, type: "courier_payout", date: day, data, memo, contactName: name, contactKind: "courier", storeId: store.id });
           if (res.action === "created") r.created++;
           else if (res.action === "updated") r.updated++;
           else r.skipped++;
