@@ -9,6 +9,7 @@ import { requireBook } from "~/lib/books-app/access.server";
 import { COD_BASES } from "~/lib/books-app/setup";
 import { parseSalesForm, recentGateways, runSales, salesDefaults, salesStores, type SalesSettings } from "~/lib/books-app/connectors/sales.server";
 import { getConnector, listRuns, runConnector, saveConnector } from "~/lib/books-app/connectors/runs.server";
+import { rebuildPreview, rebuildSales } from "~/lib/books-app/connectors/rebuild.server";
 import { BooksError, listAccounts } from "~/lib/books/books.server";
 import { isMoneySubtype } from "~/lib/books/chart";
 import { isCodGateway, type SalesMapping } from "~/lib/books/connectors/shopify-sales";
@@ -39,8 +40,20 @@ const FIELDS: Array<{ key: keyof SalesMapping; label: string; kind: Kind; help?:
   { key: "stock", label: "Stock", kind: "stock" },
 ];
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, url }: Route.LoaderArgs) {
   const { book, canManage } = await requireBook(request, "view");
+  // "Bring sales in again" (v1.1 V3): what it would cancel, shown before anything changes.
+  const rebuildFrom = url.searchParams.get("rebuildFrom") ?? "";
+  const rebuildStore = url.searchParams.get("rebuildStore") ?? "";
+  let rebuild: { from: string; store: string; days: number; entries: number; drafts: number } | { from: string; store: string; error: string } | null = null;
+  if (rebuildFrom && canManage) {
+    try {
+      rebuild = { from: rebuildFrom, store: rebuildStore, ...(await rebuildPreview(book, { from: rebuildFrom, storeId: rebuildStore || null })) };
+    } catch (e) {
+      if (!(e instanceof BooksError)) throw e;
+      rebuild = { from: rebuildFrom, store: rebuildStore, error: e.message };
+    }
+  }
   const [connector, defaults, stores, accounts, gateways, runs] = await Promise.all([getConnector(book, "shopify_sales"), salesDefaults(book), salesStores(book), listAccounts(book), recentGateways(book), listRuns(book, "shopify_sales")]);
   const mapping = connector.exists ? (connector.settings as unknown as SalesSettings).mapping : defaults;
   const live = accounts.filter((a) => !a.archived && !a.currency);
@@ -61,6 +74,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       stock: live.filter((a) => a.type === "asset" && a.subtype === "stock").map(option),
     },
     runs: runs.map((r) => ({ id: r.id, at: r.startedAt.toISOString(), status: r.status, message: r.message })),
+    rebuild,
+    lockedThrough: book.lockedThrough,
   };
 }
 
@@ -73,6 +88,11 @@ export async function action({ request }: Route.ActionArgs) {
     if (intent === "run") {
       const r = await runConnector(book, "shopify_sales", "manual", runSales);
       return r ? { ok: r.status === "ok" ? "Sales are up to date." : "Done, with notes below." } : { error: "Sales are off, or already being brought in.", field: "" };
+    }
+    if (intent === "rebuild") {
+      if (form.get("confirm") !== "on") return { error: "Tick the box to say you've read what will be cancelled.", field: "confirm" };
+      const r = await rebuildSales(book, { from: String(form.get("from") ?? ""), storeId: String(form.get("store") ?? "") || null }, viewer.userId);
+      return { ok: `${r.cancelled} saved entr${r.cancelled === 1 ? "y" : "ies"} cancelled${r.discarded ? ` and ${r.discarded} draft${r.discarded === 1 ? "" : "s"} thrown away` : ""}. The days come back in with today's settings over the next runs, every half hour until caught up; or press "Bring in now".` };
     }
     if (intent !== "save") return { error: "Nothing to do.", field: "" };
     const previous = await getConnector(book, "shopify_sales");
@@ -212,6 +232,51 @@ export default function SalesConnector({ loaderData: d, actionData }: Route.Comp
             Save
           </button>
         </Form>
+      ) : null}
+
+      {d.canManage && c.enabled ? (
+        <Card title="Bring sales in again">
+          <p className="text-sm text-gray-600">
+            After you fix something behind past days (costs added in Shopify, an account mapped differently), bring them in again from a date: each saved day from then on is cancelled, its record kept, and brought in fresh with today's settings and data. Nothing in a closed month is touched.
+          </p>
+          <Form method="get" className="flex flex-wrap items-end gap-2">
+            <Field label="From" htmlFor="rebuildFrom">
+              <input id="rebuildFrom" name="rebuildFrom" type="date" defaultValue={d.rebuild?.from ?? ""} min={c.startDate} className={`${inputClass} w-44`} />
+            </Field>
+            {d.stores.length > 1 ? (
+              <Field label="Store" htmlFor="rebuildStore">
+                <select id="rebuildStore" name="rebuildStore" defaultValue={d.rebuild?.store ?? ""} className={`${inputClass} w-48`}>
+                  <option value="">Every store</option>
+                  {d.stores.map((st) => (
+                    <option key={st.id} value={st.id}>
+                      {st.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            ) : null}
+            <button type="submit" className={quietButtonClass}>
+              See what changes
+            </button>
+          </Form>
+          {d.rebuild && "error" in d.rebuild ? <Notice tone="warn">{d.rebuild.error}</Notice> : null}
+          {d.rebuild && !("error" in d.rebuild) ? (
+            <Form method="post" className="space-y-3">
+              <p className="text-sm text-gray-700">
+                {d.rebuild.days} saved day{d.rebuild.days === 1 ? "" : "s"} ({d.rebuild.entries} entr{d.rebuild.entries === 1 ? "y" : "ies"} with their corrections) will be cancelled and brought in again
+                {d.rebuild.drafts ? `, and ${d.rebuild.drafts} draft${d.rebuild.drafts === 1 ? "" : "s"} thrown away` : ""}.
+              </p>
+              <input type="hidden" name="from" value={d.rebuild.from} />
+              <input type="hidden" name="store" value={d.rebuild.store} />
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" name="confirm" className="h-4 w-4 rounded border-gray-300" /> I've read what will be cancelled
+              </label>
+              <button type="submit" name="intent" value="rebuild" className={buttonClass} disabled={busy || d.rebuild.entries + d.rebuild.drafts === 0}>
+                Bring in again
+              </button>
+            </Form>
+          ) : null}
+        </Card>
       ) : null}
 
       {d.runs.length ? (
