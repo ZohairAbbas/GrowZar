@@ -10,8 +10,12 @@ import { BooksError, cancelDocument, discardDraft, draftTotals, getDocument, pos
 import { activityText, actorLabel } from "~/lib/books/activity";
 import { formatDate } from "~/lib/books/dates";
 import { DOC_LABELS, type DocType } from "~/lib/books/posting";
+import { addAttachment, deleteAttachment, listAttachments } from "~/lib/books/attachments.server";
+import { createRecurringFromDocument, readScheduleForm } from "~/lib/books/recurring.server";
+import { FREQUENCIES, RECURRING_TYPES } from "~/lib/books/recurring";
+import { AttachFile, kb } from "~/components/books/Attachments";
 import { Notice } from "~/components/metrics/Metrics";
-import { Card, Money, buttonClass, inputClass, quietButtonClass } from "~/components/books/BooksUi";
+import { Card, Field, Money, buttonClass, inputClass, quietButtonClass } from "~/components/books/BooksUi";
 
 export function meta() {
   return [{ title: "Entry · Books · Growzar" }];
@@ -21,7 +25,8 @@ export function meta() {
  * One entry (B4): what it posts, line by line, and what happened to it. A
  * draft can be saved to the books or thrown away; a saved entry is never
  * changed, only cancelled with a reason, which posts a mirror entry (on its
- * own day if that's open, else the first open day).
+ * own day if that's open, else the first open day). Receipts and bills can be
+ * kept with it, and it can be made to repeat (v1.1 V6).
  */
 export async function loader({ request, params, url }: Route.LoaderArgs) {
   const { viewer, book, canManage } = await requireBook(request, "view");
@@ -30,10 +35,11 @@ export async function loader({ request, params, url }: Route.LoaderArgs) {
   const { doc, contact, events } = found;
   const accountant = isAccountantRole(viewer.role);
   const accountIds = [...new Set(doc.entries.flatMap((e) => e.lines.map((l) => l.accountId)))];
-  const [accounts, store, total] = await Promise.all([
+  const [accounts, store, total, attachments] = await Promise.all([
     prisma.bkAccount.findMany({ where: { bookId: book.id, id: { in: accountIds } }, select: { id: true, code: true, name: true } }),
     doc.storeId ? prisma.store.findUnique({ where: { id: doc.storeId }, select: { shopDomain: true, displayName: true } }) : null,
     doc.status === "draft" ? draftTotals(book, [doc]).then((m) => m.get(doc.id) ?? 0n) : Promise.resolve(doc.total),
+    listAttachments(book, doc.id),
   ]);
   const acc = new Map(accounts.map((a) => [a.id, `${a.code} · ${a.name}`]));
   const users = await prisma.user.findMany({ where: { id: { in: [...new Set(events.map((e) => e.actor).filter((x): x is string => !!x))] } }, select: { id: true, name: true } });
@@ -62,6 +68,10 @@ export async function loader({ request, params, url }: Route.LoaderArgs) {
       date: formatDate(e.date.toISOString().slice(0, 10)),
       lines: e.lines.map((l) => ({ id: l.id.toString(), account: acc.get(l.accountId) ?? "An account", debit: l.amount > 0n ? money(book, l.amount, accountant) : "", credit: l.amount < 0n ? money(book, -l.amount, accountant) : "", description: l.description })),
     })),
+    attachments: attachments.map((a) => ({ id: a.id, fileName: a.fileName, size: kb(a.size), at: formatDate(a.createdAt.toISOString().slice(0, 10)) })),
+    // Only entries of these kinds repeat (rent, salaries, subscriptions); payments and imported days don't.
+    canRepeat: (RECURRING_TYPES as readonly string[]).includes(doc.type) && doc.status !== "cancelled",
+    repeatDay: Number(doc.date.toISOString().slice(8, 10)),
     events: events.map((e) => {
       const line = activityText({ action: e.action, detail: (e.detail ?? {}) as Record<string, unknown>, documentId: null }, { account: () => null, contact: () => null, document: () => null });
       return { id: e.id.toString(), at: e.createdAt.toISOString(), who: e.actor ? userName.get(e.actor) ?? actorLabel(e.actor, viewer.userId) : "Automatic", text: line.text };
@@ -85,6 +95,19 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "cancel":
         await cancelDocument(book, params.id, String(form.get("reason") ?? ""), viewer.userId);
         throw redirect(`/books/entries/${params.id}?saved=cancelled`);
+      case "attach": {
+        const file = form.get("file");
+        if (!(file instanceof File)) return { error: "Choose a file" };
+        await addAttachment(book, params.id, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }, viewer.userId);
+        return { ok: "Added." };
+      }
+      case "detach":
+        await deleteAttachment(book, String(form.get("attachmentId") ?? ""), viewer.userId);
+        return { ok: "Removed." };
+      case "repeat": {
+        const r = await createRecurringFromDocument(book, params.id, readScheduleForm(form), viewer.userId);
+        throw redirect(`/books/recurring?made=${r.id}`);
+      }
       case "tags":
         await setDocumentTags(book, params.id, String(form.get("tags") ?? "").split(",").map((t) => t.trim()).filter(Boolean), viewer.userId);
         return { ok: "Tags saved." };
@@ -203,6 +226,78 @@ export default function EntryPage({ loaderData: d, actionData }: Route.Component
           </table>
         </Card>
       ))}
+
+      <Card title="Receipts and bills" aside={d.canManage && x.status !== "cancelled" ? <AttachFile /> : null}>
+        {d.attachments.length ? (
+          <ul className="divide-y divide-gray-100 text-sm">
+            {d.attachments.map((a) => (
+              <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <a href={`/books/attachments/${a.id}`} target="_blank" rel="noreferrer" className="font-semibold text-accent-600 hover:text-accent-700">
+                  {a.fileName}
+                </a>
+                <span className="flex items-center gap-3 text-xs text-gray-500">
+                  {a.size} · {a.at}
+                  {d.canManage ? (
+                    <Form method="post">
+                      <input type="hidden" name="attachmentId" value={a.id} />
+                      <button type="submit" name="intent" value="detach" className="font-semibold text-coral-700" disabled={busy}>
+                        Remove
+                      </button>
+                    </Form>
+                  ) : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-gray-600">None. A photo of the receipt or the supplier's bill can be kept here; photos are made smaller first.</p>
+        )}
+      </Card>
+
+      {d.canManage && d.canRepeat ? (
+        <Card title="Repeat this">
+          <details>
+            <summary className={`${quietButtonClass} cursor-pointer list-none`}>Make it repeat</summary>
+            <Form method="post" className="mt-3 grid gap-3 md:grid-cols-3">
+              <Field label="Name" htmlFor="rname">
+                <input id="rname" name="name" required defaultValue={x.memo ?? x.label} maxLength={120} className={inputClass} />
+              </Field>
+              <Field label="How often" htmlFor="frequency">
+                <select id="frequency" name="frequency" defaultValue="monthly" className={inputClass}>
+                  {FREQUENCIES.map((f) => (
+                    <option key={f.value} value={f.value}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Every" htmlFor="interval" help="1 for every month (or week, or year); 3 for every 3 months.">
+                <input id="interval" name="interval" type="number" min={1} max={12} defaultValue={1} className={inputClass} />
+              </Field>
+              <Field label="On day of the month" htmlFor="dayOfMonth" help="Monthly and yearly; 29–31 fall back to the month's last day.">
+                <input id="dayOfMonth" name="dayOfMonth" type="number" min={1} max={31} defaultValue={d.repeatDay} className={inputClass} />
+              </Field>
+              <Field label="Starts" htmlFor="startDate">
+                <input id="startDate" name="startDate" type="date" required className={inputClass} />
+              </Field>
+              <Field label="Ends (optional)" htmlFor="endDate">
+                <input id="endDate" name="endDate" type="date" className={inputClass} />
+              </Field>
+              <Field label="Each time" htmlFor="mode">
+                <select id="mode" name="mode" defaultValue="draft" className={inputClass}>
+                  <option value="draft">Make a draft to approve</option>
+                  <option value="auto">Save it to the books</option>
+                </select>
+              </Field>
+              <div className="md:col-span-3">
+                <button type="submit" name="intent" value="repeat" className={buttonClass} disabled={busy}>
+                  Make it repeat
+                </button>
+              </div>
+            </Form>
+          </details>
+        </Card>
+      ) : null}
 
       <Card title="Tags">
         {d.canManage ? (

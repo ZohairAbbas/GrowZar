@@ -27,6 +27,8 @@ import { runDueDigests } from "~/lib/digest/digest.server";
 import { redactOldMessages } from "~/lib/ask/loop.server";
 import { runDueConnectors } from "~/lib/books-app/connectors/schedule.server";
 import { revalueAllBooks } from "~/lib/books-app/revaluation.server";
+import { runAllRecurring } from "~/lib/books/recurring.server";
+import { booksOn } from "~/lib/books-app/switch.server";
 import { keepDueForecasts } from "~/lib/forecast/cash-history.server";
 import { planEnabled } from "~/lib/forecast/plan-access.server";
 import { lastLags } from "~/lib/forecast/plan.server";
@@ -380,6 +382,9 @@ async function books() {
   try {
     const runs = await runDueConnectors();
     if (runs.length) console.log(`[books] ${runs.map((r) => `${r.key}=${r.status}`).join(" ")}`);
+    // Recurring entries due today (v1.1 V6), where Books is on.
+    const made = await runAllRecurring(new Date(), booksOn);
+    if (made) console.log(`[books] made ${made} recurring entr${made === 1 ? "y" : "ies"}`);
     // Foreign-currency accounts revalued at each month end (v1.1 V1, D-99).
     const revalued = await revalueAllBooks();
     if (revalued) console.log(`[books] revalued ${revalued} account-month(s)`);

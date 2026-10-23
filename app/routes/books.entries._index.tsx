@@ -48,6 +48,11 @@ export default function Entries({ loaderData: d }: Route.ComponentProps) {
   const qs = (page: number) => `?${new URLSearchParams({ ...Object.fromEntries(Object.entries(f).filter(([, v]) => v)), page: String(page) }).toString()}`;
   return (
     <div className="space-y-5">
+      <div className="flex justify-end">
+        <Link to="/books/recurring" className="text-sm font-semibold text-accent-600">
+          Recurring entries
+        </Link>
+      </div>
       <Card>
         <Form method="get" className="grid gap-3 md:grid-cols-[1fr_150px_150px_150px_1fr_auto]">
           <select name="type" defaultValue={f.type} aria-label="Kind" className={inputClass}>

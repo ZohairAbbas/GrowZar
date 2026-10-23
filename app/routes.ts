@@ -123,6 +123,8 @@ export default [
       route("taxes", "routes/books.taxes.tsx"),
       // The stock check (v1.1 V4).
       route("stock", "routes/books.stock.tsx"),
+      // Recurring entries (v1.1 V6).
+      route("recurring", "routes/books.recurring.tsx"),
       route("reports/:report", "routes/books.reports.$report.tsx"),
       // Closing the books (B6, D-70).
       route("close", "routes/books.close.tsx"),
@@ -134,6 +136,8 @@ export default [
   route("books/export/pack", "routes/books.export.pack.ts"),
   route("books/export/:report", "routes/books.export.$report.ts"),
   route("books/statements", "routes/books.statements.tsx"),
+  // A receipt or bill kept with an entry (v1.1 V6).
+  route("books/attachments/:id", "routes/books.attachments.$id.ts"),
 
   layout("routes/settings.tsx", [
     ...prefix("settings", [
