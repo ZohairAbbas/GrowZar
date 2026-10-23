@@ -279,7 +279,8 @@ export const DOC_SCHEMAS = {
     stock: id,
     counter: id,
     amount: signedAmountStr,
-    method: z.enum(["shopify", "count", "damaged"]).optional().nullable(),
+    // Growzar (v1.1 V4): "inventorify", a check against Inventorify's stock.
+    method: z.enum(["shopify", "count", "damaged", "inventorify"]).optional().nullable(),
     /** For a damaged return: the order it came back from. */
     orderName: z.string().max(100).optional().nullable(),
     countedValue: signedAmountStr.optional().nullable(),

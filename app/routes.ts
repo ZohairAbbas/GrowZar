@@ -121,6 +121,8 @@ export default [
       route("reports/spending-by-supplier", "routes/books.reports.spending-by-supplier.tsx"),
       route("reports/tax-summary", "routes/books.reports.tax-summary.tsx"),
       route("taxes", "routes/books.taxes.tsx"),
+      // The stock check (v1.1 V4).
+      route("stock", "routes/books.stock.tsx"),
       route("reports/:report", "routes/books.reports.$report.tsx"),
       // Closing the books (B6, D-70).
       route("close", "routes/books.close.tsx"),
