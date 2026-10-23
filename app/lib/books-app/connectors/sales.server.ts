@@ -12,17 +12,20 @@ import {
   routeManualPayment,
   sumLines,
   summariseDays,
+  type DaySummary,
   type ParcelEvent,
   type ParcelLines,
   type SalesMapping,
   type ShopOrder,
 } from "../../books/connectors/shopify-sales";
-import { toSums } from "./ad-spend";
+import { toPosting, toSums } from "./ad-spend";
+import { parseFxRate, toBookAmount } from "../../books/fx";
 import { updateRegister } from "../../books/connectors/parcels.server";
 import { linkLoadsheets } from "../../books/courier-sheets.server";
 import { refreshRegister } from "./parcels.server";
 import { convertMoneyTree } from "../fx";
 import { bookRates } from "../fx.server";
+import { ensureOwed, foreignDay, foreignStore, shadowEvents, type ForeignStore } from "./sales-foreign.server";
 import { postDifference } from "./corrections.server";
 import { factsAvailable, manualEvidence, releaseDays, statusFromOutcome, toShopOrder, type FeedOrder } from "./sales";
 import type { RunResult } from "./runs.server";
@@ -193,6 +196,8 @@ type StoreCtx = {
   costs: Map<string, string>;
   parcels: Awaited<ReturnType<typeof parcelFacts>>;
   grain: Array<{ orderId: string; outcome: string; day: string | null }>;
+  /** A store in another currency than the book's: what it's owed is kept in its own (v1.1 V1b). */
+  foreign: ForeignStore | null;
 };
 
 /**
@@ -204,7 +209,7 @@ type StoreCtx = {
  * in the run's notes (D-95). Every caller converts the same way, so a
  * re-check never mistakes a converted order for a missing one.
  */
-async function prepare(ctx: StoreCtx, rows: FeedOrder[]): Promise<{ orders: ShopOrder[]; waiting: FeedOrder[]; foreign: FeedOrder[]; converted: Converted[] }> {
+async function prepare(ctx: StoreCtx, rows: FeedOrder[]): Promise<{ orders: ShopOrder[]; waiting: FeedOrder[]; foreign: FeedOrder[]; converted: Converted[]; shadow: ShopOrder[] }> {
   const carried = new Set(ctx.parcels.map((p) => p.orderId));
   const book = ctx.book.currency;
   const orderCurrency = (r: FeedOrder) => r.currency?.code ?? book;
@@ -213,6 +218,8 @@ async function prepare(ctx: StoreCtx, rows: FeedOrder[]): Promise<{ orders: Shop
   const waiting: FeedOrder[] = [];
   const foreign: FeedOrder[] = [];
   const converted: Converted[] = [];
+  // v1.1 V1b: for a store in another currency, the same orders in the store's own currency.
+  const shadow: ShopOrder[] = [];
   for (const raw of rows) {
     if (!factsAvailable(raw)) {
       waiting.push(raw);
@@ -235,10 +242,57 @@ async function prepare(ctx: StoreCtx, rows: FeedOrder[]): Promise<{ orders: Shop
       foreign.push(raw);
       continue;
     }
+    if (ctx.foreign) {
+      const own = inStoreCurrency(raw, cur, book, ctx.foreign, rateOf, ctx.dayOf(raw.createdAt));
+      if (!own) {
+        // No rate for the store's currency that day: the order can't be kept in both, so it waits like one with no rate.
+        foreign.push(raw);
+        continue;
+      }
+      let so = toShopOrder(own, ctx.costs);
+      if (ctx.mapping.manualPayments !== "as_mapped") so = routeManualPayment(so, manualEvidence(carried.has(so.id)));
+      shadow.push(so);
+    }
     if (ctx.mapping.manualPayments !== "as_mapped") o = routeManualPayment(o, manualEvidence(carried.has(o.id)));
     orders.push(o);
   }
-  return { orders, waiting, foreign, converted };
+  return { orders, waiting, foreign, converted, shadow };
+}
+
+/** The given days summed in a foreign store's own currency, from the same orders and parcel events; null when a rate is missing. */
+async function ownSummaries(ctx: StoreCtx, f: ForeignStore, dayList: string[], shadow: ShopOrder[], events: ParcelEvent[]) {
+  const dayOfOrder = new Map(shadow.map((o) => [o.id, ctx.dayOf(o.createdAt)]));
+  const missing = [...new Set(events.map((e) => e.orderId).filter((id) => !dayOfOrder.has(id)))];
+  if (missing.length) for (const o of await loadOrdersById(ctx.storeId, missing)) dayOfOrder.set(o.orderId, ctx.dayOf(o.createdAt));
+  const ownEvents = shadowEvents(events, ctx.book.decimals, f, (id) => dayOfOrder.get(id) ?? null);
+  if (!ownEvents) return null;
+  const placed = shadow.filter((o) => dayList.includes(ctx.dayOf(o.createdAt)));
+  return summariseDays({ days: dayList, timeZone: ctx.book.settings.timeZone, startDate: ctx.start, decimals: f.decimals, mapping: ctx.mapping, placed, changed: shadow, parcels: ownEvents });
+}
+
+/** A foreign store's day as a sales summary's data: "owed" on its own-currency sub-accounts, with their amounts (v1.1 V1b). */
+async function dayData(book: BookView, f: ForeignStore, s: DaySummary, own: DaySummary | null) {
+  await ensureOwed(book, f, [...s.debits, ...s.credits].map((l) => l.accountId));
+  const fd = foreignDay(book, f, s.day, s, own);
+  return { ...toPosting(fd.sums), ...(Object.keys(fd.fx).length ? { fx: fd.fx } : {}) };
+}
+
+function toBookValue(book: BookView, f: ForeignStore, foreignMinor: bigint, rate: string): bigint {
+  const [w, fr = ""] = rate.split(".");
+  const scaled = parseFxRate(fr ? `${w}.${fr.slice(0, 8)}` : w!);
+  return scaled === null ? 0n : toBookAmount(foreignMinor, f.currency, book.decimals, scaled);
+}
+
+/** An order in the store's own currency (v1.1 V1b): as it is, or converted through the book's rates for both currencies. */
+function inStoreCurrency(raw: FeedOrder, cur: string, bookCurrency: string, f: ForeignStore, rateOf: (currency: string, day: string) => { rate: string } | null, day: string): FeedOrder | null {
+  if (cur === f.currency) return raw;
+  const store = f.rateOf(day);
+  const bookPerOrder = cur === bookCurrency ? 1 : Number(rateOf(cur, day)?.rate ?? NaN);
+  // Units of the store's currency per one of the order's.
+  const cross = store ? bookPerOrder / Number(store.rate) : NaN;
+  if (!Number.isFinite(cross) || cross <= 0) return null;
+  const c = convertMoneyTree(raw, cur, f.currency, cross.toFixed(12).replace(/0+$/, "").replace(/\.$/, ""));
+  return c ? { ...c, currency: { ...(c.currency ?? {}), code: f.currency } } : null;
 }
 
 type Converted = { currency: string; day: string; source: string; placed: string };
@@ -382,7 +436,7 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
         prisma.orderGrain.findMany({ where: { storeId: store.id, localDay: { gte: addDays(start, -1) } }, select: { orderId: true, outcome: true, outcomeAt: true } }),
       ]);
       // Inventorify's costs are in the store's currency: of no use to a book in another (orders carry Financify's cost, converted).
-      const ctx: StoreCtx = { book, storeId: store.id, storeName: store.name, start, mapping, dayOf, costs: store.currency && store.currency !== book.currency ? new Map() : costs, parcels, grain: grainRows.map((g) => ({ orderId: g.orderId, outcome: g.outcome, day: g.outcomeAt ? dayOf(g.outcomeAt.toISOString()) : null })) };
+      const ctx: StoreCtx = { book, storeId: store.id, storeName: store.name, start, mapping, dayOf, costs: store.currency && store.currency !== book.currency ? new Map() : costs, parcels, grain: grainRows.map((g) => ({ orderId: g.orderId, outcome: g.outcome, day: g.outcomeAt ? dayOf(g.outcomeAt.toISOString()) : null })), foreign: await foreignStore(book, store.currency, mapping, start, today) };
       const done = progress[store.id] ?? null;
 
       // 1. The last days already brought in, re-checked for data that arrived late.
@@ -400,7 +454,7 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
       const to = addDays(from, MAX_DAYS_PER_RUN - 1) < yesterday ? addDays(from, MAX_DAYS_PER_RUN - 1) : yesterday;
       for (let chunkFrom = from; chunkFrom <= to; chunkFrom = addDays(chunkFrom, DAYS_PER_CHUNK)) {
         let chunkTo = addDays(chunkFrom, DAYS_PER_CHUNK - 1) < to ? addDays(chunkFrom, DAYS_PER_CHUNK - 1) : to;
-        const { orders, waiting, foreign, converted } = await prepare(ctx, await loadOrders(store.id, chunkFrom, chunkTo));
+        const { orders, waiting, foreign, converted, shadow } = await prepare(ctx, await loadOrders(store.id, chunkFrom, chunkTo));
         // A day isn't summed while one of its orders still waits for Financify's details.
         const firstWaiting = waiting.map((w) => dayOf(w.createdAt)).filter((d) => d >= chunkFrom && d <= chunkTo).sort()[0];
         if (firstWaiting) {
@@ -416,8 +470,16 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
         const changed = orders;
         const parcelEvents = mapping.parcelReturns === false ? [] : await parcelEventsFor(ctx, chunkFrom, chunkTo, orders);
         const summaries = summariseDays({ days: days(chunkFrom, chunkTo), timeZone: tz, startDate: start, decimals: book.decimals, mapping, placed, changed, parcels: parcelEvents });
+        // A store in another currency: the same days summed in its own currency, for what it's owed (v1.1 V1b).
+        const own = ctx.foreign ? await ownSummaries(ctx, ctx.foreign, days(chunkFrom, chunkTo), shadow, parcelEvents) : null;
+        if (ctx.foreign && !own) {
+          r.status = "partial";
+          r.notes.push(`${store.name}: no ${ctx.foreign.currency} rate for some days from ${formatDate(chunkFrom)}; those days come in on a later run`);
+          break;
+        }
         for (const s of summaries) {
-          const res = await upsertImported(book, { source: SOURCE, sourceRef: `${store.id}:${s.day}`, type: "sales_summary", date: s.day, data: { debits: s.debits, credits: s.credits }, memo: `${store.name} — ${s.memo.replace(/^Shopify: /, "")}`, storeId: store.id });
+          const data = ctx.foreign ? await dayData(book, ctx.foreign, s, own!.find((x) => x.day === s.day) ?? null) : { debits: s.debits, credits: s.credits };
+          const res = await upsertImported(book, { source: SOURCE, sourceRef: `${store.id}:${s.day}`, type: "sales_summary", date: s.day, data, memo: `${store.name} — ${s.memo.replace(/^Shopify: /, "")}`, storeId: store.id });
           if (res.action === "created") r.created++;
           else if (res.action === "updated") r.updated++;
           else r.skipped++;
@@ -476,7 +538,7 @@ export async function runSales(book: BookView, connector: BkConnector): Promise<
  */
 async function recheck(ctx: StoreCtx, from: string, to: string, today: string, mode: string, r: RunResult) {
   const { book } = ctx;
-  const { orders, waiting } = await prepare(ctx, await loadOrders(ctx.storeId, from, to));
+  const { orders, waiting, shadow } = await prepare(ctx, await loadOrders(ctx.storeId, from, to));
   const waitingDays = new Set(waiting.map((w) => ctx.dayOf(w.createdAt)));
   for (const day of days(from, to)) {
     if (waitingDays.has(day)) continue;
@@ -484,18 +546,31 @@ async function recheck(ctx: StoreCtx, from: string, to: string, today: string, m
     const parcels: ParcelEvent[] = saved.map((e) => ({ orderId: e.orderId, orderName: e.orderName, day, kind: e.kind as ParcelEvent["kind"], lines: e.lines as ParcelLines }));
     const placed = orders.filter((o) => ctx.dayOf(o.createdAt) === day);
     const [s] = summariseDays({ days: [day], timeZone: book.settings.timeZone, startDate: ctx.start, decimals: book.decimals, mapping: ctx.mapping, placed, changed: orders, parcels });
+    const own = ctx.foreign ? await ownSummaries(ctx, ctx.foreign, [day], shadow, parcels) : null;
+    if (ctx.foreign && !own) continue; // no rate yet: looked at again next run
+    const ownDay = own?.[0] ?? null;
     const base = `${ctx.storeId}:${day}`;
     const doc = await prisma.bkDocument.findFirst({ where: { bookId: book.id, source: SOURCE, sourceRef: base } });
     if (!doc || doc.status === "draft") {
       if (!s) continue;
-      const res = await upsertImported(book, { source: SOURCE, sourceRef: base, type: "sales_summary", date: day, data: { debits: s.debits, credits: s.credits }, memo: `${ctx.storeName} — ${s.memo.replace(/^Shopify: /, "")}`, storeId: ctx.storeId });
+      const data = ctx.foreign ? await dayData(book, ctx.foreign, s, ownDay) : { debits: s.debits, credits: s.credits };
+      const res = await upsertImported(book, { source: SOURCE, sourceRef: base, type: "sales_summary", date: day, data, memo: `${ctx.storeName} — ${s.memo.replace(/^Shopify: /, "")}`, storeId: ctx.storeId });
       if (res.action === "created") r.created++;
       else if (res.action === "updated") r.updated++;
       if (mode === "auto" && res.doc.status === "draft") await postDocument(book, res.doc.id, null).catch(() => undefined);
       continue;
     }
     if (doc.status !== "posted") continue;
-    await postDifference(book, { source: SOURCE, base, day, today, current: toSums(s ? { debits: s.debits, credits: s.credits } : null), memo: `${ctx.storeName}: sales for ${formatDate(day)} changed after they were saved (${doc.number})`, storeId: ctx.storeId, mode }, r);
+    const memo = `${ctx.storeName}: sales for ${formatDate(day)} changed after they were saved (${doc.number})`;
+    if (ctx.foreign) {
+      const f = ctx.foreign;
+      if (s) await ensureOwed(book, f, [...s.debits, ...s.credits].map((l) => l.accountId));
+      const fd = foreignDay(book, f, day, s ?? null, ownDay);
+      const rate = f.rateOf(day);
+      await postDifference(book, { source: SOURCE, base, day, today, current: fd.sums, memo, storeId: ctx.storeId, mode, foreign: { current: fd.fxSigned, toBook: (v) => (rate ? toBookValue(book, f, v, rate.rate) : 0n), gains: f.gains } }, r);
+      continue;
+    }
+    await postDifference(book, { source: SOURCE, base, day, today, current: toSums(s ? { debits: s.debits, credits: s.credits } : null), memo, storeId: ctx.storeId, mode }, r);
   }
 }
 

@@ -32,8 +32,10 @@ import {
   isIsoDate,
   isOpenDate,
   mirrorLines,
+  realiseExchange,
   type AccountInfo,
   type DocType,
+  type Posting,
   type PostingContext,
   type PostingLine,
 } from "./posting";
@@ -965,6 +967,37 @@ export async function allocationsFor(book: BookView, by: { billId?: string; paym
   });
 }
 
+const GAINS_NAME = "Exchange gains and losses";
+
+/** Growzar (v1.1, ported from Financify's fx.server.ts): the account exchange differences go to, made the first time it's needed. */
+export async function fxGainsAccount(book: Pick<BookView, "id">, client: Tx | typeof prisma = prisma): Promise<string> {
+  const find = () => client.bkAccount.findFirst({ where: { bookId: book.id, archivedAt: null, name: { equals: GAINS_NAME, mode: "insensitive" } }, select: { id: true } });
+  const found = await find();
+  if (found) return found.id;
+  const used = await client.bkAccount.findMany({ where: { bookId: book.id }, select: { code: true } });
+  return (await client.bkAccount.create({ data: { bookId: book.id, code: nextCode(used.map((u) => u.code), 4910), name: GAINS_NAME, type: "income", subtype: "other" } })).id;
+}
+
+/**
+ * Growzar (v1.1 V1b, D-99): the realised exchange difference on lines that
+ * pay down a foreign balance, worked out from the account's value and foreign
+ * balance up to the entry's date (realiseExchange in posting.ts).
+ */
+async function withRealisedExchange(tx: Tx, book: BookView, type: DocType, date: string, posting: Posting, ctx: PostingContext): Promise<Posting> {
+  if (type === "fx_revaluation" || type === "opening") return posting;
+  const foreign = [...new Set(posting.lines.filter((l) => l.fxAmount && ctx.accounts.get(l.accountId)?.currency).map((l) => l.accountId))];
+  if (!foreign.length) return posting;
+  const rows = await tx.$queryRaw<Array<{ accountId: string; book: bigint; foreign: bigint }>>`
+    SELECT "accountId", COALESCE(SUM(amount), 0)::bigint AS book, COALESCE(SUM("fxAmount"), 0)::bigint AS foreign
+      FROM bk_entry_lines WHERE "bookId" = ${book.id} AND "accountId" IN (${Prisma.join(foreign)}) AND date <= ${toDbDate(date)}
+     GROUP BY "accountId"`;
+  const balances = new Map(rows.map((r) => [r.accountId, { book: BigInt(r.book), foreign: BigInt(r.foreign) }]));
+  if (![...balances.values()].some((b) => b.foreign !== 0n)) return posting;
+  const lines = realiseExchange(posting.lines, balances, await fxGainsAccount(book, tx));
+  if (lines.length === posting.lines.length && lines.every((l, i) => l.amount === posting.lines[i]!.amount)) return posting;
+  return { ...posting, lines, total: lines.reduce((t, l) => t + (l.amount > 0n ? l.amount : 0n), 0n) };
+}
+
 async function postInTx(tx: Tx, book: BookView, id: string, actor: string | null, expectedUpdatedAt?: string): Promise<BkDocument> {
   const doc = await lockDocument(tx, book.id, id);
   if (doc.status !== "draft") throw new BooksError("This entry is already posted");
@@ -980,7 +1013,7 @@ async function postInTx(tx: Tx, book: BookView, id: string, actor: string | null
   if (doc.type === "bill" || doc.type === "invoice") await checkBill(tx, book, doc);
   const allocations = SETTLES[doc.type] ? await checkAllocations(tx, book, doc) : [];
   const ctx = await postingContext(tx, book.id);
-  const posting = buildPosting(doc.type as DocType, doc.data, ctx, doc.contactId);
+  const posting = await withRealisedExchange(tx, book, doc.type as DocType, date, buildPosting(doc.type as DocType, doc.data, ctx, doc.contactId), ctx);
   const lineContacts = [...new Set(posting.lines.map((l) => l.contactId).filter((c): c is string => !!c))];
   if (lineContacts.length) {
     const found = await tx.bkContact.count({ where: { bookId: book.id, id: { in: lineContacts } } });
