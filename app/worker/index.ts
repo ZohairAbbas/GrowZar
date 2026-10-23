@@ -18,13 +18,15 @@ import { rebuildOrderGrain, updateOrderGrain } from "~/lib/metrics/order-grain.s
 import type { CityAlias } from "~/lib/metrics/city-aliases";
 import { evaluateStore } from "~/lib/insights/inbox.server";
 import { measureStore } from "~/lib/outcomes/engine.server";
-import { refreshFxRates } from "~/lib/metrics/fx.server";
+import { fxBases, refreshFxRates } from "~/lib/metrics/fx.server";
+import { fillFxHistory } from "~/lib/metrics/fx-history.server";
 import { refreshAdSpend } from "~/lib/metrics/ad-spend.server";
 import { refreshProfitSettings } from "~/lib/metrics/summaries.server";
 import { refreshBuyerNetwork, refreshOrderNetwork } from "~/lib/metrics/buyer-network.server";
 import { runDueDigests } from "~/lib/digest/digest.server";
 import { redactOldMessages } from "~/lib/ask/loop.server";
 import { runDueConnectors } from "~/lib/books-app/connectors/schedule.server";
+import { revalueAllBooks } from "~/lib/books-app/revaluation.server";
 import { keepDueForecasts } from "~/lib/forecast/cash-history.server";
 import { planEnabled } from "~/lib/forecast/plan-access.server";
 import { lastLags } from "~/lib/forecast/plan.server";
@@ -216,6 +218,11 @@ export const syncWorker = new Worker<SyncJob>(
         if (fx.stored || fx.problems.length) {
           console.log(`[fx] stored=${fx.stored} bases=${fx.bases.join(",")}` + (fx.problems.length ? ` problems: ${fx.problems.join("; ")}` : ""));
         }
+        // Past days no rate covers, from 2026-07-01 (D-98): a few dozen a tick until filled.
+        const past = await fillFxHistory(await fxBases());
+        if (past.stored || past.problems.length) {
+          console.log(`[fx] past days filled=${past.days} stored=${past.stored}` + (past.problems.length ? ` problems: ${past.problems.slice(0, 5).join("; ")}` : ""));
+        }
       } catch (error) {
         console.error("[fx] refresh FAILED:", error instanceof Error ? error.message : error);
       }
@@ -373,6 +380,9 @@ async function books() {
   try {
     const runs = await runDueConnectors();
     if (runs.length) console.log(`[books] ${runs.map((r) => `${r.key}=${r.status}`).join(" ")}`);
+    // Foreign-currency accounts revalued at each month end (v1.1 V1, D-99).
+    const revalued = await revalueAllBooks();
+    if (revalued) console.log(`[books] revalued ${revalued} account-month(s)`);
   } finally {
     booksRunning = false;
   }

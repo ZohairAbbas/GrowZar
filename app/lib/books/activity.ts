@@ -115,6 +115,8 @@ export function activityText(e: ActivityEvent, names: ActivityNames): ActivityLi
       return { text: `Archived the contact ${con}`, link: conLink };
     case "contact.restored":
       return { text: `Brought back the contact ${con}`, link: conLink };
+    case "book.store_added":
+      return { text: `Added ${s(d.name)} to the books${d.currency ? ` (in ${s(d.currency)})` : ""}`, link: "/books/sources" };
     case "book.created":
       return { text: "Set up the books", link: null };
     case "book.fiscal_year_changed":
