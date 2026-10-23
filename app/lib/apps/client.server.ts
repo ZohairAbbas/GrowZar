@@ -143,25 +143,33 @@ async function attempt<T>(
     pathWithQuery: string;
     shopDomain: string;
     body?: string;
+    headers?: Record<string, string>;
+    timeoutMs?: number;
   },
 ): Promise<AppRequestResult<T>> {
   const { app } = credentials;
 
   try {
+    const headers = outboundHeaders({
+      platformKey: credentials.platformKey,
+      signingSecret: credentials.signingSecret,
+      shopDomain: options.shopDomain,
+      method: options.method,
+      pathWithQuery: options.pathWithQuery,
+      body: options.body,
+    });
+    for (const [name, value] of Object.entries(options.headers ?? {})) {
+      headers.set(name, value);
+    }
     const response = await fetch(
       `${credentials.baseUrl}${options.pathWithQuery}`,
       {
         method: options.method,
-        headers: outboundHeaders({
-          platformKey: credentials.platformKey,
-          signingSecret: credentials.signingSecret,
-          shopDomain: options.shopDomain,
-          method: options.method,
-          pathWithQuery: options.pathWithQuery,
-          body: options.body,
-        }),
+        headers,
         body: options.body,
-        signal: AbortSignal.timeout(timeoutFor(options.pathWithQuery)),
+        signal: AbortSignal.timeout(
+          options.timeoutMs ?? timeoutFor(options.pathWithQuery),
+        ),
       },
     );
 
@@ -266,6 +274,18 @@ export async function appRequest<T>(
     shopDomain: string;
     body?: unknown;
     credentials?: AppCredentials | null;
+    /**
+     * Extra headers, not covered by the signature (like `X-Growzar-Shop`):
+     * an `Idempotency-Key`, or who is acting.
+     */
+    headers?: Record<string, string>;
+    /** For a write that takes longer than a read. */
+    timeoutMs?: number;
+    /**
+     * At most this many attempts. A write whose reply was lost may still be
+     * running at the app, so it is not retried blindly.
+     */
+    maxAttempts?: number;
     /** Test seam: lets a test run the retry logic without real waiting. */
     wait?: (ms: number) => Promise<void>;
   },
@@ -294,13 +314,16 @@ export async function appRequest<T>(
     options.body === undefined ? undefined : JSON.stringify(options.body);
 
   let last: AppRequestError | null = null;
+  const attempts = Math.min(options.maxAttempts ?? MAX_ATTEMPTS, MAX_ATTEMPTS);
 
-  for (let attemptNumber = 1; attemptNumber <= MAX_ATTEMPTS; attemptNumber += 1) {
+  for (let attemptNumber = 1; attemptNumber <= attempts; attemptNumber += 1) {
     const result = await attempt<T>(credentials, {
       method: options.method ?? "GET",
       pathWithQuery: options.pathWithQuery,
       shopDomain: options.shopDomain,
       body,
+      headers: options.headers,
+      timeoutMs: options.timeoutMs,
     });
 
     if (result.ok) {
@@ -317,7 +340,7 @@ export async function appRequest<T>(
       recordSuccess(app);
     }
 
-    if (!isRetryable(result) || attemptNumber === MAX_ATTEMPTS) break;
+    if (!isRetryable(result) || attemptNumber === attempts) break;
 
     // An app that says how long to wait is obeyed, and never shortened. If it
     // asks for longer than we are willing to hold the cycle open, we stop and

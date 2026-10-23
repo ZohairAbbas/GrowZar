@@ -8,6 +8,7 @@ import { requireBook } from "~/lib/books-app/access.server";
 import { isAccountantRole, money } from "~/lib/books-app/format";
 import { checkStock, inventorifyStock, lastChecks, prepareStockAdjustment, proposedChange, stockCounters } from "~/lib/books-app/stock.server";
 import { bookStores } from "~/lib/books-app/reports.server";
+import { confirmCosts, costsStoreIds, dropPreview, heldPreview, itemsWithNoCost, MAX_ITEMS, previewCosts, type CostResult } from "~/lib/books-app/stock-costs.server";
 import { BooksError } from "~/lib/books/books.server";
 import { todayIn } from "~/lib/books/dates";
 import { decimalToMinor } from "~/lib/books/connectors/shopify-sales";
@@ -22,7 +23,8 @@ export function meta() {
  * Stock (Books v1.1 V4, D-97): what the books say each store's stock is
  * worth, checked against Inventorify (or a count). A difference becomes a
  * stock adjustment, always a draft: nothing changes in the books until it's
- * saved from To approve.
+ * saved from To approve. Items with no cost can get one in Shopify through
+ * Inventorify (V7), previewed and confirmed.
  */
 export async function loader({ request }: Route.LoaderArgs) {
   const { viewer, book, canManage } = await requireBook(request, "view");
@@ -34,11 +36,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     prisma.bkDocument.findFirst({ where: { bookId: book.id, type: "stock_adjustment", status: "draft" }, select: { id: true } }),
   ]);
   const withInventorify = new Set(connections.map((c) => c.storeId));
+  const withCosts = canManage ? await costsStoreIds(book) : new Set<string>();
   const out = [];
   for (const s of stores) {
     const snap = checks[s.id];
     const inv = withInventorify.has(s.id);
     const items = inv ? (await inventorifyStock(book, s.id)).items : [];
+    const costs = withCosts.has(s.id) ? { items: (await itemsWithNoCost(book, s.id)).slice(0, MAX_ITEMS), preview: await heldPreview(book, s.id, viewer.userId) } : null;
     out.push({
       id: s.id,
       name: s.name,
@@ -65,6 +69,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         .slice(0, 25)
         .map((i) => ({ id: i.variantId, name: i.name, sku: i.sku, units: i.units, cost: i.unitCost === null ? null : m(i.unitCost), value: m(i.value), state: i.state })),
       itemCount: items.filter((i) => i.units !== 0).length,
+      costs: costs ? { ...costs, more: Math.max(0, items.filter((i) => i.state === "no_cost" && i.units > 0).length - MAX_ITEMS) } : null,
     });
   }
   return { canManage, today: todayIn(book.settings.timeZone), waiting: waiting?.id ?? null, stores: out, counters: await stockCounters(book) };
@@ -82,6 +87,16 @@ export async function action({ request }: Route.ActionArgs) {
       case "check":
         await checkStock(book, storeId);
         return { ok: "Checked against Inventorify." };
+      case "cost-preview": {
+        const wanted = [...form.entries()].filter(([k]) => k.startsWith("cost:")).map(([k, v]) => ({ variantId: k.slice(5), cost: String(v) }));
+        await previewCosts(book, storeId, wanted, viewer.userId);
+        return { ok: "Here's what would change in Shopify. Nothing has changed yet." };
+      }
+      case "cost-confirm":
+        return { costs: { storeId, ...(await confirmCosts(book, storeId, viewer.userId)) } };
+      case "cost-drop":
+        await dropPreview(book, storeId);
+        return { ok: "Preview cleared. Nothing was changed." };
       case "adjust":
       case "count": {
         const counted = str("intent") === "count" ? decimalToMinor(str("counted").replace(/,/g, "") || "x", book.decimals).toString() : undefined;
@@ -124,6 +139,7 @@ export default function Stock({ loaderData: d, actionData }: Route.ComponentProp
         </Notice>
       ) : null}
       {actionData && "error" in actionData ? <Notice tone="warn">{actionData.error}</Notice> : null}
+      {actionData && "costs" in actionData && actionData.costs ? <CostResults result={actionData.costs} /> : null}
       {d.waiting && !(actionData && "entry" in actionData) ? (
         <Notice>
           A stock adjustment is waiting for approval.{" "}
@@ -241,6 +257,8 @@ export default function Stock({ loaderData: d, actionData }: Route.ComponentProp
             </details>
           ) : null}
 
+          {s.costs ? <CostsCard storeId={s.id} costs={s.costs} busy={busy} /> : null}
+
           {d.canManage ? (
             <Form method="post" className="grid gap-3 border-t border-gray-100 pt-3 md:grid-cols-[180px_200px_240px_auto] md:items-end">
               <input type="hidden" name="storeId" value={s.id} />
@@ -259,5 +277,115 @@ export default function Stock({ loaderData: d, actionData }: Route.ComponentProp
         </Card>
       ))}
     </div>
+  );
+}
+
+type Costs = NonNullable<Route.ComponentProps["loaderData"]["stores"][number]["costs"]>;
+
+/** Items with no cost: type each one's cost, preview it through Inventorify, then confirm (V7). */
+function CostsCard({ storeId, costs, busy }: { storeId: string; costs: Costs; busy: boolean }) {
+  const p = costs.preview;
+  if (p) {
+    const setting = p.items.filter((i) => i.change === "set").length;
+    const until = new Date(p.expiresAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    return (
+      <div className="space-y-2 border-t border-gray-100 pt-3 text-sm">
+        <p className="font-semibold">Cost per item in Shopify: the preview</p>
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-gray-200 text-xs uppercase tracking-wide text-gray-500">
+              <th className="py-1 text-left font-semibold">Item</th>
+              <th className="py-1 text-right font-semibold">Now</th>
+              <th className="py-1 text-right font-semibold">New ({p.currency})</th>
+              <th className="py-1 text-left font-semibold pl-3">What happens</th>
+            </tr>
+          </thead>
+          <tbody>
+            {p.items.map((i) => (
+              <tr key={i.variantId} className="border-b border-gray-50">
+                <td className="py-1">
+                  {i.name}
+                  {i.sku ? <span className="text-xs text-gray-500"> · {i.sku}</span> : null}
+                </td>
+                <td className="py-1 text-right tabular-nums">{i.current ?? <span className="text-xs text-gray-500">none</span>}</td>
+                <td className="py-1 text-right tabular-nums">{i.proposed}</td>
+                <td className={`py-1 pl-3 ${i.change === "refused" ? "text-coral-700" : "text-gray-600"}`}>{i.change === "set" ? "Will be set" : i.change === "same" ? "Already this" : `Won't be set: ${i.reason}`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="text-xs text-gray-500">
+          Shopify uses a cost for orders from now on; sales already in your books keep theirs. Confirm by {until}, or preview again.
+        </p>
+        <Form method="post" className="flex flex-wrap gap-2">
+          <input type="hidden" name="storeId" value={storeId} />
+          {setting ? (
+            <button type="submit" name="intent" value="cost-confirm" className={buttonClass} disabled={busy}>
+              Set {setting} cost{setting === 1 ? "" : "s"} in Shopify
+            </button>
+          ) : null}
+          <button type="submit" name="intent" value="cost-drop" className={quietButtonClass} disabled={busy}>
+            {setting ? "Cancel" : "Close"}
+          </button>
+        </Form>
+      </div>
+    );
+  }
+  if (costs.items.length === 0) return null;
+  return (
+    <details className="border-t border-gray-100 pt-3 text-sm">
+      <summary className="cursor-pointer font-semibold text-accent-600">Give items with no cost a cost in Shopify ({costs.items.length + costs.more})</summary>
+      <Form method="post" className="mt-2 space-y-2">
+        <input type="hidden" name="storeId" value={storeId} />
+        <p className="text-xs text-gray-500">
+          Type what each item cost you, in the store's currency. Inventorify shows what would change first; nothing changes in Shopify until you confirm. Leave an item empty to skip it.
+          {costs.more ? ` The ${costs.items.length} with the most units are shown; set these first, then the rest appear.` : ""}
+        </p>
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-gray-200 text-xs uppercase tracking-wide text-gray-500">
+              <th className="py-1 text-left font-semibold">Item</th>
+              <th className="py-1 text-right font-semibold">Available</th>
+              <th className="py-1 text-right font-semibold">Cost each</th>
+            </tr>
+          </thead>
+          <tbody>
+            {costs.items.map((i) => (
+              <tr key={i.variantId} className="border-b border-gray-50">
+                <td className="py-1">
+                  {i.name}
+                  {i.sku ? <span className="text-xs text-gray-500"> · {i.sku}</span> : null}
+                </td>
+                <td className="py-1 text-right tabular-nums">{i.units}</td>
+                <td className="py-1 text-right">
+                  <input name={`cost:${i.variantId}`} inputMode="decimal" aria-label={`Cost of ${i.name}`} className={`${inputClass} w-28 text-right`} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <button type="submit" name="intent" value="cost-preview" className={quietButtonClass} disabled={busy}>
+          Preview in Shopify
+        </button>
+      </Form>
+    </details>
+  );
+}
+
+function CostResults({ result }: { result: CostResult & { storeId: string } }) {
+  const failed = result.items.filter((i) => !i.ok);
+  return (
+    <Notice tone={failed.length ? "warn" : undefined}>
+      {result.set ? `Set ${result.set} cost${result.set === 1 ? "" : "s"} in Shopify. Inventorify's list here catches up within a few minutes; check stock again after that.` : "No cost was set."}
+      {failed.length ? (
+        <ul className="mt-1 list-disc pl-5">
+          {failed.map((i) => (
+            <li key={i.variantId}>
+              {i.name}: {i.reason}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </Notice>
   );
 }

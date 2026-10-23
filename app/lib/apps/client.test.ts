@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { backoffDelay, parseRetryAfter, CLIENT_SETTINGS } from "./client.server";
+import { appRequest, backoffDelay, parseRetryAfter, CLIENT_SETTINGS } from "./client.server";
 import {
   BREAKER_SETTINGS,
   allowRequest,
@@ -102,5 +102,37 @@ describe("circuit breaker", () => {
 
     expect(breakerState("COURIERIFY")).toBe("closed");
     expect(allowRequest("COURIERIFY")).toBe(true);
+  });
+});
+
+describe("appRequest for a write", () => {
+  const credentials = { app: "INVENTORIFY" as const, baseUrl: "https://inv.test", platformKey: "k", signingSecret: "s" };
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetBreakers();
+  });
+
+  it("sends the extra headers alongside the signed ones, and stops after the attempts it was given", async () => {
+    const seen: Headers[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      seen.push(new Headers(init.headers));
+      return new Response(JSON.stringify({ error: "down", errorType: "internal_error" }), { status: 500 });
+    });
+    const r = await appRequest("INVENTORIFY", {
+      method: "POST",
+      pathWithQuery: "/api/v1/growzar/costs/confirm",
+      shopDomain: "a.myshopify.com",
+      body: { previewId: "p" },
+      headers: { "Idempotency-Key": "key-1", "X-Growzar-User": "u1" },
+      maxAttempts: 1,
+      credentials,
+      wait: async () => undefined,
+    });
+    expect(r).toMatchObject({ ok: false, reason: "server_error", errorType: "internal_error" });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.get("Idempotency-Key")).toBe("key-1");
+    expect(seen[0]!.get("X-Growzar-User")).toBe("u1");
+    expect(seen[0]!.get("X-Growzar-Signature")).toBeTruthy();
+    expect(seen[0]!.get("X-Growzar-Shop")).toBe("a.myshopify.com");
   });
 });
