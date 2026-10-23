@@ -98,6 +98,8 @@ export async function runAdSpend(book: BookView, connector: BkConnector): Promis
   // Spend in another currency converts at its day's rate (v1.1 V1, D-98); with no rate, it waits and says so.
   const rateOf = await bookRates(book, rows.filter((x) => x.currency !== book.currency).map((x) => ({ currency: x.currency, day: x.day })));
   const noRate = new Map<string, number>();
+  // The first day still waiting for a rate: the connector's place stays before it, so that day is read again.
+  let firstNoRate: string | null = null;
 
   const save = async (input: { sourceRef: string; date: string; data: Posting & { platform: string; correctionOf?: string | null }; memo: string; storeId: string }) => {
     const res = await upsertImported(book, { source: "ad_spend", type: "ad_spend", ...input });
@@ -129,6 +131,7 @@ export async function runAdSpend(book: BookView, connector: BkConnector): Promis
       const fe = rate ? convertAmount(feesText, rate.rate) : null;
       if (!rate || sp === null || fe === null) {
         noRate.set(row.currency, (noRate.get(row.currency) ?? 0) + 1);
+        if (!firstNoRate || row.day < firstNoRate) firstNoRate = row.day;
         continue;
       }
       spendText = sp;
@@ -187,7 +190,8 @@ export async function runAdSpend(book: BookView, connector: BkConnector): Promis
     r.status = "partial";
     r.notes.push(`${platformName(p)} has spend but isn't set up in Books yet. Open Ad spend and save it`);
   }
-  await prisma.bkConnector.update({ where: { id: connector.id }, data: { syncedThrough: new Date(`${win.to}T00:00:00.000Z`) } });
+  const through = firstNoRate && firstNoRate <= win.to ? addDays(firstNoRate, -1) : win.to;
+  await prisma.bkConnector.update({ where: { id: connector.id }, data: { syncedThrough: new Date(`${through}T00:00:00.000Z`) } });
   return r;
 }
 

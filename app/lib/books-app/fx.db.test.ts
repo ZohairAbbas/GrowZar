@@ -1,7 +1,7 @@
 /**
  * Books in more than one currency against Postgres (v1.1 V1, D-96 to D-99):
  * past rates filled in, orders and ad spend converted at their day's rate (or
- * left out and said with no rate), a store in another currency added to a
+ * waiting for a day's rate until it's filled in), a store in another currency added to a
  * book, and a foreign card revalued at month end. Synthetic data only, in a
  * private schema with all of Growzar's migrations (test-db.ts). Runs only
  * with BOOKS_TEST_DATABASE_URL.
@@ -59,7 +59,7 @@ run("Books in more than one currency", () => {
     const D = await import("../books/dates");
     const P = await import("../books/posting");
     const today = D.todayIn("Asia/Karachi");
-    for (const [k, n] of [["start", -6], ["d1", -5], ["d2", -4], ["d3", -2]] as const) day[k] = P.addDays(today, n);
+    for (const [k, n] of [["start", -6], ["d1", -5], ["d2", -4], ["d3", -2], ["y", -1]] as const) day[k] = P.addDays(today, n);
     await prisma.organization.create({ data: { id: org, name: "FX Org", slug: org, baseCurrency: "PKR" } });
     for (const [id, currency] of [[pkrStore, "PKR"], [aedStore, "AED"]] as const) {
       await prisma.store.create({ data: { id, organizationId: org, shopDomain: `${id}.myshopify.com`, displayName: currency === "PKR" ? "Lahore Store" : "Dubai Store", currency, timezone: "Asia/Karachi" } });
@@ -110,11 +110,11 @@ run("Books in more than one currency", () => {
     await prisma.bkConnector.deleteMany({ where: { bookId: book.id, key: "ad_spend" } });
   });
 
-  it("orders convert at their day's rate (or the latest within a week); with no rate they're left out and said", async () => {
+  it("orders convert at their day's rate (or the latest within a week); a day whose rate isn't in yet waits", async () => {
     const S = await import("./connectors/sales.server");
     await putOrder(order("A", pkrStore, day.d1!, "PKR", 1000, 180));
     await putOrder(order("B", pkrStore, day.d1!, "AED", 100, 0));
-    await putOrder(order("C", pkrStore, day.d1!, "USD", 50, 0));
+    await putOrder(order("C", pkrStore, day.y!, "USD", 50, 0));
     await putOrder(order("D", aedStore, day.d3!, "AED", 200, 0));
     const mapping = await S.checkSalesMapping(book, await S.salesDefaults(book));
     await R.saveConnector(book, "shopify_sales", { enabled: true, mode: "auto", startDate: day.start!, settings: { mapping } as never }, "owner");
@@ -122,8 +122,9 @@ run("Books in more than one currency", () => {
     const notes = r!.notes.join(" | ");
     expect(notes).toMatch(/Lahore Store: 1 order in AED \(100\.00\) converted into PKR at each day's rate \(test rate\)/);
     expect(notes).toMatch(/Dubai Store: 1 order in AED \(200\.00\) converted into PKR/);
-    expect(notes).toMatch(/Lahore Store: 1 order in USD \(50\.00\) left out/);
-    // 1,000 + 100 × 75.5 + 200 × 75.5; the USD order isn't in.
+    expect(notes).toMatch(/Lahore Store: 1 order from .+ in another currency waits for the day's exchange rate/);
+    expect(r!.status).toBe("partial");
+    // 1,000 + 100 × 75.5 + 200 × 75.5; the USD order's day waits.
     expect(-(await bal("Sales"))).toBe(100_000n + 755_000n + 1_510_000n);
     expect(-(await bal("Sales tax to pay"))).toBe(18_000n);
     expect(await bal("Cost of what you sold")).toBe(40_000n + 302_000n + 604_000n);
@@ -141,6 +142,15 @@ run("Books in more than one currency", () => {
     expect(await bal("Owed by payment gateways")).toBe(118_000n + 755_000n);
     // A re-run converts the same way: nothing new, nothing corrected.
     expect(await R.runConnector(book, "shopify_sales", "manual", S.runSales)).toMatchObject({ created: 0, updated: 0 });
+  });
+
+  it("once the day's rate is filled in, the waiting day comes in, converted", async () => {
+    const S = await import("./connectors/sales.server");
+    const before = -(await bal("Sales"));
+    await prisma.fxRate.create({ data: { base: "PKR", currency: "USD", day: day.y!, rate: "277", source: "test rate" } });
+    const r = await R.runConnector(book, "shopify_sales", "manual", S.runSales);
+    expect(r!.notes.join(" ")).toMatch(/Lahore Store: 1 order in USD \(50\.00\) converted into PKR/);
+    expect(-(await bal("Sales"))).toBe(before + 1_385_000n);
   });
 
   it("a refund on an AED order after its day was saved: a correction carrying AED, at that order's rate", async () => {
