@@ -415,6 +415,44 @@ const days = (from: string, to: string) => {
   return out;
 };
 
+/**
+ * Books v1.1 V4 (Financify's stock check): what the sales connector would
+ * move on Stock for a store's days it hasn't brought in yet (up to today),
+ * and what its saved drafts would, by its own rules: cost taken off with each
+ * sale it counts, put back for returns. Negative: stock still to come off.
+ * Null when sales aren't set up with cost tracking for the store.
+ */
+export async function stockNotYetIn(book: BookView, storeId: string): Promise<{ notYetIn: bigint; drafts: bigint; from: string } | null> {
+  const connector = await prisma.bkConnector.findUnique({ where: { bookId_key: { bookId: book.id, key: SOURCE } } });
+  const settings = (connector?.settings ?? {}) as unknown as SalesSettings;
+  const start = connector?.startDate?.toISOString().slice(0, 10);
+  if (!connector?.enabled || !start || !settings.mapping?.cogs || !settings.mapping.stock) return null;
+  const store = (await salesStores(book)).find((s) => s.id === storeId);
+  if (!store?.financify) return null;
+  const tz = book.settings.timeZone;
+  const today = todayIn(tz);
+  const dayOf = (iso: string) => todayIn(tz, new Date(iso));
+  const mapping: SalesMapping = { ...settings.mapping, codBasis: book.settings.codBasis ?? settings.mapping.codBasis ?? "delivery" };
+  const stockId = mapping.stock!;
+  const net = (p: { debits?: Array<{ accountId: string; amount: string }>; credits?: Array<{ accountId: string; amount: string }> } | null) =>
+    (p?.debits ?? []).filter((l) => l.accountId === stockId).reduce((t, l) => t + BigInt(l.amount), 0n) - (p?.credits ?? []).filter((l) => l.accountId === stockId).reduce((t, l) => t + BigInt(l.amount), 0n);
+  const drafts = (await prisma.bkDocument.findMany({ where: { bookId: book.id, source: SOURCE, storeId, status: "draft" }, select: { data: true } })).reduce((t, d) => t + net(d.data as never), 0n);
+  const done = settings.progress?.[storeId] ?? null;
+  const from = done ? addDays(done, 1) : start;
+  if (from > today) return { notYetIn: 0n, drafts, from };
+  const [costs, parcels, grainRows] = await Promise.all([
+    inventorifyCosts(store.id),
+    parcelFacts(store.id, dayOf),
+    prisma.orderGrain.findMany({ where: { storeId: store.id, localDay: { gte: addDays(start, -1) } }, select: { orderId: true, outcome: true, outcomeAt: true } }),
+  ]);
+  const ctx: StoreCtx = { book, storeId: store.id, storeName: store.name, start, mapping, dayOf, costs: store.currency && store.currency !== book.currency ? new Map() : costs, parcels, grain: grainRows.map((g) => ({ orderId: g.orderId, outcome: g.outcome, day: g.outcomeAt ? dayOf(g.outcomeAt.toISOString()) : null })), foreign: await foreignStore(book, store.currency, mapping, start, today) };
+  const { orders } = await prepare(ctx, await loadOrders(store.id, from, today));
+  const placed = orders.filter((o) => ctx.dayOf(o.createdAt) >= from && ctx.dayOf(o.createdAt) <= today);
+  const events = mapping.parcelReturns === false ? [] : await parcelEventsFor(ctx, from, today, orders);
+  const summaries = summariseDays({ days: days(from, today), timeZone: tz, startDate: start, decimals: book.decimals, mapping, placed, changed: orders, parcels: events });
+  return { notYetIn: summaries.reduce((t, s) => t + net(s), 0n), drafts, from };
+}
+
 export async function runSales(book: BookView, connector: BkConnector): Promise<RunResult> {
   const r: RunResult = { status: "ok", created: 0, updated: 0, skipped: 0, notes: [], from: null, to: null };
   const settings = (connector.settings ?? {}) as unknown as SalesSettings;

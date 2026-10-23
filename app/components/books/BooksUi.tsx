@@ -49,6 +49,7 @@ const TABS = [
   { to: "/books/drafts", label: "To approve" },
   { to: "/books/bank", label: "Bank" },
   { to: "/books/couriers", label: "Couriers" },
+  { to: "/books/stock", label: "Stock" },
   { to: "/books/reports", label: "Reports" },
   { to: "/books/close", label: "Close" },
   { to: "/books/accounts", label: "Accounts" },
