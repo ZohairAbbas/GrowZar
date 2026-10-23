@@ -4,7 +4,7 @@ import { todayIn } from "~/lib/books/dates";
 import { reportFile } from "~/lib/books/report-data.server";
 
 /** The reports with a screen in Growzar (B6); the file always matches the screen. */
-const FILES = new Set(["profit-and-loss", "balance-sheet", "trial-balance", "cash-flow", "general-ledger", "journal"]);
+const FILES = new Set(["profit-and-loss", "balance-sheet", "trial-balance", "cash-flow", "general-ledger", "journal", "aged-payables", "spending-by-supplier", "tax-summary"]);
 
 /** A Books report as CSV (B6). A resource route: the screens link to it, the session authenticates it. */
 export async function loader({ request, params, url }: Route.LoaderArgs) {

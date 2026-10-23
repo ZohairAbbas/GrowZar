@@ -28,6 +28,14 @@ const GROUPS = [
     ],
   },
   {
+    title: "Tax and suppliers",
+    reports: [
+      { path: "tax-summary", title: "Tax summary", owner: "Tax you charged, paid, can claim back and withheld, and what's left to pay. Set your rates from here." },
+      { path: "owed-to-suppliers", title: "Owed to suppliers by age", owner: "Unpaid bills by supplier and how late they are." },
+      { path: "spending-by-supplier", title: "Spending by supplier", owner: "Who you spent the most with in a period, and what for." },
+    ],
+  },
+  {
     title: "For your accountant",
     reports: [
       { path: "trial-balance", title: "Trial balance", owner: "Every account's balance in debits and credits." },

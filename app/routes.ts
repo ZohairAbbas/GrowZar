@@ -116,6 +116,11 @@ export default [
       route("reports/general-ledger", "routes/books.reports.general-ledger.tsx"),
       route("reports/journal", "routes/books.reports.journal.tsx"),
       route("reports/compare-finance", "routes/books.reports.compare-finance.tsx"),
+      // Screens whose code was already ported (v1.1 V2).
+      route("reports/owed-to-suppliers", "routes/books.reports.owed-to-suppliers.tsx"),
+      route("reports/spending-by-supplier", "routes/books.reports.spending-by-supplier.tsx"),
+      route("reports/tax-summary", "routes/books.reports.tax-summary.tsx"),
+      route("taxes", "routes/books.taxes.tsx"),
       route("reports/:report", "routes/books.reports.$report.tsx"),
       // Closing the books (B6, D-70).
       route("close", "routes/books.close.tsx"),
