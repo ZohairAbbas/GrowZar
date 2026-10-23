@@ -129,6 +129,8 @@ export function activityText(e: ActivityEvent, names: ActivityNames): ActivityLi
       return { text: `Withdrew the prepared close through ${s(d.from)}`, link: "/books/close" };
     case "book.reopened":
       return { text: `${d.to ? `Reopened the books after ${s(d.to)}` : "Reopened every date"}${d.reason ? ` — “${s(d.reason)}”` : ""}`, link: "/books" };
+    case "connector.rebuilt":
+      return { text: `Brought ${connectorName(d.key)} in again from ${s(d.from)} (${s(d.cancelled)} entr${d.cancelled === 1 ? "y" : "ies"} cancelled)`, link: typeof d.key === "string" && CONNECTOR_PATHS[d.key] ? `/books/connectors/${CONNECTOR_PATHS[d.key]}` : null };
     case "connector.saved":
       return {
         text: `${d.enabled === false ? "Switched off" : "Saved the settings of"} ${connectorName(d.key)}${d.restart ? " and started it again from its start date" : ""}`,

@@ -12,7 +12,9 @@ import { runConnector, type Runner } from "./runs.server";
  * Which connectors the worker runs, and how often (porting guide §4.10): every
  * tick, up to five switched-on connectors whose last run is at least six
  * hours old, longest-waiting first, one after another. Books pages can also
- * run one now.
+ * run one now. Growzar (v1.1 V3): one still catching up (brought in again,
+ * a store added, a new first day) runs every tick, half an hour apart, until
+ * it's within two days of today.
  */
 export const RUNNERS: Partial<Record<ConnectorKey, Runner>> = {
   ad_spend: runAdSpend,
@@ -22,12 +24,22 @@ export const RUNNERS: Partial<Record<ConnectorKey, Runner>> = {
 };
 
 const EVERY_MS = 6 * 60 * 60 * 1000;
+const CATCH_UP_MS = 25 * 60 * 1000;
+const BEHIND_MS = 2 * 24 * 60 * 60 * 1000;
 const PER_TICK = 5;
 
 export async function runDueConnectors(now = new Date()): Promise<Array<{ key: string; status: string }>> {
   if (!booksEnabled()) return [];
   const due = await prisma.bkConnector.findMany({
-    where: { enabled: true, key: { in: Object.keys(RUNNERS) }, OR: [{ lastRunAt: null }, { lastRunAt: { lt: new Date(now.getTime() - EVERY_MS) } }] },
+    where: {
+      enabled: true,
+      key: { in: Object.keys(RUNNERS) },
+      OR: [
+        { lastRunAt: null },
+        { lastRunAt: { lt: new Date(now.getTime() - EVERY_MS) } },
+        { syncedThrough: { lt: new Date(now.getTime() - BEHIND_MS) }, lastRunAt: { lt: new Date(now.getTime() - CATCH_UP_MS) } },
+      ],
+    },
     orderBy: [{ lastRunAt: { sort: "asc", nulls: "first" } }],
     take: PER_TICK,
     select: { key: true, bookId: true },
