@@ -199,17 +199,17 @@ export type PickedPeriod = { days: number; from: string; to: string; custom: boo
  */
 export function CustomRange({ period, keep = "", firstDay = null }: { period: PickedPeriod; keep?: string; firstDay?: string | null }) {
   const hidden = [...new URLSearchParams(keep).entries()].filter(([k]) => k !== "days" && k !== "from" && k !== "to");
-  const input = "rounded-lg border-0 bg-field px-2.5 py-1.5 text-sm text-gray-900 focus:ring-2 focus:ring-mint";
+  const input = "rounded-lg border-0 bg-field px-2.5 py-1.5 text-sm text-gray-900 focus:ring-2 focus:ring-mint max-sm:min-h-11";
   return (
     <details className="relative">
       <summary
-        className={`cursor-pointer list-none rounded-full px-3 py-1 [&::-webkit-details-marker]:hidden ${
+        className={`tap cursor-pointer list-none rounded-full px-3 py-1 [&::-webkit-details-marker]:hidden ${
           period.custom ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"
         }`}
       >
         {period.custom ? rangeLabel(period.from, period.to) : "Custom"}
       </summary>
-      <Form method="get" preventScrollReset className="absolute left-0 z-20 mt-2 w-max max-w-[calc(100vw-2rem)] rounded-2xl bg-white p-4 shadow-lg ring-1 ring-gray-200">
+      <Form method="get" preventScrollReset className="absolute left-0 z-20 mt-2 w-max max-w-[calc(100vw-2rem)] rounded-2xl bg-white p-4 shadow-lg ring-1 ring-gray-200 max-sm:fixed max-sm:inset-x-4 max-sm:top-24 max-sm:mt-0 max-sm:w-auto">
         {hidden.map(([k, v]) => (
           <input key={k} type="hidden" name={k} value={v} />
         ))}
@@ -222,7 +222,7 @@ export function CustomRange({ period, keep = "", firstDay = null }: { period: Pi
             To
             <input type="date" name="to" required defaultValue={period.to} min={firstDay ?? undefined} max={period.today} className={`mt-1 block ${input}`} />
           </label>
-          <button type="submit" className="rounded-full bg-navy px-4 py-2 text-sm font-bold text-white hover:bg-navy-surface">
+          <button type="submit" className="tap rounded-full bg-navy px-4 py-2 text-sm font-bold text-white hover:bg-navy-surface">
             Apply
           </button>
         </div>
@@ -245,7 +245,7 @@ export function PeriodPicker({ period, options, keep = "" }: { period: PickedPer
             to={`?${withPeriod(new URLSearchParams(keep), `days=${d}`).toString()}`}
             preventScrollReset
             aria-current={on ? "page" : undefined}
-            className={`rounded-full px-3.5 py-1.5 ${on ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
+            className={`tap rounded-full px-3.5 py-1.5 ${on ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
           >
             {d} days
           </Link>

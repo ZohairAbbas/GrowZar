@@ -222,7 +222,7 @@ export function CourierDeductions({ rows, sources }: { rows: FinanceDepth["deduc
       <p className="mt-1 text-sm text-gray-600">
         Courier statements dated in this period, from Courierify: COD collected, what each courier took, and what it paid.
       </p>
-      <table className="mt-4 min-w-full text-sm">
+      <table className="pin-first mt-4 min-w-full text-sm">
         <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
           <tr>
             <th className="py-2 pr-4">Courier</th>

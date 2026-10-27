@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { NavLink } from "react-router";
 
 import { cn } from "~/lib/utils";
+import { useCenterActive } from "~/components/ui/useCenterActive";
 
 /**
  * Small pieces the Books screens share (B2). Plain words on primary screens,
@@ -60,14 +61,16 @@ const TABS = [
 
 /** The Books tabs; "To approve" shows how many drafts wait. */
 export function BooksTabs({ drafts = 0 }: { drafts?: number }) {
+  const strip = useCenterActive<HTMLElement>();
+  // One row that scrolls sideways on a phone; eleven tabs would wrap onto four.
   return (
-    <nav className="flex flex-wrap gap-1.5">
+    <nav ref={strip} className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
       {TABS.map((t) => (t.to === "/books/drafts" && drafts ? { ...t, label: `To approve · ${drafts}` } : t)).map((t) => (
         <NavLink
           key={t.to}
           to={t.to}
           end={t.end}
-          className={({ isActive }) => cn("rounded-full px-3.5 py-1.5 text-sm font-semibold transition", isActive ? "bg-navy text-white" : "bg-white text-gray-700 hover:bg-gray-100")}
+          className={({ isActive }) => cn("tap flex-shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-semibold transition", isActive ? "bg-navy text-white" : "bg-white text-gray-700 hover:bg-gray-100")}
         >
           {t.label}
         </NavLink>

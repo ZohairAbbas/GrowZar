@@ -36,7 +36,7 @@ export function BuyerHistoryPanel({ view }: { view: BuyerHistoryPanelView }) {
         Each order in this period, by what the same buyer's earlier orders with this store had come to when it was placed.
         {view.returnsFromReturners !== null ? ` Buyers who had returned before made ${view.returnsFromReturners.toFixed(1)}% of this period's returns.` : ""}
       </p>
-      <table className="mt-4 min-w-full text-sm">
+      <table className="pin-first mt-4 min-w-full text-sm">
         <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
           <tr>
             <th className="py-2 pr-4">Buyer</th>
@@ -79,7 +79,7 @@ function NetworkTable({ network }: { network: NonNullable<BuyerHistoryPanelView[
       <p className="mt-1 text-sm text-gray-600">
         Your delivered and returned Courierify orders of the last {n(network.days)} days, {n(network.labelled)} of {n(network.decided)} labelled so far.
       </p>
-      <table className="mt-3 min-w-full text-sm">
+      <table className="pin-first mt-3 min-w-full text-sm">
         <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
           <tr>
             <th className="py-2 pr-4">Courierify's label then</th>

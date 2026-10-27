@@ -60,7 +60,7 @@ export function FilterBar({
     if (city) q.set("city", city);
     return `?${q.toString()}`;
   };
-  const select = "rounded-full border-0 bg-white py-1.5 pl-3.5 pr-8 text-sm font-semibold text-gray-700 focus:ring-2 focus:ring-mint";
+  const select = "rounded-full border-0 bg-white py-1.5 pl-3.5 pr-8 text-sm font-semibold text-gray-700 focus:ring-2 focus:ring-mint max-sm:min-h-11";
   const compared = historyFrom
     ? `History starts ${shortDay(historyFrom)}, so there is no full previous ${period.days} days to compare with`
     : `Compared with ${shortDay(previous.from)}–${shortDay(previous.to)}`;
@@ -96,7 +96,7 @@ export function FilterBar({
               to={query({ days: d })}
               preventScrollReset
               aria-current={on ? "page" : undefined}
-              className={`rounded-full px-3 py-1 ${on ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
+              className={`tap rounded-full px-3 py-1 ${on ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
             >
               {d}d
             </Link>

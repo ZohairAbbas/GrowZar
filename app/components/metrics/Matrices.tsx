@@ -146,7 +146,7 @@ export function ProductMatrix({
       </ul>
 
       <div className="mt-4 overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="pin-first min-w-full text-sm">
           <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
             <tr>
               <th className="py-2 pr-4">Product</th>
@@ -196,7 +196,7 @@ export function ProductMatrix({
                   )}
                 </td>
                 <td className="py-2 text-right">
-                  <Link to={link(p)} className="inline-flex items-center gap-1 text-xs font-semibold text-accent-600 hover:underline">
+                  <Link to={link(p)} className="tap inline-flex items-center gap-1 text-xs font-semibold text-accent-600 hover:underline">
                     Orders <ArrowRight className="h-3 w-3" />
                   </Link>
                 </td>
@@ -281,7 +281,7 @@ export function CityDeliveryTable({
                 type="button"
                 onClick={() => setView(key)}
                 aria-pressed={view === key}
-                className={`rounded-full px-3 py-1 ${view === key ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
+                className={`tap rounded-full px-3 py-1 ${view === key ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
               >
                 {label}
               </button>
@@ -295,7 +295,7 @@ export function CityDeliveryTable({
           : "Every courier together. Pick a city to see its couriers."}
       </p>
       <div className="mt-4 overflow-x-auto">
-        <table className={`min-w-full text-sm ${byCourier ? "border-separate border-spacing-[2px]" : ""}`}>
+        <table className={`pin-first min-w-full text-sm ${byCourier ? "border-separate border-spacing-[2px]" : ""}`}>
           <thead className={`text-left text-xs font-semibold text-gray-500 ${byCourier ? "" : "border-b border-gray-100"}`}>
             <tr>
               <th className="py-2 pr-4">City</th>
@@ -361,7 +361,7 @@ export function CityDeliveryTable({
                     <td className="py-2 pr-4">{rate(r)}</td>
                     <td className="py-2 text-right">
                       {r.other ? null : (
-                        <Link to={link("/orders", { city: r.key })} className="inline-flex items-center gap-1 text-xs font-semibold text-accent-600 hover:underline">
+                        <Link to={link("/orders", { city: r.key })} className="tap inline-flex items-center gap-1 text-xs font-semibold text-accent-600 hover:underline">
                           Orders <ArrowRight className="h-3 w-3" />
                         </Link>
                       )}
@@ -414,7 +414,7 @@ export function ChannelCourierTable({ matrix, min }: { matrix: ChannelCourierMat
         cells deliver worse than the typical cell ({mid.toFixed(1)}%), mint better.
       </p>
       <div className="mt-4 overflow-x-auto">
-        <table className="min-w-full border-separate border-spacing-[2px] text-sm">
+        <table className="pin-first min-w-full border-separate border-spacing-[2px] text-sm">
           <thead className="text-left text-xs font-semibold text-gray-500">
             <tr>
               <th className="py-2 pr-4">Channel</th>
@@ -473,7 +473,7 @@ export function PayoutAgeingTable({ ageing }: { ageing: PayoutAgeing }) {
         for its orders.
       </p>
       {ageing.orders ? (
-        <table className="mt-4 min-w-full text-sm">
+        <table className="pin-first mt-4 min-w-full text-sm">
           <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
             <tr>
               <th className="py-2 pr-4">Courier</th>
@@ -564,20 +564,22 @@ export function ConfirmationFunnelView({
   const step = (key: string) => funnel.steps.find((s) => s.key === key)?.orders ?? 0;
   const base = `/orders?${period}${scope ? `&${scope}` : ""}`;
   return (
-    <div className="overflow-x-auto rounded-2xl bg-white p-5">
+    <div className="rounded-2xl bg-white p-5">
       <h2 className="font-display text-lg font-bold text-gray-900">From order to outcome, by confirmation</h2>
       <p className="mt-1 text-sm text-gray-600">
         {total.orders.toLocaleString()} orders placed in this period; {step("attempted").toLocaleString()} sent for confirmation,{" "}
         {step("confirmed").toLocaleString()} confirmed. Pick a row for its orders.
       </p>
-      <table className="mt-4 min-w-full text-sm">
+      {/* Only the table scrolls on a phone, with the bars, Shipped and Returned left out there so Return rate stays in view. */}
+      <div className="mt-4 overflow-x-auto">
+      <table className="pin-first min-w-full text-sm">
         <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
           <tr>
             <th className="py-2 pr-4">Confirmation</th>
             <th className="py-2 pr-4">Orders</th>
-            <th className="py-2 pr-4 text-right">Shipped</th>
+            <th className="hidden py-2 pr-4 text-right sm:table-cell">Shipped</th>
             <th className="py-2 pr-4 text-right">Delivered</th>
-            <th className="py-2 pr-4 text-right">Returned</th>
+            <th className="hidden py-2 pr-4 text-right sm:table-cell">Returned</th>
             <th className="py-2 text-right">Return rate</th>
           </tr>
         </thead>
@@ -587,7 +589,7 @@ export function ConfirmationFunnelView({
             const picked = all ? active === null : active === s.state;
             return (
               <tr key={s.state} className={`${picked && active !== null ? "bg-mint-50" : ""} ${all ? "font-semibold" : ""}`}>
-                <td className="whitespace-nowrap py-2 pr-4 text-gray-900">
+                <td className="py-2 pr-4 text-gray-900 sm:whitespace-nowrap">
                   {picked ? (
                     s.label
                   ) : (
@@ -597,16 +599,16 @@ export function ConfirmationFunnelView({
                   )}
                 </td>
                 <td className="py-2 pr-4">
-                  <span className="grid grid-cols-[3.5rem_1fr] items-center gap-2">
+                  <span className="grid items-center gap-2 sm:grid-cols-[3.5rem_1fr]">
                     <span className="text-right tabular-nums text-gray-900">{s.orders.toLocaleString()}</span>
-                    <span className="h-2 min-w-16 rounded-sm bg-field">
+                    <span className="hidden h-2 min-w-16 rounded-sm bg-field sm:block">
                       <span className={`block h-2 rounded-sm ${all ? "bg-navy" : "bg-data-700"}`} style={{ width: `${(100 * s.orders) / top}%` }} />
                     </span>
                   </span>
                 </td>
-                <td className="py-2 pr-4 text-right tabular-nums">{s.shipped.toLocaleString()}</td>
+                <td className="hidden py-2 pr-4 text-right tabular-nums sm:table-cell">{s.shipped.toLocaleString()}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{s.delivered.toLocaleString()}</td>
-                <td className="py-2 pr-4 text-right tabular-nums">{s.returned.toLocaleString()}</td>
+                <td className="hidden py-2 pr-4 text-right tabular-nums sm:table-cell">{s.returned.toLocaleString()}</td>
                 <td className="py-2 text-right tabular-nums text-gray-900">
                   {s.returnRate === null ? (
                     <span className="font-normal text-gray-500">{s.decided ? `${s.decided} decided` : "—"}</span>
@@ -619,6 +621,7 @@ export function ConfirmationFunnelView({
           })}
         </tbody>
       </table>
+      </div>
       <p className="mt-3 text-xs text-gray-500">
         Shipped is every order handed to a courier, confirmed or not, including those still in transit. Delivered and returned
         leave out orders whose outcome can&apos;t be tracked (see coverage), so they can be lower than the outcome filters below.
@@ -653,7 +656,7 @@ export function CampaignTable({ data, compared }: { data: CampaignSpend; compare
         ))}
       </div>
       <div className="mt-4 overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="pin-first min-w-full text-sm">
           <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
             <tr>
               <th className="py-2 pr-4">Campaign</th>
@@ -733,7 +736,7 @@ export function CampaignOutcomesTable({ data, spend }: { data: CampaignOutcomes;
         </div>
       ) : null}
       <div className="mt-4 overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="pin-first min-w-full text-sm">
           <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
             <tr>
               <th className="py-2 pr-4">Campaign</th>

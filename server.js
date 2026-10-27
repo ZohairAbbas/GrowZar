@@ -39,7 +39,18 @@ app.use(
     maxAge: "1y",
   }),
 );
-app.use(express.static("build/client", { maxAge: "1h" }));
+// The service worker and the manifest are asked for "no-cache", so the
+// browser (and Cloudflare, in front of nginx) checks them on every visit: a
+// worker held for an hour would keep an installed copy on the old build.
+const ALWAYS_CHECKED = new Set(["/sw.js", "/manifest.webmanifest"]);
+app.use(
+  express.static("build/client", {
+    maxAge: "1h",
+    setHeaders: (res, path) => {
+      if (ALWAYS_CHECKED.has(path.slice(path.lastIndexOf("/")))) res.setHeader("Cache-Control", "no-cache");
+    },
+  }),
+);
 
 app.all(
   "*splat",

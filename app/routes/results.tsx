@@ -100,7 +100,7 @@ export default function Results({ loaderData }: Route.ComponentProps) {
             By store
           </h2>
           <div className="mt-3 overflow-x-auto rounded-2xl bg-white">
-            <table className="w-full text-sm">
+            <table className="pin-first w-full text-sm">
               <thead className="text-left text-gray-500">
                 <tr>
                   <th className="px-4 py-3 font-semibold">Store</th>

@@ -1,10 +1,10 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
-import { magicLink, organization } from "better-auth/plugins";
+import { emailOTP, magicLink, organization } from "better-auth/plugins";
 
 import { prisma } from "./db.server";
 import { env } from "./env.server";
-import { sendInvitationEmail, sendMagicLinkEmail } from "./email.server";
+import { sendInvitationEmail, sendMagicLinkEmail, sendSignInCodeEmail } from "./email.server";
 import { ac, roles } from "./permissions";
 
 /**
@@ -66,11 +66,43 @@ export const auth = betterAuth({
         // endpoint: the token is used up on first use, and Microsoft 365
         // Safe Links opens every emailed link before the person does. Only
         // the page's button verifies (app/routes/auth.magic-link.tsx).
-        const result = await sendMagicLinkEmail(email, confirmPageUrl(url));
+        //
+        // The same email carries a 6-digit code (pre-Wave-1 pack 3). An iPhone
+        // home-screen app keeps its own cookies apart from Safari, so a link
+        // that opens in Safari signs Safari in, not the app; the code is typed
+        // into the app instead. Creating it here, rather than through the
+        // plugin's send endpoint, keeps it to one email.
+        const code = await auth.api
+          .createVerificationOTP({ body: { email, type: "sign-in" } })
+          .catch((error: unknown) => {
+            console.error(`[auth] sign-in code not created: ${error instanceof Error ? error.message : error}`);
+            return null;
+          });
+        const result = await sendMagicLinkEmail(email, confirmPageUrl(url), code);
         if (!result.sent && result.reason === "send_failed") {
           // Throwing would tell an unauthenticated caller whether the address
           // exists. Log and let the request look identical either way.
           console.error(`[auth] magic link email failed for a recipient`);
+        }
+      },
+    }),
+
+    // The sign-in code that rides along with the magic link (above). Same 10
+    // minutes; three wrong tries use it up. Stored hashed, as the token is.
+    emailOTP({
+      otpLength: 6,
+      expiresIn: 60 * 10,
+      allowedAttempts: 3,
+      storeOTP: "hashed",
+      disableSignUp: false,
+      // Reached only through the plugin's own send endpoint, which Growzar's
+      // pages never call. A sign-in code still gets its email; the plugin's
+      // other kinds (password reset, email change) are not offered.
+      sendVerificationOTP: async ({ email, otp, type }) => {
+        if (type !== "sign-in") return;
+        const result = await sendSignInCodeEmail(email, otp);
+        if (!result.sent && result.reason === "send_failed") {
+          console.error(`[auth] sign-in code email failed for a recipient`);
         }
       },
     }),

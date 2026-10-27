@@ -70,7 +70,7 @@ export function ConversationsPanel({ view, periodDays, whatkabotUrl }: { view: C
         <h2 className="font-display text-lg font-bold text-gray-900">What buyers write in about</h2>
         <p className="mt-1 text-sm text-gray-600">WhatKaBot's own categories for the conversations opened in this period.</p>
         <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="pin-first min-w-full text-sm">
             <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
               <tr>
                 <th className="py-2 pr-4">Category</th>
@@ -104,7 +104,7 @@ export function ConversationsPanel({ view, periodDays, whatkabotUrl }: { view: C
         <p className="mt-1 text-sm text-gray-600">Open conversations where the buyer wrote last, in the past 7 days.</p>
         {view.waitingList.length ? (
           <div className="mt-4 overflow-x-auto">
-            <table className="min-w-full text-sm">
+            <table className="pin-first min-w-full text-sm">
               <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
                 <tr>
                   <th className="py-2 pr-4">Buyer</th>

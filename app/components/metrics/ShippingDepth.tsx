@@ -110,7 +110,7 @@ export function CourierPerformanceTable({ rows }: { rows: ShippingDepth["perform
     <div className="overflow-x-auto rounded-2xl bg-white p-5">
       <h2 className="font-display text-lg font-bold text-gray-900">How each courier performs</h2>
       <p className="mt-1 text-sm text-gray-600">Parcels booked through Courierify, by the courier that carried them.</p>
-      <table className="mt-4 min-w-full text-sm">
+      <table className="pin-first mt-4 min-w-full text-sm">
         <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
           <tr>
             <th className="py-2 pr-4">Courier</th>
@@ -221,7 +221,7 @@ function WhyReturns({ returns: r, cities, withReason }: { returns: NonNullable<S
               type="button"
               onClick={() => setTab(t.key)}
               aria-pressed={shown.key === t.key}
-              className={`rounded-full px-3 py-1 ${shown.key === t.key ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
+              className={`tap rounded-full px-3 py-1 ${shown.key === t.key ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
             >
               {t.label}
             </button>
@@ -271,7 +271,7 @@ export function ReturnsCard({ returns, cities }: { returns: NonNullable<Shipping
       </dl>
 
       <div className="mt-5 overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="pin-first min-w-full text-sm">
           <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
             <tr>
               <th className="py-2 pr-4">Courier</th>

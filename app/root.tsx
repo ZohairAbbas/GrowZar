@@ -9,6 +9,7 @@ import {
 import { useEffect } from "react";
 import type { Route } from "./+types/root";
 import { reportClientError } from "~/lib/client-error";
+import { registerServiceWorker } from "~/lib/install-app";
 import "./styles/globals.css";
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -17,6 +18,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        {/* Installable as an app (pre-Wave-1 pack 3): the status bar takes the page's Light Field. */}
+        <meta name="theme-color" content="#F2F7F6" />
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" href="/icons/icon-64.png" type="image/png" sizes="64x64" />
+        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="Growzar" />
         <Meta />
         <Links />
       </head>
@@ -30,6 +40,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  useEffect(() => {
+    registerServiceWorker();
+  }, []);
   return <Outlet />;
 }
 

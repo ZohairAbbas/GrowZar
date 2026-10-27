@@ -72,7 +72,7 @@ export function OffersPanel({ view, canSeeMoney }: { view: OffersPanelView; canS
         {n(view.formOrders)} COD-form orders in this period (Preventify), compared with each other by what they went on to do.
       </p>
       <div className="mt-4 overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="pin-first min-w-full text-sm">
           {head}
           <Rows groups={view.byType} canSeeMoney={canSeeMoney} />
         </table>
@@ -80,7 +80,7 @@ export function OffersPanel({ view, canSeeMoney }: { view: OffersPanelView; canS
       {view.byOffer.length ? (
         <div className="mt-5 overflow-x-auto">
           <h3 className="text-sm font-semibold text-gray-700">By offer</h3>
-          <table className="mt-2 min-w-full text-sm">
+          <table className="pin-first mt-2 min-w-full text-sm">
             {head}
             <Rows groups={view.byOffer.slice(0, 15)} events={events} canSeeMoney={canSeeMoney} />
           </table>
