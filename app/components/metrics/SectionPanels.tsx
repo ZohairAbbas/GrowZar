@@ -363,6 +363,10 @@ export function FinancePanel({
               Growzar's own definition, the same for every store. Financify's net profit follows this store's settings —
               see Settings → Profit.
             </p>
+            <p className="mt-1 text-xs text-navy-muted">
+              Growzar uses Shopify's edited order totals, and Financify's dashboard uses the totals as placed, so Growzar's
+              sales can be slightly lower.
+            </p>
           </>
         ) : (
           <p className="mt-2 text-sm text-navy-muted">This store has not reported its currency yet.</p>
