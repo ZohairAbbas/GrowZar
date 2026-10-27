@@ -22,8 +22,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="theme-color" content="#F2F7F6" />
         <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="icon" href="/favicon.ico" sizes="any" />
-        <link rel="icon" href="/icons/icon-64.png" type="image/png" sizes="64x64" />
-        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+        <link rel="icon" href="/icons/growzar.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" href="/icons/growzar-apple-180.png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-title" content="Growzar" />

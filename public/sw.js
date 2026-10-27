@@ -1,10 +1,11 @@
 /**
  * Growzar's service worker (pre-Wave-1 pack 3).
  *
- * It exists so Growzar installs as an app and says something useful offline.
+ * It exists so Growzar installs as an app, opens on its launch page at once,
+ * and says something useful offline.
  * It never stores a page, a loader's data or an API answer: those hold a
  * merchant's figures, and a stale number is worse than none. What it keeps is
- * the offline page, the icons and the build's fingerprinted files.
+ * the launch and offline pages, the icons and the build's fingerprinted files.
  *
  * VERSION is stamped from build/version.txt at build time (`npm run
  * build:sw`), so every deploy ships a changed worker. The new one replaces the
@@ -14,7 +15,8 @@
 const VERSION = "__BUILD_VERSION__";
 const CACHE = `growzar-${VERSION}`;
 const OFFLINE = "/offline.html";
-const SHELL = [OFFLINE, "/icons/icon-64.png", "/icons/icon-192.png", "/favicon.ico"];
+const LAUNCH = "/launch.html";
+const SHELL = [OFFLINE, LAUNCH, "/icons/growzar.svg", "/icons/growzar-192.png", "/favicon.ico"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -43,6 +45,12 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
+
+  // The launch page holds no figures, so the installed app opens it straight from the cache.
+  if (request.mode === "navigate" && url.pathname === LAUNCH) {
+    event.respondWith(caches.match(LAUNCH).then((hit) => hit ?? fetch(request)));
+    return;
+  }
 
   // A page: always from the network. Offline, the offline page, never a saved copy.
   if (request.mode === "navigate") {
