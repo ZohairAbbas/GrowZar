@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- The installed app opens here (manifest start_url). It is static and kept by
+       the service worker, so it paints at once over the window's navy, then goes
+       on to Growzar; the logo keeps playing until the first page arrives. -->
+  <meta name="theme-color" content="#06191D">
+  <title>Growzar</title>
+  <link rel="icon" href="/icons/growzar.svg" type="image/svg+xml">
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; background: #06191D; color: #9FC0BE; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    svg { width: 120px; height: 120px; overflow: visible; }
+    p { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: #E7EFEE; }
+
+    /* One cycle, 2.4 s: the six nodes light in turn round the hexagon, each sends a
+       pulse into the centre, the centre fills and flashes, then all of it settles. */
+    .edge { stroke: #2FE7C4; animation: edge 2.4s ease-in-out infinite; }
+    .node { fill: #2FE7C4; transform-box: fill-box; transform-origin: center; animation: node 2.4s ease-out infinite; }
+    .pulse { stroke: #2FE7C4; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 0.2 2; animation: pulse 2.4s linear infinite; opacity: 0; }
+    .core { fill: #2FE7C4; transform-box: fill-box; transform-origin: center; animation: core 2.4s ease-in-out infinite; }
+    .ring { fill: none; stroke: #2FE7C4; stroke-width: 1.2; transform-box: fill-box; transform-origin: center; animation: ring 2.4s ease-out infinite; opacity: 0; }
+    /* Before its turn, each part holds its dim first frame instead of showing fully lit. */
+    .edge, .node, .pulse, .core, .ring { animation-fill-mode: backwards; }
+    .n1, .p1 { animation-delay: 0s; }
+    .n2, .p2 { animation-delay: .12s; }
+    .n3, .p3 { animation-delay: .24s; }
+    .n4, .p4 { animation-delay: .36s; }
+    .n5, .p5 { animation-delay: .48s; }
+    .n6, .p6 { animation-delay: .6s; }
+
+    @keyframes node { 0% { opacity: .3; transform: scale(.85); } 7% { opacity: 1; transform: scale(1.12); } 14% { transform: scale(1); } 72% { opacity: 1; } 92%, 100% { opacity: .3; transform: scale(.85); } }
+    @keyframes pulse { 0%, 4% { stroke-dashoffset: .2; opacity: 0; } 5% { opacity: 1; } 20% { stroke-dashoffset: -1; opacity: 1; } 21%, 100% { stroke-dashoffset: -1; opacity: 0; } }
+    @keyframes core { 0% { opacity: .35; transform: scale(.75); } 44% { opacity: 1; transform: scale(1); } 50% { transform: scale(1.18); } 58% { transform: scale(1); } 80% { opacity: 1; transform: scale(1); } 96%, 100% { opacity: .35; transform: scale(.75); } }
+    @keyframes ring { 0%, 48% { opacity: 0; transform: scale(1); } 50% { opacity: .7; } 72%, 100% { opacity: 0; transform: scale(3.4); } }
+    @keyframes edge { 0% { opacity: .2; } 46% { opacity: .9; } 80% { opacity: .9; } 96%, 100% { opacity: .2; } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .edge, .node, .core { animation: none; opacity: 1; }
+      .pulse, .ring { animation: none; opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+  <svg viewBox="0 0 64 64" role="img" aria-label="Growzar is opening">
+    <g class="edge" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M32 32V15.5M32 32L17.71 40.25M32 32L46.29 40.25" stroke-width="1.8" stroke-opacity=".55"/>
+      <path d="M32 15.5L46.29 23.75V40.25L32 48.5L17.71 40.25V23.75Z" stroke-width="2.8"/>
+    </g>
+    <!-- Each node's pulse runs from the node to the centre (pathLength 1). -->
+    <line class="pulse p1" pathLength="1" x1="32" y1="15.5" x2="32" y2="32"/>
+    <line class="pulse p2" pathLength="1" x1="46.29" y1="23.75" x2="32" y2="32"/>
+    <line class="pulse p3" pathLength="1" x1="46.29" y1="40.25" x2="32" y2="32"/>
+    <line class="pulse p4" pathLength="1" x1="32" y1="48.5" x2="32" y2="32"/>
+    <line class="pulse p5" pathLength="1" x1="17.71" y1="40.25" x2="32" y2="32"/>
+    <line class="pulse p6" pathLength="1" x1="17.71" y1="23.75" x2="32" y2="32"/>
+    <circle class="node n1" cx="32" cy="15.5" r="5.2"/>
+    <circle class="node n2" cx="46.29" cy="23.75" r="5.2"/>
+    <circle class="node n3" cx="46.29" cy="40.25" r="5.2"/>
+    <circle class="node n4" cx="32" cy="48.5" r="5.2"/>
+    <circle class="node n5" cx="17.71" cy="40.25" r="5.2"/>
+    <circle class="node n6" cx="17.71" cy="23.75" r="5.2"/>
+    <circle class="ring" cx="32" cy="32" r="6.4"/>
+    <circle class="core" cx="32" cy="32" r="6.4"/>
+  </svg>
+  <p>growzar</p>
+  <script>
+    // Paint first, then go on; this page stays up, still playing, until Growzar's first page arrives.
+    requestAnimationFrame(() => requestAnimationFrame(() => location.replace("/")));
+  </script>
+</body>
+</html>
