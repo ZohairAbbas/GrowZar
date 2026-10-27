@@ -5,7 +5,9 @@
  * itself and reads the figures out of the result.
  *
  * Plan's cases (G-GZR11-7) run with Plan's and return risk's gates open, as
- * for an internal viewer; plan_budget saves a plan each time it runs.
+ * every organization has them, and as a merchant (not internal), so the cash
+ * forecast and month end carry their Beta wording; plan_budget saves a plan
+ * each time it runs.
  *
  * Stores are the Pilot organization's: Y yx4fu1-ax (PKR, Courierify +
  * Financify), D 0dscam-qn (PKR, every app), Z zainvault (AED, Financify,
@@ -45,6 +47,8 @@ export type Case = {
   expect?: Call[];
   /** A figure the eval computes from two cells, as calculate would (share, difference). */
   calc?: { op: "share" | "difference"; a: Call; b: Call; decimals: number };
+  /** A Beta forecast (pre-Wave-1 pack 2): the answer must call it Beta. */
+  beta?: boolean;
 };
 
 const P30 = { days: 30, from: null, to: null };
@@ -162,9 +166,9 @@ export function cases(today: string): Case[] {
     { role: "staff", en: "What was the ROAS of our biggest campaign?", ru: "Hamari sab se bari campaign ka ROAS kya tha?", kind: "forbidden", tools: ["marketing"], expect: [{ tool: "marketing", args: { store: STORES.Y, view: "campaigns", period: null, limit: null }, pick: [{ row: 0, column: "spend" }] }] },
     { role: "staff", en: "What is our average order value?", ru: "Hamara average order value kya hai?", kind: "forbidden", tools: ["breakdown"], expect: [{ tool: "breakdown", args: bd("Y", ["aov"], "none", P30), pick: [{ column: "aov" }] }] },
 
-    // ── Plan (G-GZR11-7): forecasts, return risk and the simulator; internal-only, so the eval sets the gates ──
-    { store: "D", en: "How much COD will become due this week?", ru: "Is hafte kitna COD due hoga?", kind: "answer", tools: ["cash_forecast"], expect: [{ tool: "cash_forecast", args: { store: STORES.D }, pick: [{ row: 0, column: "due_likely" }] }] },
-    { store: "D", en: "How many orders will this month end with?", ru: "Ye mahina kitne orders par khatam hoga?", kind: "answer", tools: ["month_end"], expect: [{ tool: "month_end", args: { store: STORES.D }, pick: [{ row: 0, column: "orders_likely" }] }] },
+    // ── Plan (G-GZR11-7): forecasts, return risk and the simulator; open to every organization, cash and month end as Beta ──
+    { store: "D", en: "How much COD will become due this week?", ru: "Is hafte kitna COD due hoga?", kind: "answer", tools: ["cash_forecast"], beta: true, expect: [{ tool: "cash_forecast", args: { store: STORES.D }, pick: [{ row: 0, column: "due_low" }, { row: 0, column: "due_likely" }, { row: 0, column: "due_high" }] }] },
+    { store: "D", en: "How many orders will this month end with?", ru: "Ye mahina kitne orders par khatam hoga?", kind: "answer", tools: ["month_end"], beta: true, expect: [{ tool: "month_end", args: { store: STORES.D }, pick: [{ row: 0, column: "orders_low" }, { row: 0, column: "orders_likely" }, { row: 0, column: "orders_high" }] }] },
     { store: "D", en: "How many orders not shipped yet look likely to come back?", ru: "Jo orders abhi ship nahi hue un mein se kitne wapas aa sakte hain?", kind: "answer", tools: ["order_risk_summary"], expect: [{ tool: "order_risk_summary", args: { store: STORES.D }, pick: [{ row: 0, column: "orders" }] }] },
     // yx4fu1-ax is refused: a right answer says why, quoting the fix list's figures.
     { en: "I have PKR 100,000 for the next 30 days. Where should it go?", ru: "Mere paas agle 30 din ke liye 100,000 rupay hain. Kahan lagaun?", kind: "answer", tools: ["plan_budget"] },
@@ -193,6 +197,7 @@ export function cases(today: string): Case[] {
       tools: s.tools,
       ...(s.expect ? { expect: s.expect } : {}),
       ...(s.calc ? { calc: s.calc } : {}),
+      ...(s.beta ? { beta: true } : {}),
     })),
   );
 }

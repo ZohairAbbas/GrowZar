@@ -51,6 +51,8 @@ model Organization {
   askUsage         AskUsageMonthly[]
   booksSettings    BooksSettings?
 
+  productFeedback ProductFeedback[]
+
   @@map("organizations")
 }
 
@@ -1286,6 +1288,34 @@ model Plan {
 
   @@index([storeId, createdAt])
   @@map("plans")
+}
+
+/// "This looks wrong" on a Beta forecast or a return-risk band (pre-Wave-1
+/// pack 2): what the member said, with the figures they were shown as they
+/// stood. The source for the growth page's feedback list.
+model ProductFeedback {
+  id             String   @id @default(uuid())
+  organizationId String
+  storeId        String
+  userId         String
+  /// cash_forecast | month_end | return_risk
+  tool           String
+  /// wrong_amount | wrong_date | wrong_band | not_my_store | other
+  kind           String
+  note           String?
+  /// What inside the tool it is about: the order id, for return risk.
+  subject        String?
+  /// The period and the figures shown, as the page had them (money only where the member could see it).
+  inputs         Json
+  /// The build that showed them (build/version.txt), so the feedback is read against the rules of the day.
+  version        String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([tool, createdAt])
+  @@map("product_feedback")
 }
 
 /// A store's cash forecast as made at the start of a week (D-94), kept so Plan

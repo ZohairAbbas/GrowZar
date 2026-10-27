@@ -496,6 +496,20 @@ describe("answers", () => {
     }
   });
 
+  it("tells the model a Beta forecast is Beta and to give its range, without naming other stores to a merchant", async () => {
+    for (const name of ["cash_forecast", "month_end"]) {
+      const args = CALLS.find(([n]) => n === name)![1];
+      const merchant = (await run(name, args)).meta.rules[0]!;
+      expect(merchant, name).toMatch(/^This is a Beta estimate\. Say so in the answer, and give every figure as its low – high range/);
+      expect(merchant, name).toMatch(/landed inside the shown range/);
+      expect(merchant, name).not.toMatch(/0dscam|PKR stores|backtest/i);
+      expect((await run(name, args, { ...ctx(), internal: true })).meta.rules[0], name).toMatch(/Beta estimate.*Backtest 2026-10-20/);
+    }
+    const plan = CALLS.find(([n]) => n === "plan_budget")![1];
+    expect((await run("plan_budget", plan)).meta.rules[0]).toBe("Checked against past budgets; accurate on totals so far, on little history.");
+    expect((await run("plan_budget", plan, { ...ctx(), internal: true })).meta.rules[0]).toMatch(/0dscam-qn/);
+  });
+
   it("builds a strict schema for every tool", () => {
     for (const t of TOOLS) expect(() => strictSchema(t.schema)).not.toThrow();
   });

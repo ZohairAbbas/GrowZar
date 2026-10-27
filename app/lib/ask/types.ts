@@ -32,10 +32,12 @@ export type AskContext = {
   memo: Map<string, Promise<unknown>>;
   /** This answer's tool results so far, as the model numbers them (table 1 first), for `calculate`. */
   tables?: ToolResult[];
-  /** Plan's tools (G-GZR11-7): only where the viewer can see Plan (PLAN_ENABLED, internal until approved). */
+  /** Plan's tools (G-GZR11-7): only where the viewer can see Plan (plan:view, PLAN_ENABLED). */
   planTools?: boolean;
-  /** The return-risk tool: RETURN_RISK_ENABLED, for internal accounts and the organizations in RETURN_RISK_ORGS. */
+  /** The return-risk tool: while RETURN_RISK_ENABLED is on (the tool itself needs Courierify on the store). */
   riskTools?: boolean;
+  /** An internal account: Plan's rules then carry the backtests, which name stores; merchants get the Beta wording. */
+  internal?: boolean;
   /** Books' tools (B7, D-73): only where the viewer can open Books (books:view, every store in scope, Books on). */
   booksTools?: boolean;
 };

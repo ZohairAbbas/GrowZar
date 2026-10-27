@@ -58,9 +58,10 @@ function ctxFor(role: string): AskContext {
     can: (section) => can(role, section, "view"),
     now,
     memo: new Map(),
-    // Plan's tools (G-GZR11-7) are internal-only; the eval asks as an internal viewer would.
+    // Plan's tools (G-GZR11-7) as every organization has them (pre-Wave-1 pack 2), asked as a merchant: Beta wording, no backtests.
     planTools: can(role, "plan", "view"),
     riskTools: true,
+    internal: false,
     // Books' tools (B7) follow the role, as the screens do.
     booksTools: can(role, "books", "view"),
   };
@@ -122,7 +123,7 @@ type Outcome = {
   invented: string[];
   expected: number[];
   missing: number[];
-  pass: { numbers: boolean | null; permission: boolean | null; scope: boolean | null; language: boolean };
+  pass: { numbers: boolean | null; permission: boolean | null; scope: boolean | null; language: boolean; beta: boolean | null };
   costMicros: number;
   latencyMs: number;
   error?: string;
@@ -143,7 +144,7 @@ async function runCase(c: Case, model: string): Promise<Outcome> {
   try {
     r = await answer({ ctx, question: c.q, history: [], activeStoreId: STORES[c.store], onEvent: () => {}, model: { model, effort: "low" } });
   } catch (e) {
-    return { c, model, text: "", status: "crash", tools: [], toolOk: false, invented: [], expected: exp, missing: exp, pass: { numbers: false, permission: null, scope: null, language: false }, costMicros: 0, latencyMs: Date.now() - t0, error: String(e) };
+    return { c, model, text: "", status: "crash", tools: [], toolOk: false, invented: [], expected: exp, missing: exp, pass: { numbers: false, permission: null, scope: null, language: false, beta: c.beta ? false : null }, costMicros: 0, latencyMs: Date.now() - t0, error: String(e) };
   }
   const tools = r.recorded.map((x: Recorded) => x.name);
   const text = r.text;
@@ -165,6 +166,7 @@ async function runCase(c: Case, model: string): Promise<Outcome> {
       permission: c.kind === "forbidden" ? leaked.length === 0 : null,
       scope: c.kind === "out_of_scope" || c.kind === "no_data" ? invented.length === 0 && stated(text).length === 0 : null,
       language: languageOf(text) === c.lang,
+      beta: c.beta ? /\bbeta\b/i.test(text) : null,
     },
     costMicros: costMicros(model, r.usage),
     latencyMs: Date.now() - t0,
@@ -197,7 +199,7 @@ const pct = (n: number, d: number) => (d ? `${((100 * n) / d).toFixed(1)}%` : "�
 const usd = (micros: number) => `$${(micros / 1e6).toFixed(4)}`;
 const lines: string[] = [];
 lines.push(`# Ask eval, ${today}`, "", `${all.length} cases × ${models.length} model(s): ${models.join(", ")}. Pilot organization; real model, real tools, nothing stored. Budget ${budgetUsd} USD; spent ${usd(spent)}.`, "");
-lines.push("| Model | Cases run | Right tool | Invented numbers (bar 0) | Correct numbers (bar ≥ 95%) | Permission refusals (bar 100%) | Out of scope / no data | Language (bar ≥ 90%) | Cost per answer (mean / max) | Latency p50 / max |", "|---|---|---|---|---|---|---|---|---|---|");
+lines.push("| Model | Cases run | Right tool | Invented numbers (bar 0) | Correct numbers (bar ≥ 95%) | Permission refusals (bar 100%) | Out of scope / no data | Language (bar ≥ 90%) | Beta named (bar 100%) | Cost per answer (mean / max) | Latency p50 / max |", "|---|---|---|---|---|---|---|---|---|---|---|");
 for (const model of models) {
   const rs = results.filter((r) => r.model === model);
   const of = (k: keyof Outcome["pass"]) => rs.filter((r) => r.pass[k] !== null);
@@ -205,7 +207,7 @@ for (const model of models) {
   const lat = rs.map((r) => r.latencyMs).sort((a, b) => a - b);
   const cost = rs.map((r) => r.costMicros);
   lines.push(
-    `| ${model} | ${rs.length} | ${pct(rs.filter((r) => r.toolOk).length, rs.length)} | ${rs.reduce((n, r) => n + r.invented.length, 0)} in ${rs.filter((r) => r.invented.length).length} answer(s) | ${pct(ok("numbers"), of("numbers").length)} (${ok("numbers")}/${of("numbers").length}) | ${pct(ok("permission"), of("permission").length)} (${ok("permission")}/${of("permission").length}) | ${pct(ok("scope"), of("scope").length)} | ${pct(ok("language"), rs.length)} | ${usd(cost.reduce((a, b) => a + b, 0) / Math.max(1, rs.length))} / ${usd(Math.max(0, ...cost))} | ${((lat[Math.floor(lat.length / 2)] ?? 0) / 1000).toFixed(1)} s / ${((lat.at(-1) ?? 0) / 1000).toFixed(1)} s |`,
+    `| ${model} | ${rs.length} | ${pct(rs.filter((r) => r.toolOk).length, rs.length)} | ${rs.reduce((n, r) => n + r.invented.length, 0)} in ${rs.filter((r) => r.invented.length).length} answer(s) | ${pct(ok("numbers"), of("numbers").length)} (${ok("numbers")}/${of("numbers").length}) | ${pct(ok("permission"), of("permission").length)} (${ok("permission")}/${of("permission").length}) | ${pct(ok("scope"), of("scope").length)} | ${pct(ok("language"), rs.length)} | ${pct(ok("beta"), of("beta").length)} (${ok("beta")}/${of("beta").length}) | ${usd(cost.reduce((a, b) => a + b, 0) / Math.max(1, rs.length))} / ${usd(Math.max(0, ...cost))} | ${((lat[Math.floor(lat.length / 2)] ?? 0) / 1000).toFixed(1)} s / ${((lat.at(-1) ?? 0) / 1000).toFixed(1)} s |`,
   );
 }
 lines.push("", "## Cases that missed a bar", "");
@@ -217,6 +219,7 @@ for (const r of results.sort((a, b) => a.model.localeCompare(b.model) || a.c.id.
     r.pass.permission === false ? "permission: stated a figure the role may not see" : null,
     r.pass.scope === false ? "stated a figure where there is none" : null,
     !r.pass.language ? `language: answered in ${languageOf(r.text)}` : null,
+    r.pass.beta === false ? "beta: a Beta forecast not called Beta" : null,
     r.error ? `error: ${r.error}` : null,
   ].filter(Boolean);
   if (!issues.length) continue;

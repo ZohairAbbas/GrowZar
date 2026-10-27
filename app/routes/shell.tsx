@@ -90,8 +90,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   const organization = organizations.find((o) => o.id === viewer.organizationId);
   // Ask shows in the navigation only where it is on, for the server and the organization.
   const ask = askEnabled() && Boolean((await prisma.askSettings.findUnique({ where: { organizationId: viewer.organizationId }, select: { enabled: true } }))?.enabled);
-  // Plan shows only behind its switch, to internal accounts until approved (pack §10, P11-14).
-  const plan = allowed.has("plan") && (await planVisible(viewer.userId));
+  // Plan shows to every member with plan:view while its switch is on (pre-Wave-1 pack 2).
+  const plan = planVisible(allowed.has("plan"));
   // Books shows behind its switches, to members whose role and store scope allow it (D-80, D-81, D-91).
   const books = allowed.has("books") && (await booksVisible(request, viewer));
 

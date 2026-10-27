@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { prisma } from "../../db.server";
-import { FORECAST_STATUS } from "../../forecast/plan-form";
+import { FORECAST_STATUS, type ForecastStatus } from "../../forecast/plan-form";
 import { forecasts, runAndSave, savedPlan } from "../../forecast/plan.server";
 import { storeRisk } from "../../forecast/return-risk.server";
 import type { SimRequest } from "../../forecast/simulator/types";
@@ -14,10 +14,11 @@ import { FORBIDDEN_STORE, oneStoreArg, pickOneStore, refusal, screenLink } from 
  * simulator. Each reads exactly what /plan (or Orders) shows, so Ask and the
  * screen give the same figures for the same inputs: ranges are seeded.
  *
- * Gated like the screens (pack §10, P11-14): Plan's tools only where the
- * viewer can see Plan, the risk tool only where return risk is on for them
- * (internal accounts, and the pilot's organizations in RETURN_RISK_ORGS). A
- * forecast that failed its backtest says so in its rules, every time.
+ * Gated like the screens (pre-Wave-1 pack 2): Plan's tools where the viewer
+ * can see Plan, the risk tool while return risk is on. The two forecasts that
+ * failed their backtests are Beta: their rules tell the model to say so and to
+ * give the range, every time. Only an internal viewer's rules carry the
+ * backtests themselves, which name stores.
  */
 
 const r0 = (x: number) => Math.round(x);
@@ -31,7 +32,12 @@ function storeOf(ctx: AskContext, store: string | null, tool: string) {
   return s;
 }
 
-const statusRule = (s: { passes: boolean; note: string }) => (s.passes ? s.note : `This forecast failed its backtest, so treat it as rough and say so: ${s.note}`);
+/** How far to trust a tool's figures, as the rule the model reads first. */
+export function statusRule(s: ForecastStatus, ctx: Pick<AskContext, "internal">): string {
+  const record = ctx.internal ? s.note : s.line.replace(/^New\. /, "").replace(/ Tell us when it's off\.$/, "");
+  if (!s.beta) return record;
+  return `This is a Beta estimate. Say so in the answer, and give every figure as its low – high range with the likely figure inside it, never one number on its own. ${record}`;
+}
 
 // ── cash_forecast ───────────────────────────────────────────────────────────
 
@@ -72,7 +78,7 @@ async function runCashForecast(args: z.infer<typeof storeOnly>, ctx: AskContext)
       stores: [{ id: store.id, name: store.name }],
       currency: cur,
       rules: [
-        statusRule(FORECAST_STATUS.cash),
+        statusRule(FORECAST_STATUS.cash, ctx),
         "COD becoming due = parcels in transit delivered at their courier and city's odds for their age, on the days such parcels take. Paid out = only for couriers whose payout cycle Growzar measures, or whose lag the merchant gave in a plan.",
         "Low and high are the 10th and 90th percentiles of 1,000 runs; the low end is the one to count on.",
       ],
@@ -131,7 +137,7 @@ async function runMonthEnd(args: z.infer<typeof storeOnly>, ctx: AskContext): Pr
       stores: [{ id: store.id, name: store.name }],
       currency: cur,
       rules: [
-        statusRule(FORECAST_STATUS.monthEnd),
+        statusRule(FORECAST_STATUS.monthEnd, ctx),
         "Orders to come: the last 8 weeks' same-weekday orders, adjusted for the last 4 weeks' trend (at most ±20%); open orders resolved at their delivery odds. Profit is Finance's: delivered revenue less product cost, courier fees, other costs and ad spend at this month's rate.",
       ],
       gaps: [],
@@ -285,7 +291,7 @@ async function runPlanBudget(args: z.infer<typeof planSchema>, ctx: AskContext):
     rows,
     meta: {
       ...meta,
-      rules: [statusRule(FORECAST_STATUS.simulator), "Profit is delivered profit after the line's spend; the low end is the one to count on.", ...plan.assumptions],
+      rules: [statusRule(FORECAST_STATUS.simulator, ctx), "Profit is delivered profit after the line's spend; the low end is the one to count on.", ...plan.assumptions],
       notes: [...(t.kept > 0 ? [`${r0(t.kept)} ${cur} kept as cash: no further spend earned more than it cost`] : []), ...plan.leftOut.slice(0, 5)],
     },
     link,

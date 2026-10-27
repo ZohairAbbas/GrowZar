@@ -39,6 +39,8 @@ export default [
   // "Talk to your data" (Phase 10): a question in, a stream of events out.
   route("api/ask", "routes/api.ask.ts"),
   route("api/ask/feedback", "routes/api.ask.feedback.ts"),
+  // "This looks wrong" on Plan's Beta forecasts and return-risk bands.
+  route("api/feedback", "routes/api.feedback.ts"),
   // A browser crash, to the web log.
   route("api/client-error", "routes/api.client-error.ts"),
 
