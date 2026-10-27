@@ -6,6 +6,7 @@ import { auth } from "~/lib/auth.server";
 import { env } from "~/lib/env.server";
 import { readFormData } from "~/lib/form.server";
 import { LoadingSpinner } from "~/components/ui/LoadingSpinner";
+import { AppIcon } from "~/components/ui/AppIcon";
 
 export function meta() {
   return [{ title: "Sign in · Growzar" }];
@@ -67,9 +68,7 @@ export default function MagicLink({ loaderData, actionData }: Route.ComponentPro
     <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12">
       <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl">
         <div className="bg-primary-500 px-8 py-7 text-white">
-          <span className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 font-display text-xl font-bold leading-none text-mint">
-            g
-          </span>
+          <AppIcon className="mb-4 h-10 w-10" />
           <h1 className="font-display text-2xl font-bold">Sign in to Growzar</h1>
         </div>
         <div className="space-y-6 p-8">

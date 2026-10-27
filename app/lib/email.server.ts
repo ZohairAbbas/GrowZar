@@ -75,7 +75,7 @@ export async function sendEmail(message: Message): Promise<SendResult> {
   }
 }
 
-const shell = (heading: string, body: string, cta: { url: string; label: string }) => `
+const shell = (heading: string, body: string, cta?: { url: string; label: string }, extra = "") => `
 <!doctype html>
 <html><body style="margin:0;background:#f5f5f5;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px;">
@@ -85,24 +85,50 @@ const shell = (heading: string, body: string, cta: { url: string; label: string 
         <tr><td style="padding:32px;">
           <h1 style="margin:0 0 12px;font-size:20px;color:#111827;">${heading}</h1>
           <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#4b5563;">${body}</p>
-          <a href="${cta.url}" style="display:inline-block;padding:12px 24px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;font-weight:600;font-size:15px;">${cta.label}</a>
-          <p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">If the button does not work, paste this link into your browser:<br><span style="color:#2563eb;word-break:break-all;">${cta.url}</span></p>
+          ${cta ? `<a href="${cta.url}" style="display:inline-block;padding:12px 24px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;font-weight:600;font-size:15px;">${cta.label}</a>` : ""}
+          ${extra}
+          ${cta ? `<p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">If the button does not work, paste this link into your browser:<br><span style="color:#2563eb;word-break:break-all;">${cta.url}</span></p>` : ""}
         </td></tr>
       </table>
     </td></tr>
   </table>
 </body></html>`;
 
-export function sendMagicLinkEmail(to: string, url: string) {
+/** The sign-in code as it sits in an email: "123 456", easier to read across. */
+export function spacedCode(code: string): string {
+  return code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
+}
+
+const codeBlock = (code: string) =>
+  `<p style="margin:24px 0 0;font-size:15px;line-height:1.6;color:#4b5563;">Or type this code in Growzar:</p>
+          <p style="margin:6px 0 0;font-size:28px;font-weight:700;letter-spacing:4px;color:#111827;">${spacedCode(code)}</p>`;
+
+export function sendMagicLinkEmail(to: string, url: string, code?: string | null) {
   return sendEmail({
     to,
-    subject: "Your Growzar sign-in link",
+    subject: code ? "Your Growzar sign-in link and code" : "Your Growzar sign-in link",
     html: shell(
       "Sign in to Growzar",
       "This link signs you in and expires shortly. If you did not ask for it, you can ignore this email.",
       { url, label: "Sign in" },
+      code ? codeBlock(code) : "",
     ),
-    text: `Sign in to Growzar:\n\n${url}\n\nThis link expires shortly. If you did not ask for it, ignore this email.`,
+    text: code
+      ? `Sign in to Growzar:\n\n${url}\n\nOr type this code in Growzar: ${spacedCode(code)}\n\nThe link and the code expire shortly. If you did not ask for them, ignore this email.`
+      : `Sign in to Growzar:\n\n${url}\n\nThis link expires shortly. If you did not ask for it, ignore this email.`,
+  });
+}
+
+/** A code on its own: only if something calls Better Auth's code endpoint directly. */
+export function sendSignInCodeEmail(to: string, code: string) {
+  return sendEmail({
+    to,
+    subject: "Your Growzar sign-in code",
+    html: shell(
+      "Sign in to Growzar",
+      `Type this code in Growzar to sign in: <strong style="font-size:20px;letter-spacing:3px;color:#111827;">${spacedCode(code)}</strong><br>It expires in 10 minutes. If you did not ask for it, you can ignore this email.`,
+    ),
+    text: `Type this code in Growzar to sign in: ${spacedCode(code)}\n\nIt expires in 10 minutes. If you did not ask for it, ignore this email.`,
   });
 }
 

@@ -12,6 +12,7 @@ import {
   redirectWithCookies,
 } from "~/lib/session.server";
 import { LoadingSpinner } from "~/components/ui/LoadingSpinner";
+import { AppIcon } from "~/components/ui/AppIcon";
 
 export function meta() {
   return [{ title: "Sign in · Growzar" }];
@@ -46,7 +47,9 @@ export async function action({ request }: Route.ActionArgs) {
       // address exists; the next screen says the same thing either way.
       readableAuthError(error, "Could not send the link.");
     }
-    throw redirect(`/auth/check-email?email=${encodeURIComponent(email)}`);
+    const query = new URLSearchParams({ email });
+    if (next !== "/") query.set("next", next);
+    throw redirect(`/auth/check-email?${query}`);
   }
 
   const password = String(formData.get("password") ?? "");
@@ -88,9 +91,7 @@ export default function SignIn({ actionData }: Route.ComponentProps) {
       <div className="w-full max-w-md">
         <div className="overflow-hidden rounded-2xl bg-white shadow-xl">
           <div className="bg-primary-500 px-8 py-7 text-white">
-            <span className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 font-display text-xl font-bold leading-none text-mint">
-              g
-            </span>
+            <AppIcon className="mb-4 h-10 w-10" />
             <h1 className="font-display text-2xl font-bold">Sign in to Growzar</h1>
             <p className="mt-1 text-sm text-navy-muted">
               One place for the apps you already run.

@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 
 import type { Route } from "./+types/home";
 import { getSession } from "~/lib/session.server";
+import { AppIcon } from "~/components/ui/AppIcon";
 
 export function meta() {
   return [{ title: "Growzar" }];
@@ -22,9 +23,7 @@ export default function Home() {
     <main className="flex min-h-screen items-center justify-center bg-field px-4 py-12">
       <div className="w-full max-w-xl rounded-2xl bg-navy p-10 text-white">
         <div className="flex items-center gap-2.5">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 font-display text-xl font-bold leading-none text-mint">
-            g
-          </span>
+          <AppIcon className="h-10 w-10" />
           <span className="font-display text-2xl font-bold">growzar</span>
         </div>
         <h1 className="mt-8 font-display text-4xl font-bold leading-tight tracking-tight">

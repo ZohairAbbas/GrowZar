@@ -2,6 +2,7 @@ import { NavLink } from "react-router";
 import { BookOpen, Building2, CreditCard, Gauge, Mail, MessageCircleQuestionMark, Scale, Shield, User, Users } from "lucide-react";
 
 import { cn } from "~/lib/utils";
+import { useCenterActive } from "~/components/ui/useCenterActive";
 
 /**
  * Ported from salvage/components/settings/SettingsNav.tsx.
@@ -81,9 +82,11 @@ const navigation: NavItem[] = [
 ];
 
 export function SettingsNav({ internal = false }: { internal?: boolean }) {
+  // A phone gets one row of names that scrolls sideways, so the page itself starts on screen.
+  const strip = useCenterActive<HTMLElement>();
   return (
-    <nav className="space-y-1">
-      <h2 className="mb-2 px-3 pt-2 font-display text-lg font-bold text-gray-900">
+    <nav ref={strip} className="flex gap-1.5 overflow-x-auto sm:block sm:space-y-1">
+      <h2 className="mb-2 hidden px-3 pt-2 font-display text-lg font-bold text-gray-900 sm:block">
         Settings
       </h2>
 
@@ -93,7 +96,7 @@ export function SettingsNav({ internal = false }: { internal?: boolean }) {
             <span
               key={item.name}
               aria-disabled="true"
-              className="group flex cursor-not-allowed items-start gap-3 rounded-xl px-3 py-2.5 text-gray-400"
+              className="group hidden cursor-not-allowed items-start gap-3 rounded-xl px-3 py-2.5 text-gray-400 sm:flex"
             >
               <item.icon className="mt-0.5 h-5 w-5 flex-shrink-0 text-gray-300" />
               <span className="min-w-0 flex-1">
@@ -116,7 +119,7 @@ export function SettingsNav({ internal = false }: { internal?: boolean }) {
             end={item.end}
             className={({ isActive }) =>
               cn(
-                "group flex items-start gap-3 rounded-xl px-3 py-2.5 transition",
+                "group flex flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2.5 transition max-sm:min-h-11 sm:items-start sm:gap-3 sm:whitespace-normal",
                 isActive
                   ? "bg-navy text-white"
                   : "text-gray-700 hover:bg-field hover:text-gray-900",
@@ -127,7 +130,7 @@ export function SettingsNav({ internal = false }: { internal?: boolean }) {
               <>
                 <item.icon
                   className={cn(
-                    "mt-0.5 h-5 w-5 flex-shrink-0",
+                    "h-5 w-5 flex-shrink-0 sm:mt-0.5",
                     isActive
                       ? "text-mint"
                       : "text-gray-400 group-hover:text-gray-600",
@@ -135,7 +138,7 @@ export function SettingsNav({ internal = false }: { internal?: boolean }) {
                 />
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-semibold">{item.name}</span>
-                  <span className={cn("mt-0.5 block text-xs", isActive ? "text-navy-muted" : "text-gray-500")}>
+                  <span className={cn("mt-0.5 hidden text-xs sm:block", isActive ? "text-navy-muted" : "text-gray-500")}>
                     {item.description}
                   </span>
                 </span>

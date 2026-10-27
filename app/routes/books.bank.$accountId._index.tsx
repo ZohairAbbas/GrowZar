@@ -115,7 +115,7 @@ export default function StatementReview({ loaderData: d, actionData }: Route.Com
     return [];
   });
   const tab = (s: string, label: string, n: number) => (
-    <Link to={`?show=${s}`} className={`rounded-full px-3.5 py-1.5 text-sm font-semibold ${d.show === s ? "bg-navy text-white" : "bg-white text-gray-700 hover:bg-gray-100"}`}>
+    <Link to={`?show=${s}`} className={`tap rounded-full px-3.5 py-1.5 text-sm font-semibold ${d.show === s ? "bg-navy text-white" : "bg-white text-gray-700 hover:bg-gray-100"}`}>
       {label} · {n}
     </Link>
   );

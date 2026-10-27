@@ -72,7 +72,7 @@ export function CohortGrid({
                 type="button"
                 onClick={() => setView(key)}
                 aria-pressed={view === key}
-                className={`rounded-full px-3 py-1 ${view === key ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
+                className={`tap rounded-full px-3 py-1 ${view === key ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
               >
                 {label}
               </button>
@@ -91,7 +91,7 @@ export function CohortGrid({
       {data.cohorts.length === 0 ? (
         <p className="mt-4 text-sm text-gray-500">No delivered orders with a buyer yet.</p>
       ) : view === "share" ? (
-        <table className="mt-4 min-w-full border-separate border-spacing-[2px] text-sm">
+        <table className="pin-first mt-4 min-w-full border-separate border-spacing-[2px] text-sm">
           <thead className="text-left text-xs font-semibold text-gray-500">
             <tr>
               <th className="py-2 pr-4">First order</th>
@@ -171,7 +171,7 @@ function MoneyGrid({ data, view, months }: { data: Retention; view: "revenue" | 
   const top = Math.max(1, ...data.cohorts.flatMap((c) => (c.money?.cells ?? []).map((x) => Number(valueOf(x) ?? 0))));
   const step = (v: number) => STEPS[Math.min(STEPS.length - 1, Math.floor((v / top) * STEPS.length))]!;
   return (
-    <table className="mt-4 min-w-full border-separate border-spacing-[2px] text-sm">
+    <table className="pin-first mt-4 min-w-full border-separate border-spacing-[2px] text-sm">
       <thead className="text-left text-xs font-semibold text-gray-500">
         <tr>
           <th className="py-2 pr-4">First order</th>
@@ -282,7 +282,7 @@ export function RepeatCurve({ data, minBuyers }: { data: Retention; minBuyers: n
           ) : null}
         </svg>
       ) : null}
-      <table className="mt-3 min-w-full text-sm">
+      <table className="pin-first mt-3 min-w-full text-sm">
         <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
           <tr>
             <th className="py-2 pr-4">Within</th>

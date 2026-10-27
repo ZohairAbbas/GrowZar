@@ -12,6 +12,7 @@ import {
   redirectWithCookies,
 } from "~/lib/session.server";
 import { LoadingSpinner } from "~/components/ui/LoadingSpinner";
+import { AppIcon } from "~/components/ui/AppIcon";
 
 export function meta() {
   return [{ title: "Create an account · Growzar" }];
@@ -76,9 +77,7 @@ export default function SignUp({ actionData }: Route.ComponentProps) {
       <div className="w-full max-w-md">
         <div className="overflow-hidden rounded-2xl bg-white shadow-xl">
           <div className="bg-primary-500 px-8 py-7 text-white">
-            <span className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 font-display text-xl font-bold leading-none text-mint">
-              g
-            </span>
+            <AppIcon className="mb-4 h-10 w-10" />
             <h1 className="font-display text-2xl font-bold">Create your Growzar account</h1>
             <p className="mt-1 text-sm text-navy-muted">
               Then connect the stores you already run.

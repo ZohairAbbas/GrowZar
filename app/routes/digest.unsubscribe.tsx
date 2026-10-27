@@ -5,6 +5,7 @@ import type { Route } from "./+types/digest.unsubscribe";
 import { prisma } from "~/lib/db.server";
 import { readFormData } from "~/lib/form.server";
 import { readUnsubscribeToken } from "~/lib/digest/unsubscribe.server";
+import { AppIcon } from "~/components/ui/AppIcon";
 
 export function meta() {
   return [{ title: "Weekly digest · Growzar" }];
@@ -52,9 +53,7 @@ export default function Unsubscribe({ loaderData, actionData }: Route.ComponentP
     <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12">
       <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl">
         <div className="bg-primary-500 px-8 py-7 text-white">
-          <span className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 font-display text-xl font-bold leading-none text-mint">
-            g
-          </span>
+          <AppIcon className="mb-4 h-10 w-10" />
           <h1 className="font-display text-2xl font-bold">Weekly digest</h1>
         </div>
         <div className="space-y-5 p-8 text-sm text-gray-700">

@@ -70,7 +70,7 @@ export function ProfitTables({
               type="button"
               onClick={() => setTab(t.key)}
               aria-pressed={tab === t.key}
-              className={`rounded-full px-3 py-1 ${tab === t.key ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
+              className={`tap rounded-full px-3 py-1 ${tab === t.key ? "bg-navy text-white" : "text-gray-600 hover:text-gray-900"}`}
             >
               {t.label}
             </button>
@@ -82,7 +82,7 @@ export function ProfitTables({
         {losing ? ` ${losing} of the rows shown lose money.` : ""}
       </p>
       <div className="mt-4 overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="pin-first min-w-full text-sm">
           <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
             <tr>
               <th className="py-2 pr-4">{TABS.find((t) => t.key === tab)!.one}</th>
@@ -132,7 +132,7 @@ export function ProfitTables({
                   </td>
                   <td className="py-2 text-right">
                     {to ? (
-                      <Link to={to} className="inline-flex items-center gap-1 text-xs font-semibold text-accent-600 hover:underline">
+                      <Link to={to} className="tap inline-flex items-center gap-1 text-xs font-semibold text-accent-600 hover:underline">
                         Orders <ArrowRight className="h-3 w-3" />
                       </Link>
                     ) : null}

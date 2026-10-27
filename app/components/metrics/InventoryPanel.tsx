@@ -152,7 +152,7 @@ export function InventoryPanel({
                 to={`/inventory?${period}${s.state ? `&stock=${s.state}` : ""}`}
                 preventScrollReset
                 aria-current={active ? "true" : undefined}
-                className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 transition ${
+                className={`tap inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 transition ${
                   active ? "bg-navy text-white" : "bg-gray-50 text-gray-700 hover:bg-gray-100"
                 }`}
               >
@@ -163,7 +163,7 @@ export function InventoryPanel({
           })}
         </nav>
         <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="pin-first min-w-full text-sm">
             <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
               <tr>
                 <th className="py-2 pr-4">Variant</th>

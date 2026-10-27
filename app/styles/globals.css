@@ -24,6 +24,34 @@
   @apply border-gray-200;
 }
 
+/* A small pill or tab that still takes a thumb on a phone (pre-Wave-1 pack 3):
+   44 px tall below `sm`, unchanged above it. */
+@media (max-width: 639px) {
+  .tap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.75rem;
+  }
+
+  /* Pill buttons and text fields across the app, the same 44 px (a plain
+     inline link is left alone: it can't take a height). */
+  :is(a, button, summary).rounded-full,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+  select {
+    min-height: 2.75rem;
+  }
+
+  /* A wide table that scrolls inside its card keeps its first column in view. */
+  table.pin-first tr > :first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background-color: #fff;
+    box-shadow: 1px 0 0 #E7EFEE;
+  }
+}
+
 html {
   scroll-behavior: smooth;
 }

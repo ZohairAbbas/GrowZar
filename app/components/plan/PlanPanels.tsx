@@ -30,8 +30,9 @@ function RangeFirst({ r, f = n }: { r: Range; f?: (x: number) => string }) {
   if (Math.round(r.low) === Math.round(r.high)) return <>{f(r.likely)}</>;
   return (
     <>
-      {f(r.low)} – {f(r.high)}
-      <span className="block text-xs font-normal text-gray-500">likely {f(r.likely)}</span>
+      {/* Each figure stays on one line; a narrow column breaks at the dash, never inside "PKR 1,525,670". */}
+      <span className="whitespace-nowrap">{f(r.low)}</span> – <span className="whitespace-nowrap">{f(r.high)}</span>
+      <span className="block whitespace-nowrap text-xs font-normal text-gray-500">likely {f(r.likely)}</span>
     </>
   );
 }
@@ -65,9 +66,10 @@ function Card({ title, children, aside, beta }: { title: string; children: React
     <section className="space-y-3 rounded-2xl bg-white p-5">
       <div className="space-y-1">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="flex items-center gap-2 font-display text-lg font-bold text-gray-900">
+          {/* Inline, so the pill follows the title's last word when a long title wraps. */}
+          <h2 className="font-display text-lg font-bold text-gray-900">
             {title}
-            {beta ? <span className="rounded-full bg-accent-100 px-2 py-0.5 font-sans text-xs font-semibold text-accent-700">Beta</span> : null}
+            {beta ? <span className="ml-2 inline-block rounded-full bg-accent-100 px-2 py-0.5 align-middle font-sans text-xs font-semibold text-accent-700">Beta</span> : null}
           </h2>
           {aside}
         </div>
@@ -87,7 +89,27 @@ export function CashForecastCard({ cash, status, internal, storeId }: { cash: Ca
   return (
     <Card title="Cash coming back" aside={<span className="text-xs text-gray-500">Next 4 weeks, low – high</span>} beta={status.beta ? status.line : undefined}>
       <Status status={status} internal={internal} />
-      <div className="overflow-x-auto">
+      {/* A phone gets each week as a block; the five-column table would hide paid out off to the side. */}
+      <ul className="divide-y divide-gray-100 text-sm sm:hidden">
+        {cash.weeks.map((w, i) => (
+          <li key={w.from} className="space-y-2 py-3">
+            <p className="font-semibold text-gray-700">{date(w.from)} – {date(w.to)}</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <p className="text-xs text-gray-500">COD becoming due</p>
+                <p className="tabular-nums text-gray-900"><RangeFirst r={cash.due.weeks[i]!} f={(x) => money(x, c)} /></p>
+                <RangeBar r={cash.due.weeks[i]!} max={max} />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-gray-500">Paid out</p>
+                <p className="tabular-nums text-gray-900">{paid ? <RangeFirst r={cash.paid.weeks[i]!} f={(x) => money(x, c)} /> : "—"}</p>
+                {paid ? <RangeBar r={cash.paid.weeks[i]!} max={max} /> : null}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="hidden overflow-x-auto sm:block">
         <table className="min-w-full text-sm">
           <thead className="text-left text-xs font-semibold text-gray-500">
             <tr>
@@ -210,7 +232,10 @@ export function MonthEndCard({ month, canSeeMoney, status, internal, storeId }: 
         <thead className="text-left text-xs font-semibold text-gray-500">
           <tr>
             <th className="py-2 pr-4" />
-            <th className="py-2 pr-4">{label(m.month)} at month end (low – high)</th>
+            <th className="py-2 pr-4">
+              <span className="sm:hidden">{label(m.month)} end</span>
+              <span className="hidden sm:inline">{label(m.month)} at month end (low – high)</span>
+            </th>
             <th className="py-2">{label(p.month)}</th>
           </tr>
         </thead>
@@ -459,7 +484,7 @@ export function SavedPlans({ plans, current }: { plans: Array<{ id: string; crea
   return (
     <div className="flex flex-wrap gap-2 text-sm">
       {plans.map((p) => (
-        <Link key={p.id} to={`/plan?id=${p.id}`} aria-current={p.id === current ? "true" : undefined} className={`rounded-full px-3 py-1.5 ${p.id === current ? "bg-navy text-white" : "bg-white text-gray-700 hover:bg-gray-100"}`}>
+        <Link key={p.id} to={`/plan?id=${p.id}`} aria-current={p.id === current ? "true" : undefined} className={`tap rounded-full px-3 py-1.5 ${p.id === current ? "bg-navy text-white" : "bg-white text-gray-700 hover:bg-gray-100"}`}>
           {new Date(p.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
           {p.budget ? ` · ${n(p.budget)}` : ""}
           {p.status === "refused" ? " · refused" : ""}

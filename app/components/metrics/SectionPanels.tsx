@@ -533,7 +533,7 @@ export function OrdersPanel({
               to={`/orders?${query}`}
               preventScrollReset
               aria-current={active ? "true" : undefined}
-              className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 transition ${
+              className={`tap inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 transition ${
                 active ? "bg-navy text-white" : "bg-white text-gray-700 hover:bg-gray-100"
               }`}
             >
@@ -544,8 +544,46 @@ export function OrdersPanel({
           );
         })}
       </nav>
-      <div className="overflow-x-auto rounded-2xl bg-white">
-        <table className="min-w-full text-sm">
+      {/* A phone gets each order as a card: seven columns would leave all but three off to the side. */}
+      <ul className="divide-y divide-gray-100 rounded-2xl bg-white sm:hidden">
+        {view.rows.map((r) => (
+          <li key={r.orderId} className="space-y-2 px-4 py-3 text-sm">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="min-w-0">
+                <span className="font-semibold text-gray-900">{r.orderName ?? r.orderId}</span>{" "}
+                <span className="whitespace-nowrap text-xs text-gray-500">{r.localDay ?? "—"}</span>
+              </p>
+              <span className="flex-shrink-0 text-right">
+                {r.placed ? <MoneyList values={[r.placed]} /> : <span className="text-gray-400">no total</span>}
+              </span>
+            </div>
+            <p className="text-gray-700">
+              <OutcomeDot outcome={r.outcome} className="mr-2" />
+              <OutcomeText outcome={r.outcome} timing={r.timing} authority={r.authority} />
+              {r.refunded && Number(r.refunded.amount) > 0 ? (
+                <span className="ml-2 rounded-full bg-coral-100 px-2 py-0.5 text-xs font-semibold text-coral-700">refunded {r.refunded.amount}</span>
+              ) : null}
+            </p>
+            {disagree ? (
+              <p className="text-xs text-gray-600">Financify says {view.financifySays[r.orderId] ? outcomeLabel(view.financifySays[r.orderId]!) : "—"}</p>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-gray-600">
+              {r.confirmation ? <ConfirmationPill value={r.confirmation} /> : null}
+              <span>
+                {r.courier?.replace(/^financify:/, "") ?? "—"} · {r.city ?? "—"}
+              </span>
+            </div>
+            {risk && risk.rows[r.orderId] ? <RiskDetails orderId={r.orderId} value={risk.rows[r.orderId]!} risk={risk} /> : null}
+          </li>
+        ))}
+        {view.total > view.shown ? (
+          <li className="px-4 py-3 text-xs text-gray-500">
+            Latest {view.shown} of {view.total.toLocaleString()} {view.filter ? "matching " : ""}orders in this period.
+          </li>
+        ) : null}
+      </ul>
+      <div className="hidden overflow-x-auto rounded-2xl bg-white sm:block">
+        <table className="pin-first min-w-full text-sm">
           <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
             <tr>
               <th className="px-5 py-3">Order</th>
@@ -632,6 +670,29 @@ function RiskCell({ orderId, value, risk }: { orderId: string; value: OrdersRisk
   );
 }
 
+/** The phone's risk line: the band, with its reasons and "this looks wrong" behind a tap. */
+function RiskDetails({ orderId, value, risk }: { orderId: string; value: OrdersRisk["rows"][string]; risk: OrdersRisk }) {
+  const band = (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${RISK_STYLE[value.band]}`}>
+      {value.band.charAt(0).toUpperCase() + value.band.slice(1)} return risk
+    </span>
+  );
+  if (value.band === "medium") return <p>{band}</p>;
+  return (
+    <details className="group">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-xs font-semibold text-gray-600 [&::-webkit-details-marker]:hidden">
+        {band}
+        <span className="group-open:hidden">Why?</span>
+        <span className="hidden group-open:inline">Hide</span>
+      </summary>
+      <div className="space-y-1 pb-1">
+        {value.reasons[0] ? <p className="text-xs text-gray-500">{value.reasons.join("; ")}</p> : null}
+        <LooksWrong tool="return_risk" storeId={risk.storeId} subject={orderId} inputs={{ band: value.band, reasons: value.reasons, storeRate: Math.round(risk.storeRate * 1000) / 1000 }} compact />
+      </div>
+    </details>
+  );
+}
+
 // ── Shipping ────────────────────────────────────────────────────────────────
 
 export function ShippingPanel({
@@ -670,7 +731,7 @@ export function ShippingPanel({
 
   const table = (kind: "courier" | "city", list: ReturnType<typeof rows>) => (
     <div className="overflow-x-auto rounded-2xl bg-white">
-      <table className="min-w-full text-sm">
+      <table className="pin-first min-w-full text-sm">
         <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
           <tr>
             <th className="px-5 py-3">
@@ -712,7 +773,7 @@ export function ShippingPanel({
                 {r.other ? null : (
                   <Link
                     to={link("/orders", kind === "courier" ? { courier: r.key } : { city: r.key })}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-accent-600 hover:underline"
+                    className="tap inline-flex items-center gap-1 text-xs font-semibold text-accent-600 hover:underline"
                   >
                     Orders <ArrowRight className="h-3 w-3" />
                   </Link>
@@ -810,7 +871,7 @@ export function CustomersPanel({
         </Stat>
       </div>
       <div className="overflow-x-auto rounded-2xl bg-white">
-        <table className="min-w-full text-sm">
+        <table className="pin-first min-w-full text-sm">
           <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
             <tr>
               <th className="px-5 py-3">Buyer</th>

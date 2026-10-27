@@ -57,7 +57,7 @@ export function MessagingPanel({ view, periodDays }: { view: MessagingPanelView;
       </p>
 
       <div className="mt-4 overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="pin-first min-w-full text-sm">
           <thead className="border-b border-gray-100 text-left text-xs font-semibold text-gray-500">
             <tr>
               <th className="py-2 pr-4">Journey</th>
