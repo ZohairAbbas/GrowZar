@@ -15,7 +15,7 @@ import {
   currentStatusTiming,
   type StatusTiming,
 } from "../shipments/events";
-import { formatAmount, isPositive, parseAmount, readMoney, subtractMoney, timesQuantity, type Money } from "./money";
+import { formatAmount, isPositive, parseAmount, readMoney, subtractMoney, timesQuantity, zero, type Money } from "./money";
 import { normalizeCity, type CityAlias } from "./city-aliases";
 
 /** A synced row as the grain sees it. */
@@ -145,7 +145,10 @@ export type OrderGrain = {
    * `value` is the line's own price × quantity less its own discount; an
    * order-level discount is not in it, so lines need not sum to `placed`.
    * `cost` is the order-time unit cost × quantity (rule #14). Either is null
-   * when Financify did not send it.
+   * when Financify did not send it. A gift card costs nothing.
+   *
+   * `quantity` is after Shopify order edits: units edited off are in
+   * `editedOff`, and a line edited off entirely stays with quantity 0.
    */
   lines: Array<{
     variantId: string | null;
@@ -154,6 +157,8 @@ export type OrderGrain = {
     title?: string | null;
     variantTitle?: string | null;
     quantity: number;
+    /** Units removed in a Shopify order edit; absent when none were. */
+    editedOff?: number;
     value: Money | null;
     cost: Money | null;
   }>;
@@ -191,6 +196,77 @@ function date(value: unknown): Date | null {
 
 function obj(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+/**
+ * What Shopify order edits took off an order (W1 finance edits).
+ *
+ * Financify sends Shopify's edited figures (D-82), but `current.*` is after
+ * edits *and* refunds and cancellations (it is 0 on a cancelled order), and
+ * so is each line's `currentQuantity`. Growzar keeps refunds (rule #10) and
+ * cancellations (rule #11) apart from placed revenue, so it reads the edits
+ * alone: Shopify records items edited off an unpaid order as a zero-value
+ * refund, which Financify sends as `refunds[kind=edit_removal]` with its
+ * lines. Books reads edits the same way, so the two agree.
+ *
+ * An edit that only changes a price or shipping, or adds items, leaves no
+ * such event and keeps the total as placed (2026-10-27 decision). An edit
+ * removal on an order already paid comes back as a money refund, and counts
+ * as one.
+ *
+ * Null when the order was not edited, Financify has not sent its refunds,
+ * nothing was edited off, or the removals are in another currency than the
+ * order (Financify's `money.*` is in the order's currency, its refunds in
+ * the shop's; rule #4).
+ */
+type EditRemovals = {
+  /** Units edited off per Shopify line id. */
+  byLine: Map<string, number>;
+  /** Value of the items edited off, with their tax and order-discount share. */
+  value: Money;
+  tax: Money;
+  count: number;
+};
+
+function editRemovals(fin: Record<string, unknown> | null, currency: string | null): { removals: EditRemovals | null; note: string | null } {
+  if (obj(fin?.current).edited !== true) return { removals: null, note: null };
+  if (!Array.isArray(fin!.refunds)) {
+    return { removals: null, note: "edited in Shopify, but Financify has not sent the edit's details; the total as placed is used" };
+  }
+  const byLine = new Map<string, number>();
+  let value = 0n;
+  let tax = 0n;
+  let count = 0;
+  for (const r of fin!.refunds as unknown[]) {
+    const refund = obj(r);
+    if (refund.kind !== "edit_removal" || !Array.isArray(refund.lines)) continue;
+    count += 1;
+    for (const l of refund.lines as unknown[]) {
+      const line = obj(l);
+      const amount = readMoney(line.amount);
+      const lineTax = readMoney(line.tax);
+      if ((amount && amount.currency !== currency) || (lineTax && lineTax.currency !== currency)) {
+        return { removals: null, note: `edited in Shopify, but the edit is in ${amount?.currency ?? lineTax?.currency} and the order in ${currency}; the total as placed is used` };
+      }
+      value += parseAmount(amount?.amount) ?? 0n;
+      tax += parseAmount(lineTax?.amount) ?? 0n;
+      const id = line.lineId == null ? null : String(line.lineId);
+      const qty = typeof line.quantity === "number" && Number.isInteger(line.quantity) ? line.quantity : 0;
+      if (id) byLine.set(id, (byLine.get(id) ?? 0) + qty);
+    }
+  }
+  if (count === 0) {
+    return { removals: null, note: "edited in Shopify without removing items; the total as placed is used" };
+  }
+  return {
+    removals: {
+      byLine,
+      value: { amount: formatAmount(value + tax), currency: currency! },
+      tax: { amount: formatAmount(tax), currency: currency! },
+      count,
+    },
+    note: null,
+  };
 }
 
 /** One parcel's outcome, from Courierify's own status vocabulary. */
@@ -282,15 +358,24 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
   };
 
   // ── Money (rules #2, #4) ─────────────────────────────────────────────────
-  const placed = readMoney(money.placed);
-  const currency = placed?.currency ?? null;
+  const asPlaced = readMoney(money.placed);
+  const currency = asPlaced?.currency ?? null;
+  // Shopify's edited total: as placed, less what edits took off.
+  const { removals, note: editNote } = editRemovals(fin, currency);
+  const placed = asPlaced && removals ? subtractMoney(asPlaced, removals.value) : asPlaced;
   explain.placed = {
     rule: ["#1", "#2"],
-    source: order ? "financify.orders.money.placed" : "none",
-    inputs: order ? [ref(order, "money.placed")] : [],
-    note: order
-      ? undefined
-      : "Courierify's parcel feed carries a COD amount, not an order total, so placed revenue is unknown without Financify",
+    source: !order
+      ? "none"
+      : removals
+        ? "Shopify's edited total: financify.orders.money.placed less refunds[edit_removal]"
+        : "financify.orders.money.placed",
+    inputs: order ? [ref(order, "money.placed"), ...(removals ? [ref(order, "refunds")] : [])] : [],
+    note: !order
+      ? "Courierify's parcel feed carries a COD amount, not an order total, so placed revenue is unknown without Financify"
+      : removals
+        ? `${asPlaced!.currency} ${asPlaced!.amount} as placed, less ${removals.value.amount} of items removed in ${removals.count === 1 ? "an edit" : `${removals.count} edits`}`
+        : (editNote ?? undefined),
   };
 
   for (const field of ["refunded", "discounts", "shipping", "tax"] as const) {
@@ -299,6 +384,11 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
       source: order ? `financify.orders.money.${field}` : "none",
       inputs: order ? [ref(order, `money.${field}`)] : [],
     };
+  }
+  const taxAsPlaced = readMoney(money.tax);
+  const tax = taxAsPlaced && removals && removals.tax.currency === taxAsPlaced.currency ? subtractMoney(taxAsPlaced, removals.tax) : taxAsPlaced;
+  if (removals && isPositive(removals.tax)) {
+    explain.tax = { ...explain.tax!, source: "financify.orders.money.tax less refunds[edit_removal].lines.tax", inputs: [...explain.tax!.inputs, ref(order!, "refunds")] };
   }
 
   // ── Delivery outcome (rules #7, #8, #9, #10, #11) ────────────────────────
@@ -470,14 +560,80 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     note: collected ? "paid by courier; bank receipt is not yet available" : "no settled delivered parcel",
   };
 
+  // ── Lines (rules #14, #30) ──────────────────────────────────────────────
+  const lineItems = Array.isArray(fin?.lineItems) ? (fin!.lineItems as unknown[]).map(obj) : [];
+  const giftCards = lineItems.map((line) => line.isGiftCard === true);
+  const lines = lineItems.map((line, i) => {
+    const ordered = typeof line.quantity === "number" && Number.isInteger(line.quantity) ? line.quantity : 0;
+    const lineId = line.lineId == null ? null : String(line.lineId);
+    const editedOff = Math.min(ordered, (lineId && removals?.byLine.get(lineId)) || 0);
+    const quantity = ordered - editedOff;
+    const unitPrice = readMoney(line.unitPrice);
+    const unitCost = readMoney(line.unitCost);
+    const discount = readMoney(line.totalDiscount);
+    let value = unitPrice ? timesQuantity(unitPrice, ordered) : null;
+    if (value && discount && discount.currency === value.currency) value = subtractMoney(value, discount);
+    // The line's own discount covers every unit ordered; what is left keeps its share.
+    if (value && editedOff) value = { amount: formatAmount((parseAmount(value.amount)! * BigInt(quantity)) / BigInt(ordered)), currency: value.currency };
+    return {
+      variantId: typeof line.variantId === "string" ? line.variantId : null,
+      productId: typeof line.productId === "string" ? line.productId : null,
+      title: typeof line.title === "string" ? line.title : null,
+      variantTitle: typeof line.variantTitle === "string" ? line.variantTitle : null,
+      quantity,
+      ...(editedOff ? { editedOff } : {}),
+      value,
+      cost: giftCards[i] ? (currency ? zero(currency) : null) : unitCost ? timesQuantity(unitCost, quantity) : null,
+    };
+  });
+  explain.lines = {
+    rule: ["#14", "#30"],
+    source: removals
+      ? "financify.orders.lineItems, quantities less refunds[edit_removal].lines (Shopify's edited quantities)"
+      : "financify.orders.lineItems (quantities as ordered)",
+    inputs: order ? [ref(order, "lineItems"), ...(removals ? [ref(order, "refunds")] : [])] : [],
+    note: removals
+      ? `${lines.filter((l) => l.editedOff).length} line(s) changed by an edit; a line removed entirely stays with quantity 0`
+      : giftCards.includes(true)
+        ? "gift cards carry no cost"
+        : undefined,
+  };
+
   // ── Costs (rules #13, #14) ──────────────────────────────────────────────
+  // Financify's cost of goods is per unit ordered. After an edit (or with a
+  // gift card, which costs nothing) it is recomputed from the lines, and is
+  // complete only if every line still on the order has a cost.
   const cogsObj = obj(fin?.cogs);
-  const cogs = readMoney(cogsObj.total);
+  const fromLines = !!removals || giftCards.includes(true);
+  let cogs = readMoney(cogsObj.total);
+  let cogsComplete = typeof cogsObj.complete === "boolean" ? cogsObj.complete : null;
+  let missingCost = 0;
+  if (fromLines) {
+    const costCurrency = cogs?.currency ?? currency;
+    let units = 0n;
+    for (const [i, l] of lines.entries()) {
+      if (l.quantity === 0 || giftCards[i]) continue;
+      if (!l.cost || l.cost.currency !== costCurrency) missingCost += 1;
+      else units += parseAmount(l.cost.amount)!;
+    }
+    cogs = costCurrency ? { amount: formatAmount(units), currency: costCurrency } : null;
+    cogsComplete = missingCost === 0;
+  }
   explain.cogs = {
     rule: ["#14"],
-    source: "financify.orders.cogs",
-    inputs: order ? [ref(order, "cogs")] : [],
-    note: cogsObj.complete === false ? `${String(cogsObj.linesMissingCost)} line(s) have no cost` : undefined,
+    source: !fromLines
+      ? "financify.orders.cogs"
+      : removals
+        ? "financify.orders.lineItems: unit cost × quantity after Shopify's edits"
+        : "financify.orders.lineItems: unit cost × quantity, gift cards at no cost",
+    inputs: order ? [ref(order, fromLines ? "lineItems" : "cogs"), ...(removals ? [ref(order, "refunds")] : [])] : [],
+    note: fromLines
+      ? missingCost
+        ? `${missingCost} line(s) have no cost`
+        : undefined
+      : cogsObj.complete === false
+        ? `${String(cogsObj.linesMissingCost)} line(s) have no cost`
+        : undefined,
   };
   // Financify nests the money: `courierFee: { amount: { amount, currency },
   // source }`. Reading `courierFee` itself as money dropped all 908 priced
@@ -589,26 +745,6 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
             : `Financify's "${finCityRaw}" has no learned match: unmapped`,
       };
 
-  const lines = Array.isArray(fin?.lineItems)
-    ? (fin!.lineItems as unknown[]).map((l) => {
-        const line = obj(l);
-        const quantity = typeof line.quantity === "number" && Number.isInteger(line.quantity) ? line.quantity : 0;
-        const unitPrice = readMoney(line.unitPrice);
-        const unitCost = readMoney(line.unitCost);
-        const discount = readMoney(line.totalDiscount);
-        let value = unitPrice ? timesQuantity(unitPrice, quantity) : null;
-        if (value && discount && discount.currency === value.currency) value = subtractMoney(value, discount);
-        return {
-          variantId: typeof line.variantId === "string" ? line.variantId : null,
-          productId: typeof line.productId === "string" ? line.productId : null,
-          title: typeof line.title === "string" ? line.title : null,
-          variantTitle: typeof line.variantTitle === "string" ? line.variantTitle : null,
-          quantity,
-          value,
-          cost: unitCost ? timesQuantity(unitCost, quantity) : null,
-        };
-      })
-    : [];
 
   return {
     orderId: input.orderId,
@@ -623,9 +759,9 @@ export function buildOrderGrain(input: OrderGrainInput): OrderGrain {
     refunded: readMoney(money.refunded),
     discounts: readMoney(money.discounts),
     shipping: readMoney(money.shipping),
-    tax: readMoney(money.tax),
+    tax,
     cogs,
-    cogsComplete: typeof cogsObj.complete === "boolean" ? cogsObj.complete : null,
+    cogsComplete,
     courierFee,
     courierFeeSource: typeof feeObj.source === "string" ? feeObj.source : null,
     outcome,
