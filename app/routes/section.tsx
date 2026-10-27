@@ -227,8 +227,8 @@ async function buildMetrics(
   // A bare `city` is the filter bar's now (D2), not the city card's filter:
   // the two select the same orders, and one banner is enough.
   const parsed = section === "orders" ? parseOrderFilter(url.searchParams) : null;
-  // Return risk (G-GZR11-4): behind its switch, internal accounts only until the bands are approved.
-  const riskOn = section === "orders" && (await riskVisible(storeId, (await inboxViewer()).userId));
+  // Return risk (G-GZR11-4): behind its switch, for every organization on stores with Courierify (pre-Wave-1 pack 2).
+  const riskOn = section === "orders" && (await riskVisible(storeId));
   const filter = parsed?.kind === "city" || (parsed?.kind === "risk_high" && !riskOn) ? null : parsed;
   const confirmation = section === "orders" && isConfirmationGroup(url.searchParams.get("confirmation")) ? url.searchParams.get("confirmation") : null;
   // So does an outcome picked from the Orders chips.
@@ -295,6 +295,8 @@ async function buildMetrics(
               rows: Object.fromEntries(view.rows.flatMap((r) => (risk.orders.has(r.orderId) ? [[r.orderId, risk.orders.get(r.orderId)!]] : []))),
               high: highRisk!.size,
               actions: await riskActions(storeId, summary.store.shopDomain),
+              storeId,
+              storeRate: risk.cuts.storeRate,
             }
           : null,
       };

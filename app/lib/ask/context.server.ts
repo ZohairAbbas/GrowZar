@@ -2,7 +2,7 @@ import { prisma } from "../db.server";
 import { getViewer, listVisibleStores } from "../authorize.server";
 import { roleChecker } from "../role-check.server";
 import { planVisible } from "../forecast/plan-access.server";
-import { returnRiskEnabled, riskOrgs } from "../forecast/return-risk.server";
+import { returnRiskEnabled } from "../forecast/return-risk.server";
 import { viewerIsInternal } from "../outcomes/results.server";
 import { scopeAllowsBooks } from "../books-app/access";
 import { booksOn } from "../books-app/switch.server";
@@ -23,8 +23,9 @@ export async function askContext(request: Request, now = new Date()): Promise<As
   ]);
   const internal = await viewerIsInternal(viewer.userId);
   return {
-    planTools: can(viewer.role, "plan", "view") && (await planVisible(viewer.userId)),
-    riskTools: returnRiskEnabled() && (internal || riskOrgs().has(viewer.organizationId)),
+    planTools: planVisible(can(viewer.role, "plan", "view")),
+    riskTools: returnRiskEnabled(),
+    internal,
     booksTools: can(viewer.role, "books", "view") && scopeAllowsBooks(viewer.scopedStoreIds) && (await booksOn(viewer.organizationId)),
     organizationId: viewer.organizationId,
     userId: viewer.userId,

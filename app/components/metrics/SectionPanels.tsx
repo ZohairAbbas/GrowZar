@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { Activity, ArrowRight } from "lucide-react";
 import { AskBox } from "~/components/ask/AskBox";
+import { LooksWrong } from "~/components/ui/LooksWrong";
 import type { AppPrompt } from "~/lib/metrics/next-app";
 import { SUITE_APPS } from "~/lib/apps/app-links";
 import { figuresText, riskLabel, type BuyerNetworkLine } from "~/lib/metrics/buyer-network";
@@ -585,7 +586,7 @@ export function OrdersPanel({
                 </td>
                 {risk ? (
                   <td className="px-5 py-3">
-                    {risk.rows[r.orderId] ? <RiskCell value={risk.rows[r.orderId]!} /> : <span className="text-gray-400">—</span>}
+                    {risk.rows[r.orderId] ? <RiskCell orderId={r.orderId} value={risk.rows[r.orderId]!} risk={risk} /> : <span className="text-gray-400">—</span>}
                   </td>
                 ) : null}
               </tr>
@@ -607,18 +608,26 @@ export type OrdersRisk = {
   /** High-risk orders not yet with the courier, last 30 days. */
   high: number;
   actions: Array<{ label: string; href: string }>;
+  storeId: string;
+  /** The store's recent return rate the bands are cut against, sent with "this looks wrong". */
+  storeRate: number;
 };
 
 const RISK_STYLE = { high: "bg-coral-100 text-coral-700", medium: "bg-gray-100 text-gray-700", low: "bg-mint-50 text-mint-700" } as const;
 
-/** A band and its reasons (P11-4: never a percentage). */
-function RiskCell({ value }: { value: OrdersRisk["rows"][string] }) {
+/** A band and its reasons (P11-4: never a percentage); high and low bands take "this looks wrong" (pre-Wave-1 pack 2). */
+function RiskCell({ orderId, value, risk }: { orderId: string; value: OrdersRisk["rows"][string]; risk: OrdersRisk }) {
   return (
     <div className="max-w-xs">
       <span className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${RISK_STYLE[value.band]}`} title={value.reasons.join("\n")}>
         {value.band}
       </span>
       {value.band !== "medium" && value.reasons[0] ? <p className="mt-1 text-xs text-gray-500">{value.reasons.join("; ")}</p> : null}
+      {value.band !== "medium" ? (
+        <div className="mt-1">
+          <LooksWrong tool="return_risk" storeId={risk.storeId} subject={orderId} inputs={{ band: value.band, reasons: value.reasons, storeRate: Math.round(risk.storeRate * 1000) / 1000 }} compact />
+        </div>
+      ) : null}
     </div>
   );
 }

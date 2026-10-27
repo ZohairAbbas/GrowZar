@@ -2,9 +2,11 @@ import { Form, Link } from "react-router";
 import { ArrowRight } from "lucide-react";
 
 import { Notice } from "~/components/metrics/Metrics";
+import { LooksWrong } from "~/components/ui/LooksWrong";
 import type { CashForecast } from "~/lib/forecast/cash";
 import type { HistoryRow } from "~/lib/forecast/cash-history";
 import type { MonthEnd } from "~/lib/forecast/month-end";
+import { cashFeedbackInputs, monthEndFeedbackInputs, type ForecastStatus } from "~/lib/forecast/plan-form";
 import type { FormOptions } from "~/lib/forecast/plan.server";
 import type { Plan, PlanLine } from "~/lib/forecast/simulator/types";
 import type { WhatIf } from "~/lib/forecast/simulator/whatif";
@@ -13,13 +15,26 @@ import type { Range } from "~/lib/forecast/stats";
 /**
  * Plan's screens (G-GZR11-6, pack §5.6). Every figure shows its range and
  * what it rests on; money only reaches these components for a viewer with
- * finance:view (the loader strips it otherwise).
+ * finance:view (the loader strips it otherwise). The cash forecast and the
+ * month end are Beta (pre-Wave-1 pack 2): labelled, low – high first with the
+ * likely figure inside it, and a "this looks wrong" button.
  */
 
 const n = (x: number) => Math.round(x).toLocaleString("en-US");
 const money = (x: number, currency: string) => `${currency} ${n(x)}`;
 const rangeText = (r: Range, f: (x: number) => string = n) => (Math.round(r.low) === Math.round(r.high) ? f(r.likely) : `${f(r.low)} – ${f(r.high)}`);
 const date = (d: string | null) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }) : "—");
+
+/** A Beta figure: low – high first, the likely figure under it. */
+function RangeFirst({ r, f = n }: { r: Range; f?: (x: number) => string }) {
+  if (Math.round(r.low) === Math.round(r.high)) return <>{f(r.likely)}</>;
+  return (
+    <>
+      {f(r.low)} – {f(r.high)}
+      <span className="block text-xs font-normal text-gray-500">likely {f(r.likely)}</span>
+    </>
+  );
+}
 
 /** Low and high as a thin bar, the likely figure as a tick; the numbers sit beside it in text. */
 function RangeBar({ r, max }: { r: Range; max: number }) {
@@ -33,17 +48,30 @@ function RangeBar({ r, max }: { r: Range; max: number }) {
   );
 }
 
-function Status({ passes, note, internal }: { passes: boolean; note: string; internal: boolean }) {
-  if (!internal) return null;
-  return <p className={`rounded-xl px-3 py-2 text-xs ${passes ? "bg-mint-50 text-mint-700" : "bg-coral-50 text-coral-700"}`}>{passes ? "Passes its backtest. " : "Fails its backtest: not shown to merchants. "}{note}</p>;
+/**
+ * Where a tool stands against its backtest. Internal viewers see the backtest
+ * itself (it names stores); merchants see a passing tool's plain line, and a
+ * Beta tool's line under its title instead.
+ */
+export function Status({ status, internal }: { status: ForecastStatus; internal: boolean }) {
+  if (internal) {
+    return <p className={`rounded-xl px-3 py-2 text-xs ${status.passes ? "bg-mint-50 text-mint-700" : "bg-coral-50 text-coral-700"}`}>{status.passes ? "Passes its backtest. " : "Fails its backtest: shown to merchants as Beta. "}{status.note}</p>;
+  }
+  return status.beta ? null : <p className="text-xs text-gray-500">{status.line}</p>;
 }
 
-function Card({ title, children, aside }: { title: string; children: React.ReactNode; aside?: React.ReactNode }) {
+function Card({ title, children, aside, beta }: { title: string; children: React.ReactNode; aside?: React.ReactNode; beta?: string }) {
   return (
     <section className="space-y-3 rounded-2xl bg-white p-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="font-display text-lg font-bold text-gray-900">{title}</h2>
-        {aside}
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="flex items-center gap-2 font-display text-lg font-bold text-gray-900">
+            {title}
+            {beta ? <span className="rounded-full bg-accent-100 px-2 py-0.5 font-sans text-xs font-semibold text-accent-700">Beta</span> : null}
+          </h2>
+          {aside}
+        </div>
+        {beta ? <p className="text-xs text-gray-600">{beta}</p> : null}
       </div>
       {children}
     </section>
@@ -52,12 +80,13 @@ function Card({ title, children, aside }: { title: string; children: React.React
 
 // ── Cash forecast ───────────────────────────────────────────────────────────
 
-export function CashForecastCard({ cash, status, internal }: { cash: CashForecast; status: { passes: boolean; note: string }; internal: boolean }) {
+export function CashForecastCard({ cash, status, internal, storeId }: { cash: CashForecast; status: ForecastStatus; internal: boolean; storeId: string }) {
   const c = cash.currency ?? "";
   const max = Math.max(...cash.due.weeks.map((w) => w.high), ...cash.paid.weeks.map((w) => w.high), 1);
+  const paid = cash.paid.byPayer.length > 0;
   return (
-    <Card title="Cash coming back" aside={<span className="text-xs text-gray-500">Next 4 weeks, low – high</span>}>
-      <Status {...status} internal={internal} />
+    <Card title="Cash coming back" aside={<span className="text-xs text-gray-500">Next 4 weeks, low – high</span>} beta={status.beta ? status.line : undefined}>
+      <Status status={status} internal={internal} />
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead className="text-left text-xs font-semibold text-gray-500">
@@ -73,10 +102,10 @@ export function CashForecastCard({ cash, status, internal }: { cash: CashForecas
             {cash.weeks.map((w, i) => (
               <tr key={w.from}>
                 <td className="whitespace-nowrap py-2 pr-4 text-gray-700">{date(w.from)} – {date(w.to)}</td>
-                <td className="whitespace-nowrap py-2 pr-4 tabular-nums text-gray-900">{rangeText(cash.due.weeks[i]!, (x) => money(x, c))}</td>
+                <td className="whitespace-nowrap py-2 pr-4 tabular-nums text-gray-900"><RangeFirst r={cash.due.weeks[i]!} f={(x) => money(x, c)} /></td>
                 <td className="py-2 pr-4"><RangeBar r={cash.due.weeks[i]!} max={max} /></td>
-                <td className="whitespace-nowrap py-2 pr-4 tabular-nums text-gray-900">{cash.paid.byPayer.length ? rangeText(cash.paid.weeks[i]!, (x) => money(x, c)) : "—"}</td>
-                <td className="py-2">{cash.paid.byPayer.length ? <RangeBar r={cash.paid.weeks[i]!} max={max} /> : null}</td>
+                <td className="whitespace-nowrap py-2 pr-4 tabular-nums text-gray-900">{paid ? <RangeFirst r={cash.paid.weeks[i]!} f={(x) => money(x, c)} /> : "—"}</td>
+                <td className="py-2">{paid ? <RangeBar r={cash.paid.weeks[i]!} max={max} /> : null}</td>
               </tr>
             ))}
           </tbody>
@@ -101,6 +130,7 @@ export function CashForecastCard({ cash, status, internal }: { cash: CashForecas
           {cash.notTracked.orders} open orders have no Courierify parcel to time: about {rangeText(cash.notTracked.expected, (x) => money(x, c))} of COD, week unknown.
         </p>
       ) : null}
+      {status.beta ? <LooksWrong tool="cash_forecast" storeId={storeId} inputs={cashFeedbackInputs(cash)} /> : null}
     </Card>
   );
 }
@@ -160,7 +190,7 @@ export function CashHistoryCard({ rows, currency }: { rows: HistoryRow[]; curren
 
 // ── Month end ───────────────────────────────────────────────────────────────
 
-export function MonthEndCard({ month, canSeeMoney, status, internal }: { month: { current: MonthEnd; previous: MonthEnd }; canSeeMoney: boolean; status: { passes: boolean; note: string }; internal: boolean }) {
+export function MonthEndCard({ month, canSeeMoney, status, internal, storeId }: { month: { current: MonthEnd; previous: MonthEnd }; canSeeMoney: boolean; status: ForecastStatus; internal: boolean; storeId: string }) {
   const { current: m, previous: p } = month;
   const c = m.currency ?? "";
   const label = (x: string) => new Date(`${x}-01T00:00:00Z`).toLocaleDateString("en-GB", { month: "long", timeZone: "UTC" });
@@ -174,8 +204,8 @@ export function MonthEndCard({ month, canSeeMoney, status, internal }: { month: 
       : []),
   ];
   return (
-    <Card title={`${label(m.month)} so far, and where it is heading`} aside={<span className="text-xs text-gray-500">Day {m.daysElapsed} of {m.daysInMonth}</span>}>
-      <Status {...status} internal={internal} />
+    <Card title={`${label(m.month)} so far, and where it is heading`} aside={<span className="text-xs text-gray-500">Day {m.daysElapsed} of {m.daysInMonth}</span>} beta={status.beta ? status.line : undefined}>
+      <Status status={status} internal={internal} />
       <table className="min-w-full text-sm">
         <thead className="text-left text-xs font-semibold text-gray-500">
           <tr>
@@ -188,8 +218,8 @@ export function MonthEndCard({ month, canSeeMoney, status, internal }: { month: 
           {rows.map(([name, a, b, f]) => (
             <tr key={name}>
               <td className="py-2 pr-4 font-medium text-gray-700">{name}</td>
-              <td className="py-2 pr-4 tabular-nums text-gray-900">{a ? <>{f(a.likely)} <span className="text-gray-500">({rangeText(a, f)})</span></> : "—"}</td>
-              <td className="py-2 tabular-nums text-gray-700">{b ? f(b.likely) : "—"}</td>
+              <td className="py-2 pr-4 tabular-nums text-gray-900">{a ? <RangeFirst r={a} f={f} /> : "—"}</td>
+              <td className="py-2 tabular-nums text-gray-700">{b ? <RangeFirst r={b} f={f} /> : "—"}</td>
             </tr>
           ))}
         </tbody>
@@ -200,6 +230,7 @@ export function MonthEndCard({ month, canSeeMoney, status, internal }: { month: 
         {canSeeMoney && m.adSpend ? ` Ad spend at this month's rate: ${money(m.adSpend.projected, c)}.` : ""}
       </p>
       {m.notes.length ? <p className="text-xs text-coral-700">{m.notes.join(". ")}.</p> : null}
+      {status.beta ? <LooksWrong tool="month_end" storeId={storeId} inputs={monthEndFeedbackInputs(month, canSeeMoney)} /> : null}
     </Card>
   );
 }

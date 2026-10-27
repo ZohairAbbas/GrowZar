@@ -6,13 +6,14 @@ import { prisma } from "~/lib/db.server";
 import { readFormData } from "~/lib/form.server";
 import { Forbidden, hasPermission, listVisibleStores, requireSection } from "~/lib/authorize.server";
 import { readStoreCookie, rememberLinkedStore } from "~/lib/store-cookie.server";
-import { planVisible } from "~/lib/forecast/plan-access.server";
+import { planEnabled } from "~/lib/forecast/plan-access.server";
+import { viewerIsInternal } from "~/lib/outcomes/results.server";
 import { FORECAST_STATUS, parseSimRequest, withoutMoney } from "~/lib/forecast/plan-form";
 import { formOptions, forecasts, parseWhatIf, runAndSave, savedPlan, savedPlans, whatIfOn } from "~/lib/forecast/plan.server";
 import type { SimRequest } from "~/lib/forecast/simulator/types";
 import { sectionState, SECTION_DEFINITIONS } from "~/lib/sections";
 import { Notice } from "~/components/metrics/Metrics";
-import { CashForecastCard, CashHistoryCard, MonthEndCard, PlanForm, PlanResult, SavedPlans, WhatIfs } from "~/components/plan/PlanPanels";
+import { CashForecastCard, CashHistoryCard, MonthEndCard, PlanForm, PlanResult, SavedPlans, Status, WhatIfs } from "~/components/plan/PlanPanels";
 
 export function meta() {
   return [{ title: "Plan · Growzar" }];
@@ -23,13 +24,13 @@ export function meta() {
  * month-end projection for the active store.
  *
  * Who: plan:view (owner, admin, manager by default; staff and custom roles
- * not), behind PLAN_ENABLED and, until the G-GZR11-8 approval, internal
- * accounts only (P11-13, P11-14). Money also needs finance:view; without it
- * the loader sends orders and dates only, so nothing reaches the page.
+ * not), in every organization, behind PLAN_ENABLED (pre-Wave-1 pack 2).
+ * Money also needs finance:view; without it the loader sends orders and
+ * dates only, so nothing reaches the page.
  */
 async function context(request: Request, url?: URL) {
   const viewer = await requireSection(request, "plan", "view");
-  if (!(await planVisible(viewer.userId))) throw new Response("Not found", { status: 404 });
+  if (!planEnabled()) throw new Response("Not found", { status: 404 });
   const stores = await listVisibleStores(viewer);
   // A link from Ask names its store (?store=): remember it, as the sections do.
   const linked = url ? rememberLinkedStore(url, stores) : null;
@@ -41,23 +42,30 @@ async function context(request: Request, url?: URL) {
 }
 
 export async function loader({ request, url }: Route.LoaderArgs) {
-  const { active, canSeeMoney } = await context(request, url);
+  const { viewer, active, canSeeMoney } = await context(request, url);
   if (!active) return { kind: "empty" as const };
   const connections = await prisma.appConnection.findMany({ where: { storeId: active.id }, select: { app: true, status: true, lastSyncedAt: true } });
   const state = sectionState(SECTION_DEFINITIONS.plan, connections);
   if (state.kind !== "open") return { kind: "locked" as const, storeName: active.displayName ?? active.shopDomain };
 
   const id = url.searchParams.get("id");
-  const [{ cash, month, history }, options, list, plan] = await Promise.all([forecasts(active.id), formOptions(active.id), savedPlans(active.id), id ? savedPlan(active.id, id) : null]);
+  const [{ cash, month, history }, options, list, plan, internal] = await Promise.all([
+    forecasts(active.id),
+    formOptions(active.id),
+    savedPlans(active.id),
+    id ? savedPlan(active.id, id) : null,
+    viewerIsInternal(viewer.userId),
+  ]);
   const ask = plan ? parseWhatIf(url.searchParams) : null;
   const whatIf = plan && ask ? await whatIfOn(active.id, plan, ask) : null;
   return {
     kind: "open" as const,
+    storeId: active.id,
     storeName: active.displayName ?? active.shopDomain,
     canSeeMoney,
     status: FORECAST_STATUS,
-    // Plan is internal-only for now: everyone who reaches it sees where each forecast stands.
-    internal: true,
+    // Internal viewers also see each tool's backtest, which names stores.
+    internal,
     cash: canSeeMoney ? cash : null,
     history: canSeeMoney ? history : null,
     month: canSeeMoney ? month : { current: { ...month.current, deliveredRevenue: null, profit: null, adSpend: null }, previous: { ...month.previous, deliveredRevenue: null, profit: null, adSpend: null } },
@@ -102,7 +110,7 @@ export default function PlanPage({ loaderData, actionData }: Route.ComponentProp
           <h2 className="font-display text-lg font-bold text-gray-900">Where should the money go?</h2>
           <SavedPlans plans={d.plans} current={d.plan?.id ?? null} />
         </div>
-        <p className={`rounded-xl px-3 py-2 text-xs ${d.status.simulator.passes ? "bg-mint-50 text-mint-700" : "bg-coral-50 text-coral-700"}`}>{d.status.simulator.note}</p>
+        <Status status={d.status.simulator} internal={d.internal} />
         {d.canSeeMoney ? <PlanForm options={d.options} error={actionData && "error" in actionData ? (actionData.error ?? null) : null} busy={busy} /> : <Notice>Making a plan needs Finance access; you can see saved plans' orders and dates.</Notice>}
         {d.plan ? (
           <div className="space-y-4 border-t border-gray-100 pt-4">
@@ -113,9 +121,9 @@ export default function PlanPage({ loaderData, actionData }: Route.ComponentProp
         ) : null}
       </section>
 
-      {d.cash ? <CashForecastCard cash={d.cash} status={d.status.cash} internal={d.internal} /> : <Notice>The cash forecast needs Finance access.</Notice>}
+      {d.cash ? <CashForecastCard cash={d.cash} status={d.status.cash} internal={d.internal} storeId={d.storeId} /> : <Notice>The cash forecast needs Finance access.</Notice>}
       {d.cash && d.history?.length ? <CashHistoryCard rows={d.history} currency={d.cash.currency ?? ""} /> : null}
-      <MonthEndCard month={d.month} canSeeMoney={d.canSeeMoney} status={d.status.monthEnd} internal={d.internal} />
+      <MonthEndCard month={d.month} canSeeMoney={d.canSeeMoney} status={d.status.monthEnd} internal={d.internal} storeId={d.storeId} />
     </div>
   );
 }

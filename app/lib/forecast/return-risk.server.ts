@@ -1,7 +1,6 @@
 import { prisma } from "../db.server";
 import { actionFor, actionHref } from "../apps/app-links";
 import { parseFormOrder } from "../metrics/offers";
-import { viewerIsInternal } from "../outcomes/results.server";
 import { KNOWN_AFTER_DAYS } from "../outcomes/as-of.server";
 import { bandOf, fitCuts, reasonsOf, RISK_OPEN_DAYS, RISK_OUTCOMES, RISK_SCREENS, riskPass, scoreOf, type Band, type Cuts, type RiskOrder } from "./return-risk";
 
@@ -9,11 +8,10 @@ import { bandOf, fitCuts, reasonsOf, RISK_OPEN_DAYS, RISK_OUTCOMES, RISK_SCREENS
  * Return risk for a store's open orders (G-GZR11-4), and the loader its
  * backtest shares.
  *
- * Shown only while the switch is on (`RETURN_RISK_ENABLED`), to internal
- * accounts and to the organizations in `RETURN_RISK_ORGS` (the pilot,
- * approved 2026-10-20; pack §10, P11-14), on stores with Courierify (P11-8:
- * zainvault has no courier data), on orders not yet with the courier: not
- * shipped, or booked and not picked up (P11-9).
+ * Shown while the switch is on (`RETURN_RISK_ENABLED`), to every member of
+ * every organization (pre-Wave-1 pack 2, 2026-10-27), on stores with
+ * Courierify (P11-8: zainvault has no courier data), on orders not yet with
+ * the courier: not shipped, or booked and not picked up (P11-9).
  */
 
 const DAY_MS = 86_400_000;
@@ -107,28 +105,11 @@ const CACHE_MS = 5 * 60_000;
 /** The kill switch, read like Ask's (ASK_ENABLED). */
 export const returnRiskEnabled = () => ["on", "true", "1"].includes((process.env.RETURN_RISK_ENABLED ?? "").trim().toLowerCase());
 
-/**
- * Organizations whose members see return risk, comma-separated ids in
- * RETURN_RISK_ORGS: the pilot's switch until a per-organization setting
- * replaces it at the wider rollout.
- */
-export const riskOrgs = (): ReadonlySet<string> =>
-  new Set(
-    (process.env.RETURN_RISK_ORGS ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
-
-/** Whether this viewer sees return risk on this store. */
-export async function riskVisible(storeId: string, userId: string): Promise<boolean> {
+/** Whether return risk shows on this store: the switch, and Courierify connected. */
+export async function riskVisible(storeId: string): Promise<boolean> {
   if (!returnRiskEnabled()) return false;
-  const store = await prisma.store.findUnique({
-    where: { id: storeId },
-    select: { organizationId: true, connections: { where: { app: "COURIERIFY", status: "CONNECTED" }, select: { app: true } } },
-  });
-  if (!store?.connections.length) return false;
-  return riskOrgs().has(store.organizationId) || (await viewerIsInternal(userId));
+  const courierify = await prisma.appConnection.findFirst({ where: { storeId, app: "COURIERIFY", status: "CONNECTED" }, select: { app: true } });
+  return !!courierify;
 }
 
 /** Today's open orders' risk, cached for five minutes per store. */
