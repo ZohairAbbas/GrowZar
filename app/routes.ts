@@ -43,6 +43,9 @@ export default [
   route("api/feedback", "routes/api.feedback.ts"),
   // A browser crash, to the web log.
   route("api/client-error", "routes/api.client-error.ts"),
+  // Push notifications (pre-Wave-1 pack 4): Settings' switch, and the service worker's click report.
+  route("api/push", "routes/api.push.ts"),
+  route("api/push/click", "routes/api.push.click.ts"),
 
   // "Open in Growzar" lands here with a signed claim token (contract §10).
   route("claim", "routes/claim.tsx"),

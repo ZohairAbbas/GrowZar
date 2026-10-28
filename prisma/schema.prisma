@@ -53,6 +53,8 @@ model Organization {
 
   productFeedback ProductFeedback[]
 
+  pushSends PushSend[]
+
   @@map("organizations")
 }
 
@@ -679,6 +681,8 @@ model Member {
   storeScopes  MemberStoreScope[]
   /// Hand-added, like storeScopes: the weekly digest opt-out (G-GZR6-5).
   digestOptOut DigestOptOut?
+  /// Hand-added, like storeScopes: the devices this member gets push notifications on (pre-Wave-1 pack 4).
+  pushSubscriptions PushSubscription[]
 
   @@index([organizationId])
   @@index([userId])
@@ -1175,6 +1179,67 @@ model DigestSend {
   @@index([organizationId, createdAt])
   @@index([memberId])
   @@map("digest_sends")
+}
+
+/// One device a member turned notifications on for (pre-Wave-1 pack 4). The
+/// row is the opt-in: turning the switch off deletes it, and so does the push
+/// service answering 404 or 410 (the browser dropped it).
+model PushSubscription {
+  id            String    @id @default(uuid())
+  memberId      String
+  /// The push service's URL for this browser; unique, so a re-subscribe updates the row.
+  endpoint      String    @unique
+  p256dh        String
+  auth          String
+  userAgent     String?
+  createdAt     DateTime  @default(now())
+  lastSuccessAt DateTime?
+  /// Failed sends in a row, other than 404/410; reset by a success.
+  failures      Int       @default(0)
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId])
+  @@map("push_subscriptions")
+}
+
+/// One push notification for one member, or one test: what it said and what
+/// became of it. Kept when the member leaves, as history.
+model PushSend {
+  id             String    @id @default(uuid())
+  organizationId String
+  memberId       String
+  userId         String
+  /// cash_held | top_finding | books | digest | test
+  kind           String
+  storeId        String?
+  insightId      String?
+  /// live | dry_run | test
+  mode           String
+  /// The member's local day (their first store's timezone), YYYY-MM-DD: what the daily cap counts.
+  day            String
+  /// finding: `memberId:finding:insightId:appearedAt:mode`, once per appearance;
+  /// books and digest: `memberId:kind:week:mode`; unique per row for a test.
+  dedupeKey      String    @unique
+  /// sending | sent | failed | dry_run | no_subscription
+  status         String
+  attempts       Int       @default(0)
+  title          String
+  body           String
+  url            String
+  /// Devices it reached, of those the member had.
+  delivered      Int       @default(0)
+  error          String?
+  createdAt      DateTime  @default(now())
+  sentAt         DateTime?
+  /// The first click on it (the service worker reports it).
+  clickedAt      DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, day])
+  @@index([organizationId, createdAt])
+  @@map("push_sends")
 }
 
 /// "Talk to your data" (Phase 10): whether an organization has it, and what

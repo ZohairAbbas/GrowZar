@@ -35,6 +35,17 @@ const schema = z.object({
   // have gone out is logged in digest_sends, and nothing is emailed.
   DIGEST_SENDING: z.enum(["on", "off"]).default("off"),
 
+  // Push notifications (pre-Wave-1 pack 4). "on" sends to every member who
+  // turned them on; "internal" sends for real only to INTERNAL_EMAILS
+  // accounts, and the switch shows only to them; "off" sends nothing. What
+  // isn't sent for real is logged in push_sends as a dry run.
+  PUSH_SENDING: z.enum(["on", "internal", "off"]).default("off"),
+  // The VAPID key pair and contact (`mailto:`) push services ask for. Without
+  // them nobody can turn notifications on, and nothing is sent.
+  PUSH_VAPID_PUBLIC: z.string().optional(),
+  PUSH_VAPID_PRIVATE: z.string().optional(),
+  PUSH_SUBJECT: z.string().optional(),
+
   // Our own accounts, comma-separated (Phase 9, pack §10.1): what they act on
   // is watched and measured, but kept out of results totals and the replay.
   INTERNAL_EMAILS: z.string().optional(),

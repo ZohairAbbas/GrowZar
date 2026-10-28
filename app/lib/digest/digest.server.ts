@@ -52,19 +52,24 @@ export type BuiltStore = {
   results: DigestResult[];
 };
 
+/** Have the store's connected apps gone STALE_AFTER_MS without a successful sync? Push notifications ask too. */
+export async function storeIsStale(storeId: string, now = new Date()): Promise<boolean> {
+  // The sync's own record of success (sync_state), for the apps still connected.
+  // Not app_connections.lastSyncedAt: nothing writes that during a sync.
+  const apps = await prisma.appConnection.findMany({ where: { storeId, status: "CONNECTED" }, select: { app: true } });
+  const synced = await prisma.syncState.aggregate({
+    where: { storeId, app: { in: apps.map((c) => c.app) } },
+    _max: { lastSuccessAt: true },
+  });
+  const last = synced._max.lastSuccessAt;
+  return !last || now.getTime() - last.getTime() > STALE_AFTER_MS;
+}
+
 /** One store's part, for one level of money access. Records nothing. */
 export async function buildStore(store: StoreRow, canSeeMoney: boolean, now = new Date()): Promise<BuiltStore> {
   const name = store.displayName ?? store.shopDomain;
   const empty = { storeId: store.id, name, rows: [], app: null, results: [] };
-  // The sync's own record of success (sync_state), for the apps still connected.
-  // Not app_connections.lastSyncedAt: nothing writes that during a sync.
-  const apps = await prisma.appConnection.findMany({ where: { storeId: store.id, status: "CONNECTED" }, select: { app: true } });
-  const synced = await prisma.syncState.aggregate({
-    where: { storeId: store.id, app: { in: apps.map((c) => c.app) } },
-    _max: { lastSuccessAt: true },
-  });
-  const last = synced._max.lastSuccessAt;
-  if (!last || now.getTime() - last.getTime() > STALE_AFTER_MS) return { ...empty, skipped: "stale" };
+  if (await storeIsStale(store.id, now)) return { ...empty, skipped: "stale" };
 
   const period = periodFrom(new URL(`http://digest/?days=${DIGEST_DAYS}`), store.timezone, now);
   const summary = await storeSummary(store.id, period.from, period.to);
@@ -131,6 +136,8 @@ export type Recipient = {
   canHome: boolean;
   canSeeMoney: boolean;
   optedOut: boolean;
+  /** Scoped to every store (Books needs it, D-81). */
+  allStores: boolean;
   stores: StoreRow[];
   /** The first store's timezone: when "Monday 09:00" is for this member. */
   timezone: string;
@@ -170,6 +177,7 @@ export async function digestRecipients(organizationId: string): Promise<Recipien
       canHome: can(m.role, "home", "view"),
       canSeeMoney: can(m.role, "finance", "view"),
       optedOut: m.digestOptOut !== null,
+      allStores: scoped === null,
       stores: mine,
       timezone: mine[0]?.timezone ?? "UTC",
     };

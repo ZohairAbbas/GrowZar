@@ -24,6 +24,7 @@ import { refreshAdSpend } from "~/lib/metrics/ad-spend.server";
 import { refreshProfitSettings } from "~/lib/metrics/summaries.server";
 import { refreshBuyerNetwork, refreshOrderNetwork } from "~/lib/metrics/buyer-network.server";
 import { runDueDigests } from "~/lib/digest/digest.server";
+import { runDuePushes } from "~/lib/push/push.server";
 import { redactOldMessages } from "~/lib/ask/loop.server";
 import { runDueConnectors } from "~/lib/books-app/connectors/schedule.server";
 import { revalueAllBooks } from "~/lib/books-app/revaluation.server";
@@ -359,6 +360,29 @@ const digestTimer = setInterval(() => {
 }, DIGEST_INTERVAL_MS);
 
 /**
+ * Push notifications (pre-Wave-1 pack 4). Checked every ten minutes, after the
+ * digest's run, so Monday's "your digest is in your inbox" follows the email.
+ * Only members with a device subscribed are looked at. One run at a time.
+ */
+const PUSH_INTERVAL_MS = 10 * 60 * 1000;
+let pushRunning = false;
+
+async function pushes() {
+  if (pushRunning) return;
+  pushRunning = true;
+  try {
+    const r = await runDuePushes();
+    if (r.sent || r.dryRun || r.failed) console.log(`[push] sent=${r.sent} dryRun=${r.dryRun} failed=${r.failed}`);
+  } finally {
+    pushRunning = false;
+  }
+}
+
+const pushTimer = setInterval(() => {
+  void pushes().catch((error) => console.error("[push] run failed", error));
+}, PUSH_INTERVAL_MS);
+
+/**
  * "Talk to your data" retention (B6): questions and answers past 90 days
  * lose their text and tool results. Hourly; idempotent.
  */
@@ -425,6 +449,7 @@ async function shutdown(signal: string) {
   clearInterval(sweepTimer);
   clearInterval(reconcileTimer);
   clearInterval(digestTimer);
+  clearInterval(pushTimer);
   clearInterval(askRetentionTimer);
   clearInterval(booksTimer);
   clearInterval(forecastTimer);
