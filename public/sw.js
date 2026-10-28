@@ -71,3 +71,59 @@ self.addEventListener("fetch", (event) => {
   }
   // Everything else (loader data, /api, the manifest) goes straight to the network, unseen.
 });
+
+// ── Push notifications (pre-Wave-1 pack 4) ───────────────────────────────────
+// The server sends { title, body, url, id, tag }, worded as the card it opens.
+// A click reports itself (push_sends.clickedAt), then opens the page in the
+// window Growzar already has, or a new one. Only Growzar's own pages open.
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data ? event.data.text() : "" };
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || "Growzar", {
+      body: data.body || "",
+      icon: "/icons/growzar-192.png",
+      tag: data.tag || undefined,
+      data: { url: data.url || "/home", id: data.id || null },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const { url, id } = event.notification.data || {};
+  const target = new URL(url || "/home", self.location.origin);
+  if (target.origin !== self.location.origin) return;
+  const report = id
+    ? fetch("/api/push/click", { method: "POST", body: new URLSearchParams({ id }), credentials: "same-origin" }).catch(() => null)
+    : Promise.resolve();
+  const open = self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (windows) => {
+    const mine = windows.find((w) => new URL(w.url).origin === self.location.origin);
+    if (mine) {
+      await mine.focus();
+      return mine.navigate(target.href).catch(() => self.clients.openWindow(target.href));
+    }
+    return self.clients.openWindow(target.href);
+  });
+  event.waitUntil(Promise.all([report, open]));
+});
+
+// The browser replaced the subscription: subscribe again with the same key, and tell Growzar which one it replaces.
+self.addEventListener("pushsubscriptionchange", (event) => {
+  const old = event.oldSubscription;
+  if (!old || !old.options) return;
+  event.waitUntil(
+    self.registration.pushManager.subscribe(old.options).then((sub) =>
+      fetch("/api/push", {
+        method: "POST",
+        body: new URLSearchParams({ intent: "subscribe", subscription: JSON.stringify(sub), replaces: old.endpoint }),
+        credentials: "same-origin",
+      }),
+    ),
+  );
+});
